@@ -18,6 +18,7 @@ import {
   type OpenTaskSessionPayload,
   type ProjectRecord,
   type ProjectSnapshot,
+  resolveTopologyAgentOrder,
   resolveTopologyRootAgent,
   type SaveAgentFilePayload,
   type SubmitTaskPayload,
@@ -292,6 +293,17 @@ export class Orchestrator {
       throw new Error("Task 不属于当前 Project");
     }
 
+    const snapshot = await this.ensureTaskInitialized(
+      project,
+      task,
+      this.agentFiles.listAgentFiles(project.id, project.path),
+    );
+    this.emit({
+      type: "task-updated",
+      projectId: project.id,
+      payload: snapshot,
+    });
+
     const sessionName =
       task.zellijSessionId ?? `oap-${task.projectId.slice(0, 6)}-${task.id.slice(0, 6)}`;
     await this.zellijManager.openTaskSession(sessionName, task.cwd);
@@ -356,7 +368,11 @@ export class Orchestrator {
       source: "initialize" | "submit";
     },
   ): Promise<TaskSnapshot> {
-    const entryAgent = this.resolveEntryAgent(agentFiles, options.preferredEntryAgent);
+    const entryAgent = this.resolveEntryAgent(
+      project.id,
+      agentFiles,
+      options.preferredEntryAgent,
+    );
     if (!entryAgent) {
       throw new Error("当前项目没有可用的 Agent 文件");
     }
@@ -602,7 +618,7 @@ export class Orchestrator {
         id: response.messageId,
         projectId: project.id,
         taskId: task.id,
-        content: this.createDisplayContent(parsedReview),
+        content: this.createDisplayContent(parsedReview, response.fallbackMessage),
         sender: agentName,
         timestamp: response.timestamp,
         meta: {
@@ -732,27 +748,13 @@ export class Orchestrator {
     const targetNames = new Set<string>();
     if (signal.targets.length > 0) {
       for (const target of signal.targets) {
-        const edge = outgoing.find((item) => item.target === target);
+        const edge = outgoing.find(
+          (item) =>
+            item.target === target &&
+            (item.triggerOn === "success" || item.triggerOn === "manual"),
+        );
         if (!edge) {
-          const blockedMessage: MessageRecord = {
-            id: randomUUID(),
-            projectId: project.id,
-            taskId,
-            content: `系统提示：当前 Project 拓扑未允许 @${sourceAgentId} 触发 @${target}，因此未执行该下游派发。`,
-            sender: "system",
-            timestamp: new Date().toISOString(),
-            meta: {
-              kind: "topology-blocked",
-              sourceAgentId,
-              targetAgentId: target,
-            },
-          };
-          this.store.insertMessage(blockedMessage);
-          this.emit({
-            type: "message-created",
-            projectId: project.id,
-            payload: blockedMessage,
-          });
+          this.emitTopologyBlockedMessage(project.id, taskId, sourceAgentId, target);
           continue;
         }
         completed.add(edge.id);
@@ -763,20 +765,6 @@ export class Orchestrator {
       for (const edge of outgoing.filter((item) => item.triggerOn === "success")) {
         targetNames.add(edge.target);
       }
-
-      const completedIncomingSuccessEdges = topology.edges.filter(
-        (edge) =>
-          edge.target === sourceAgentId &&
-          edge.triggerOn === "success" &&
-          completed.has(edge.id),
-      );
-      if (completedIncomingSuccessEdges.length > 0) {
-        for (const edge of outgoing.filter((item) => item.triggerOn === "manual")) {
-          completed.add(edge.id);
-          runtime.completedEdges.add(edge.id);
-          targetNames.add(edge.target);
-        }
-      }
     }
 
     const readyTargets = [...targetNames].filter((targetName) =>
@@ -784,8 +772,8 @@ export class Orchestrator {
     );
 
     if (readyTargets.length === 0) {
-      const hasNonManualOutgoing = outgoing.some((edge) => edge.triggerOn !== "manual");
-      if (outgoing.length > 0 && !hasNonManualOutgoing && signal.targets.length === 0 && !signal.done) {
+      const hasAutomaticOutgoing = outgoing.some((edge) => edge.triggerOn === "success");
+      if (outgoing.length > 0 && !hasAutomaticOutgoing && signal.targets.length === 0 && !signal.done) {
         const waitingMessage = {
           id: randomUUID(),
           projectId: project.id,
@@ -881,6 +869,33 @@ export class Orchestrator {
     return true;
   }
 
+  private emitTopologyBlockedMessage(
+    projectId: string,
+    taskId: string,
+    sourceAgentId: string,
+    targetAgentId: string,
+  ) {
+    const blockedMessage: MessageRecord = {
+      id: randomUUID(),
+      projectId,
+      taskId,
+      content: `系统提示：当前 Project 拓扑未允许 @${sourceAgentId} 触发 @${targetAgentId}，因此未执行该下游派发。`,
+      sender: "system",
+      timestamp: new Date().toISOString(),
+      meta: {
+        kind: "topology-blocked",
+        sourceAgentId,
+        targetAgentId,
+      },
+    };
+    this.store.insertMessage(blockedMessage);
+    this.emit({
+      type: "message-created",
+      projectId,
+      payload: blockedMessage,
+    });
+  }
+
   private buildTriggerSignature(
     topology: TopologyRecord,
     completedEdges: Set<string>,
@@ -964,9 +979,12 @@ export class Orchestrator {
     return `${content.trim()}\n\n${SELF_REVIEW_PROMPT}`.trim();
   }
 
-  private createDisplayContent(parsedReview: ParsedReview): string {
+  private createDisplayContent(parsedReview: ParsedReview, fallbackMessage?: string | null): string {
     if (parsedReview.cleanContent.trim()) {
       return parsedReview.cleanContent.trim();
+    }
+    if (fallbackMessage?.trim()) {
+      return fallbackMessage.trim();
     }
     if (parsedReview.decision === "needs_revision") {
       return "（该 Agent 已给出“需要修改”的决策，详细修改意见由 Orchestrator 以返工消息形式展示。）";
@@ -1121,10 +1139,23 @@ export class Orchestrator {
     signal: ParsedSignal,
   ): string[] {
     const fromSignal = signal.targets.filter((target) =>
-      topology.edges.some((edge) => edge.source === sourceAgentId && edge.target === target),
+      topology.edges.some(
+        (edge) =>
+          edge.source === sourceAgentId &&
+          edge.target === target &&
+          (edge.triggerOn === "failed" || edge.triggerOn === "manual"),
+      ),
     );
     if (fromSignal.length > 0) {
       return [...new Set(fromSignal)];
+    }
+
+    const outgoingFailedTargets = topology.edges
+      .filter((edge) => edge.source === sourceAgentId && edge.triggerOn === "failed")
+      .map((edge) => edge.target);
+
+    if (outgoingFailedTargets.length > 0) {
+      return [...new Set(outgoingFailedTargets)];
     }
 
     const outgoingSuccessTargets = topology.edges
@@ -1188,10 +1219,28 @@ export class Orchestrator {
   }
 
   private resolveEntryAgent(
+    projectId: string,
     agentFiles: AgentFileRecord[],
     preferredEntryAgent: string | undefined,
   ): AgentFileRecord | undefined {
-    return this.findAgentFile(agentFiles, preferredEntryAgent) ?? agentFiles[0];
+    const preferred = this.findAgentFile(agentFiles, preferredEntryAgent);
+    if (preferred) {
+      return preferred;
+    }
+
+    const topology = this.store.getTopology(projectId);
+    const orderedAgentNames = resolveTopologyAgentOrder(
+      agentFiles.map((agent) => ({
+        name: agent.name,
+        mode: agent.mode,
+        role: agent.role,
+        relativePath: agent.relativePath,
+      })),
+      topology.agentOrderIds,
+      topology.rootAgentId,
+    );
+
+    return this.findAgentFile(agentFiles, orderedAgentNames[0]) ?? agentFiles[0];
   }
 
   private findAgentFile(agentFiles: AgentFileRecord[], name: string | undefined): AgentFileRecord | undefined {
@@ -1295,6 +1344,26 @@ export class Orchestrator {
       label: file.name,
       kind: "agent" as const,
     }));
+    const normalizedRootAgentId =
+      typeof topology.rootAgentId === "string" ? remapAgentName(topology.rootAgentId) : null;
+    const agentOrderIds = resolveTopologyAgentOrder(
+      agentFiles.map((file) => ({
+        name: file.name,
+        mode: file.mode,
+        role: file.role,
+        relativePath: file.relativePath,
+      })),
+      Array.isArray(topology.agentOrderIds)
+        ? topology.agentOrderIds
+            .filter((item): item is string => typeof item === "string")
+            .map((item) => remapAgentName(item))
+        : null,
+      normalizedRootAgentId,
+    );
+    const orderedNodes = agentOrderIds.map((agentName) => {
+      const node = nodes.find((item) => item.id === agentName);
+      return node ?? { id: agentName, label: agentName, kind: "agent" as const };
+    });
 
     return {
       projectId,
@@ -1305,9 +1374,10 @@ export class Orchestrator {
           role: file.role,
           relativePath: file.relativePath,
         })),
-        typeof topology.rootAgentId === "string" ? remapAgentName(topology.rootAgentId) : null,
+        normalizedRootAgentId,
       ),
-      nodes,
+      agentOrderIds,
+      nodes: orderedNodes,
       edges,
     };
   }

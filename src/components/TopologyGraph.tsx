@@ -13,7 +13,8 @@ import {
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { isBuiltinAgentPath, resolveTopologyRootAgent } from "@shared/types";
+import { getAgentColorToken } from "@/lib/agent-colors";
+import { isBuiltinAgentPath, resolveTopologyAgentOrder, resolveTopologyRootAgent } from "@shared/types";
 import type {
   AgentRole,
   AgentRuntimeSnapshot,
@@ -44,6 +45,18 @@ interface TopologyEdgeData {
   targetBlockHeight: number;
 }
 
+interface SelectedHistoryRecord {
+  agentName: string;
+  label: string;
+  timestamp: string;
+  content: string;
+}
+
+interface HoveredHistoryPreview extends SelectedHistoryRecord {
+  x: number;
+  y: number;
+}
+
 const NODE_COLUMN_GAP = 8;
 const NODE_START_X = 0;
 const NODE_START_Y = 0;
@@ -52,26 +65,28 @@ const EXPANDED_NODE_COLUMN_HEIGHT = 820;
 const MAIN_NODE_CARD_WIDTH = 264;
 const EXPANDED_NODE_CARD_WIDTH = 292;
 const MAIN_NODE_CARD_MAX_WIDTH = 324;
-const EXPANDED_NODE_CARD_MAX_WIDTH = 360;
+const EXPANDED_NODE_CARD_MAX_WIDTH = 9999;
 const MAIN_NODE_CARD_MIN_WIDTH = 120;
 const EXPANDED_NODE_CARD_MIN_WIDTH = 144;
 const NODE_COLUMN_MIN_GAP = 4;
 const IDLE_AGENT_BLOCK_HEIGHT = 26;
-const RUNNING_AGENT_BLOCK_HEIGHT = 88;
+const RUNNING_AGENT_BLOCK_HEIGHT = 26;
 const HISTORY_STACK_GAP = 0;
 const MAX_VISIBLE_HISTORY_ITEMS = 10;
 const AGENT_EDGE_TOP_INSET = 2;
 const AGENT_EDGE_BOTTOM_INSET = 2;
+const TOPOLOGY_EDGE_LANE_HEIGHT = 34;
 const MAIN_FIT_PADDING = 0.015;
 const PREVIEW_FIT_PADDING = 0.05;
-const EXPANDED_FIT_PADDING = 0.015;
+const EXPANDED_FIT_PADDING = 0;
 const FLOW_MIN_ZOOM = 0.1;
 const FLOW_MAX_ZOOM = 2;
 const MAIN_FLOW_LEFT_INSET = 6;
 const MAIN_FLOW_RIGHT_INSET = 6;
-const EXPANDED_FLOW_LEFT_INSET = 6;
-const EXPANDED_FLOW_RIGHT_INSET = 6;
-const FLOW_TOP_INSET = 8;
+const EXPANDED_FLOW_LEFT_INSET = 14;
+const EXPANDED_FLOW_RIGHT_INSET = 14;
+const MAIN_FLOW_TOP_INSET = TOPOLOGY_EDGE_LANE_HEIGHT;
+const EXPANDED_FLOW_TOP_INSET = TOPOLOGY_EDGE_LANE_HEIGHT;
 const MAIN_FLOW_BOTTOM_INSET = 8;
 const EXPANDED_FLOW_BOTTOM_INSET = 10;
 
@@ -102,42 +117,45 @@ function getAgentBlockHeight(agentState: string) {
   return agentState === "running" ? RUNNING_AGENT_BLOCK_HEIGHT : IDLE_AGENT_BLOCK_HEIGHT;
 }
 
-function getAgentCardAppearance(agentState: string) {
+function getAgentCardAppearance(
+  agentState: string,
+  agentColor: ReturnType<typeof getAgentColorToken>,
+) {
   switch (agentState) {
     case "running":
       return {
-        borderColor: "rgba(201, 111, 59, 0.92)",
-        background: "#C96F3B",
-        color: "#FFF8F0",
-        shadow: "0 12px 30px rgba(201,111,59,0.24)",
+        borderColor: agentColor.solid,
+        background: agentColor.soft,
+        color: agentColor.text,
+        shadow: `0 12px 30px ${agentColor.solid}33`,
       };
     case "needs_revision":
       return {
-        borderColor: "rgba(226, 178, 111, 0.95)",
-        background: "#E8A24D",
-        color: "#172019",
+        borderColor: "#E8A24D",
+        background: agentColor.soft,
+        color: agentColor.text,
         shadow: "0 10px 26px rgba(226,178,111,0.22)",
       };
     case "success":
       return {
-        borderColor: "rgba(157, 173, 127, 0.95)",
-        background: "#9DAD7F",
-        color: "#172019",
-        shadow: "0 10px 26px rgba(157,173,127,0.2)",
+        borderColor: agentColor.border,
+        background: agentColor.soft,
+        color: agentColor.text,
+        shadow: `0 10px 26px ${agentColor.solid}22`,
       };
     case "failed":
       return {
         borderColor: "rgba(44, 74, 63, 0.95)",
-        background: "#2C4A3F",
-        color: "#FFF8F0",
+        background: agentColor.soft,
+        color: agentColor.text,
         shadow: "0 12px 28px rgba(44,74,63,0.22)",
       };
     default:
       return {
-        borderColor: "rgba(44, 74, 63, 0.22)",
-        background: "#F7F2E8",
-        color: "#172019",
-        shadow: "0 8px 24px rgba(44,74,63,0.08)",
+        borderColor: agentColor.border,
+        background: agentColor.soft,
+        color: agentColor.text,
+        shadow: `0 8px 24px ${agentColor.solid}14`,
       };
   }
 }
@@ -173,6 +191,57 @@ function createEdgeId(source: string, target: string, triggerOn: TopologyEdge["t
   return `${source}__${target}__${triggerOn}`;
 }
 
+function getEdgeTriggerLabel(triggerOn: TopologyEdge["triggerOn"]) {
+  switch (triggerOn) {
+    case "failed":
+      return "需要修改时触发";
+    case "manual":
+      return "仅显式指派时触发";
+    default:
+      return "完成后自动触发";
+  }
+}
+
+function getEdgeTriggerDescription(triggerOn: TopologyEdge["triggerOn"]) {
+  switch (triggerOn) {
+    case "failed":
+      return "只有当前 Agent 判定“需要修改”时，才会把任务回流给这个下游 Agent。";
+    case "manual":
+      return "只有当前 Agent 在结果里显式指定 NEXT_AGENTS 时，才会触发这个下游 Agent。";
+    default:
+      return "当前 Agent 正常完成后就会自动派发到这个下游 Agent。";
+  }
+}
+
+function getEdgeTriggerAppearance(triggerOn: TopologyEdge["triggerOn"]) {
+  switch (triggerOn) {
+    case "failed":
+      return {
+        color: "#A95C42",
+        strokeWidth: 2.1,
+        strokeDasharray: "10 6",
+        zIndex: 2,
+        animated: false,
+      };
+    case "manual":
+      return {
+        color: "#C96F3B",
+        strokeWidth: 2.1,
+        strokeDasharray: "7 6",
+        zIndex: 2,
+        animated: true,
+      };
+    default:
+      return {
+        color: "#2C4A3F",
+        strokeWidth: 2,
+        strokeDasharray: undefined,
+        zIndex: 1,
+        animated: false,
+      };
+  }
+}
+
 function getRoleRank(role: AgentRole | null | undefined) {
   return preferredRoleRank[role ?? ""] ?? 2;
 }
@@ -196,6 +265,7 @@ function computeNodeLayout(
     maxNodeCardWidth?: number;
     minNodeCardWidth?: number;
     minNodeGap?: number;
+    stretchCards?: boolean;
   },
 ) {
   const layoutByNode = new Map<
@@ -210,6 +280,11 @@ function computeNodeLayout(
   const nodeIds = draft.nodes.map((node) => node.id);
   const nodeIdSet = new Set(nodeIds);
   const rootAgentId = nodeIdSet.has(draft.rootAgentId ?? "") ? draft.rootAgentId : nodeIds[0] ?? null;
+  const manualOrderIndex = new Map(
+    (draft.agentOrderIds ?? [])
+      .filter((agentId) => nodeIdSet.has(agentId))
+      .map((agentId, index) => [agentId, index] as const),
+  );
   const directIncomingByNode = new Map(nodeIds.map((nodeId) => [nodeId, 0]));
   const ancestorSets = new Map(nodeIds.map((nodeId) => [nodeId, new Set<string>()]));
 
@@ -261,11 +336,25 @@ function computeNodeLayout(
   }
 
   const sortedNodeIds = [...nodeIds].sort((left, right) => {
-    if (left === rootAgentId) {
-      return -1;
-    }
-    if (right === rootAgentId) {
-      return 1;
+    const leftManualIndex = manualOrderIndex.get(left);
+    const rightManualIndex = manualOrderIndex.get(right);
+    if (leftManualIndex !== undefined || rightManualIndex !== undefined) {
+      if (leftManualIndex === undefined) {
+        return 1;
+      }
+      if (rightManualIndex === undefined) {
+        return -1;
+      }
+      if (leftManualIndex !== rightManualIndex) {
+        return leftManualIndex - rightManualIndex;
+      }
+    } else {
+      if (left === rootAgentId) {
+        return -1;
+      }
+      if (right === rootAgentId) {
+        return 1;
+      }
     }
 
     const leftReachable = (ancestorSets.get(left)?.size ?? 0) > 0;
@@ -306,6 +395,7 @@ function computeNodeLayout(
   const maxNodeCardWidth = options?.maxNodeCardWidth ?? baseNodeCardWidth;
   const minNodeCardWidth = Math.min(options?.minNodeCardWidth ?? baseNodeCardWidth, baseNodeCardWidth);
   const minNodeGap = Math.max(0, Math.min(options?.minNodeGap ?? NODE_COLUMN_MIN_GAP, fallbackGap));
+  const stretchCards = options?.stretchCards ?? false;
   const leftPadding = options?.horizontalInsetLeft ?? 0;
   const rightPadding = options?.horizontalInsetRight ?? 0;
   const topPadding = options?.topInset ?? 0;
@@ -321,13 +411,27 @@ function computeNodeLayout(
 
   if (viewportWidth > 0) {
     if (availableWidth >= baseContentWidth) {
-      const extraWidth = availableWidth - baseContentWidth;
-      const widthCapacity = Math.max(0, maxNodeCardWidth - baseNodeCardWidth) * nodeCount;
-      const appliedWidthExtra = Math.min(extraWidth, widthCapacity);
-      resolvedNodeCardWidth =
-        baseNodeCardWidth + (nodeCount > 0 ? appliedWidthExtra / nodeCount : 0);
-      const remainingExtraWidth = extraWidth - appliedWidthExtra;
-      resolvedGap = gapCount > 0 ? fallbackGap + remainingExtraWidth / gapCount : 0;
+      if (stretchCards) {
+        resolvedGap = gapCount > 0 ? minNodeGap : 0;
+        resolvedNodeCardWidth = Math.min(
+          maxNodeCardWidth,
+          Math.max(
+            baseNodeCardWidth,
+            (availableWidth - resolvedGap * gapCount) / Math.max(nodeCount, 1),
+          ),
+        );
+        const consumedWidth = resolvedNodeCardWidth * nodeCount + resolvedGap * gapCount;
+        const remainingExtraWidth = Math.max(0, availableWidth - consumedWidth);
+        resolvedGap = gapCount > 0 ? resolvedGap + remainingExtraWidth / gapCount : 0;
+      } else {
+        const extraWidth = availableWidth - baseContentWidth;
+        const widthCapacity = Math.max(0, maxNodeCardWidth - baseNodeCardWidth) * nodeCount;
+        const appliedWidthExtra = Math.min(extraWidth, widthCapacity);
+        resolvedNodeCardWidth =
+          baseNodeCardWidth + (nodeCount > 0 ? appliedWidthExtra / nodeCount : 0);
+        const remainingExtraWidth = extraWidth - appliedWidthExtra;
+        resolvedGap = gapCount > 0 ? fallbackGap + remainingExtraWidth / gapCount : 0;
+      }
       startOffsetX = leftPadding;
     } else {
       const missingWidth = baseContentWidth - availableWidth;
@@ -349,8 +453,8 @@ function computeNodeLayout(
         startOffsetX +
         index * (resolvedNodeCardWidth + (viewportWidth > 0 ? resolvedGap : fallbackGap)),
       y: NODE_START_Y,
-      sourcePosition: Position.Bottom,
-      targetPosition: Position.Bottom,
+      sourcePosition: Position.Top,
+      targetPosition: Position.Top,
     });
   });
 
@@ -407,19 +511,38 @@ function summarizeHistoryText(content: string | null | undefined) {
   if (!normalized) {
     return "暂无详细记录";
   }
-  return normalized.length > 34 ? `${normalized.slice(0, 34)}...` : normalized;
+  return normalized;
+}
+
+function normalizeFullHistoryText(content: string | null | undefined) {
+  const normalized = (content ?? "").trim();
+  return normalized || "暂无详细记录";
+}
+
+function summarizeToolHistory(toolName: string, detail: string) {
+  const normalizedDetail = detail.replace(/^参数:\s*/u, "").trim();
+  return summarizeHistoryText(
+    normalizedDetail ? `${toolName.trim()} · 参数: ${normalizedDetail}` : toolName.trim(),
+  );
+}
+
+function buildFullToolHistory(toolName: string, detail: string) {
+  const normalizedDetail = detail.replace(/^参数:\s*/u, "").trim();
+  return normalizeFullHistoryText(
+    normalizedDetail ? `${toolName.trim()} · 参数: ${normalizedDetail}` : toolName.trim(),
+  );
 }
 
 function getRuntimeActivityAppearance(kind: string, label: string) {
   switch (kind) {
     case "tool":
       return {
-        label: label.replace(/^tool:\s*/i, "") || "Tool",
+        label: "工具",
         className: "border-[#d4b07b] bg-[#fff3e1] text-[#7a4d15]",
       };
     case "step":
       return {
-        label: "步骤",
+        label: "消息",
         className: "border-[#9cb9d7] bg-[#edf4fb] text-[#27496b]",
       };
     default:
@@ -434,22 +557,22 @@ function getHistoryAppearance(status: string) {
   switch (status) {
     case "running":
       return {
-        label: "运行中",
+        label: "消息",
         className: "border-secondary/50 bg-secondary/12 text-secondary-foreground",
       };
     case "needs_revision":
       return {
-        label: "待修改",
+        label: "消息",
         className: "border-[#e2b26f] bg-[#fff1da] text-[#8a5a19]",
       };
     case "failed":
       return {
-        label: "失败",
+        label: "消息",
         className: "border-primary/35 bg-primary/10 text-primary",
       };
     default:
       return {
-        label: "通过",
+        label: "消息",
         className: "border-accent/55 bg-accent/18 text-foreground",
       };
   }
@@ -458,17 +581,22 @@ function getHistoryAppearance(status: string) {
 function getAgentHistoryFromMessages(messages: MessageRecord[], agentId: string) {
   return messages
     .filter((message) => message.sender === agentId && message.meta?.kind === "agent-final")
-    .sort((left, right) => right.timestamp.localeCompare(left.timestamp))
-    .slice(0, MAX_VISIBLE_HISTORY_ITEMS)
+    .sort((left, right) => left.timestamp.localeCompare(right.timestamp))
+    .slice(-MAX_VISIBLE_HISTORY_ITEMS)
     .map((message) => {
-      const status = message.meta?.reviewDecision === "needs_revision" ? "needs_revision" : message.meta?.status ?? "success";
+      const status =
+        message.meta?.reviewDecision === "needs_revision"
+          ? "needs_revision"
+          : message.meta?.status ?? "success";
       const appearance = getHistoryAppearance(status);
       return {
         id: message.id,
         label: appearance.label,
         className: appearance.className,
+        sortTimestamp: message.timestamp,
         timestamp: toShortTime(message.timestamp),
         detail: summarizeHistoryText(message.meta?.finalMessage ?? message.content),
+        fullDetail: normalizeFullHistoryText(message.meta?.finalMessage ?? message.content),
       };
     });
 }
@@ -478,15 +606,27 @@ function getRuntimeHistoryItems(snapshot: AgentRuntimeSnapshot | undefined, agen
     return [];
   }
 
-  return snapshot.activities.slice(0, MAX_VISIBLE_HISTORY_ITEMS).map((activity, index) => {
-    const appearance = getRuntimeActivityAppearance(activity.kind, activity.label);
-    return {
-      id: `${agentId}-runtime-${activity.id}-${index}`,
-      label: appearance.label,
-      className: appearance.className,
-      timestamp: toShortTime(activity.timestamp),
-      detail: summarizeHistoryText(activity.detail || activity.label),
-    };
+  return [...snapshot.activities]
+    .sort((left, right) => left.timestamp.localeCompare(right.timestamp))
+    .slice(-MAX_VISIBLE_HISTORY_ITEMS)
+    .map((activity, index) => {
+      const appearance = getRuntimeActivityAppearance(activity.kind, activity.label);
+      const detail =
+        activity.kind === "tool"
+          ? summarizeToolHistory(activity.label, activity.detail)
+          : summarizeHistoryText(activity.detail || activity.label);
+      return {
+        id: `${agentId}-runtime-${activity.id}-${index}`,
+        label: appearance.label,
+        className: appearance.className,
+        sortTimestamp: activity.timestamp,
+        timestamp: toShortTime(activity.timestamp),
+        detail,
+        fullDetail:
+          activity.kind === "tool"
+            ? buildFullToolHistory(activity.label, activity.detail)
+            : normalizeFullHistoryText(activity.detail || activity.label),
+      };
   });
 }
 
@@ -503,14 +643,13 @@ function CurvedTopologyEdge({
   const laneIndex = data?.laneIndex ?? 0;
   const span = data?.span ?? 1;
   const horizontalPhase = data?.horizontalPhase ?? 0;
-  const sourceBlockHeight = data?.sourceBlockHeight ?? IDLE_AGENT_BLOCK_HEIGHT;
-  const targetBlockHeight = data?.targetBlockHeight ?? IDLE_AGENT_BLOCK_HEIGHT;
-  const sourceTopY = sourceY - sourceBlockHeight + AGENT_EDGE_TOP_INSET;
-  const targetTopY = targetY - targetBlockHeight + AGENT_EDGE_TOP_INSET;
+  const sourceTopY = sourceY + AGENT_EDGE_TOP_INSET;
+  const targetTopY = targetY + AGENT_EDGE_TOP_INSET;
+  const maxArcRise = TOPOLOGY_EDGE_LANE_HEIGHT - 12;
 
   if (Math.abs(targetX - sourceX) < 2) {
     const loopWidth = 28 + laneIndex * 8;
-    const loopDepth = 28 + laneIndex * 10;
+    const loopDepth = Math.min(maxArcRise - 4, 18 + laneIndex * 8);
     const path = [
       `M ${sourceX} ${sourceTopY}`,
       `C ${sourceX + loopWidth} ${sourceTopY - 8}, ${sourceX + loopWidth} ${sourceTopY - loopDepth}, ${sourceX} ${sourceTopY - loopDepth}`,
@@ -533,7 +672,10 @@ function CurvedTopologyEdge({
 
   const direction = targetX > sourceX ? 1 : -1;
   const horizontalDistance = Math.abs(targetX - sourceX);
-  const verticalDepth = 18 + span * 7 + laneIndex * 6;
+  const verticalDepth = Math.min(
+    maxArcRise,
+    12 + span * 4 + laneIndex * 4 + Math.abs(horizontalPhase) * 2,
+  );
   const horizontalBias = horizontalPhase * 10;
   const startX = sourceX;
   const endX = targetX;
@@ -542,7 +684,7 @@ function CurvedTopologyEdge({
   const controlReach = Math.max(28, Math.min(76, horizontalDistance * 0.18));
   const sourceControlX = startX + direction * (controlReach + horizontalBias);
   const targetControlX = endX - direction * (controlReach - horizontalBias);
-  const sourceControlY = startY - verticalDepth * 0.45;
+  const sourceControlY = startY - verticalDepth * 0.42;
   const targetControlY = endY - verticalDepth;
   const path = [
     `M ${startX} ${startY}`,
@@ -572,8 +714,8 @@ interface BottomAnchoredFlowProps {
   horizontalInsetRight?: number;
   topInset?: number;
   bottomInset?: number;
-  fitVersion?: number;
   framed?: boolean;
+  preserveLayoutViewport?: boolean;
   onNodeClick?: (_event: MouseEvent, node: Node) => void;
   onNodeMouseEnter?: (_event: MouseEvent, node: Node) => void;
   onNodeMouseLeave?: (_event: MouseEvent, node: Node) => void;
@@ -588,8 +730,8 @@ function BottomAnchoredFlow({
   horizontalInsetRight = 18,
   topInset = 8,
   bottomInset = 8,
-  fitVersion = 0,
   framed = true,
+  preserveLayoutViewport = false,
   onNodeClick,
   onNodeMouseEnter,
   onNodeMouseLeave,
@@ -620,6 +762,18 @@ function BottomAnchoredFlow({
 
     const applyViewport = () => {
       if (!containerRef.current || !flowRef.current) {
+        return;
+      }
+
+      if (preserveLayoutViewport) {
+        void flowRef.current.setViewport(
+          {
+            x: 0,
+            y: topInset,
+            zoom: 1,
+          },
+          { duration: 0 },
+        );
         return;
       }
 
@@ -658,7 +812,15 @@ function BottomAnchoredFlow({
     return () => {
       observer.disconnect();
     };
-  }, [fitPadding, fitVersion, horizontalInsetLeft, horizontalInsetRight, topInset, bottomInset, viewportSignature]);
+  }, [
+    bottomInset,
+    fitPadding,
+    horizontalInsetLeft,
+    horizontalInsetRight,
+    preserveLayoutViewport,
+    topInset,
+    viewportSignature,
+  ]);
 
   return (
     <div
@@ -674,6 +836,13 @@ function BottomAnchoredFlow({
         edges={edges}
         edgeTypes={edgeTypes}
         proOptions={{ hideAttribution: true }}
+        nodesDraggable={false}
+        nodesConnectable={false}
+        elementsSelectable={false}
+        panOnDrag={false}
+        zoomOnScroll={false}
+        zoomOnPinch={false}
+        zoomOnDoubleClick={false}
         onInit={(instance) => {
           flowRef.current = instance;
         }}
@@ -702,11 +871,13 @@ export function TopologyGraph({
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
   const [hoveredAgentId, setHoveredAgentId] = useState<string | null>(null);
   const [expandedOpen, setExpandedOpen] = useState(false);
-  const [mainFitVersion, setMainFitVersion] = useState(0);
-  const [expandedFitVersion, setExpandedFitVersion] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [selectedHistoryRecord, setSelectedHistoryRecord] = useState<SelectedHistoryRecord | null>(null);
+  const [hoveredHistoryPreview, setHoveredHistoryPreview] = useState<HoveredHistoryPreview | null>(null);
   const mainViewportRef = useRef<HTMLDivElement | null>(null);
   const expandedViewportRef = useRef<HTMLDivElement | null>(null);
+  const historyScrollRefs = useRef(new Map<string, Set<HTMLDivElement>>());
+  const historyAutoStickToBottom = useRef(new Map<string, boolean>());
   const [mainViewportSize, setMainViewportSize] = useState({ width: 0, height: 0 });
   const [expandedViewportSize, setExpandedViewportSize] = useState({ width: 0, height: 0 });
   const edgeTypes = useMemo(
@@ -719,6 +890,12 @@ export function TopologyGraph({
   useEffect(() => {
     setDraft(topology ?? null);
   }, [topology]);
+
+  useEffect(() => {
+    if (selectedHistoryRecord) {
+      setHoveredHistoryPreview(null);
+    }
+  }, [selectedHistoryRecord]);
 
   useEffect(() => {
     if (!mainViewportRef.current) {
@@ -784,6 +961,20 @@ export function TopologyGraph({
       ),
     [project],
   );
+  const defaultAgentOrderIds = useMemo(
+    () =>
+      resolveTopologyAgentOrder(
+        project?.agentFiles.map((agent) => ({
+          name: agent.name,
+          mode: agent.mode,
+          role: agent.role,
+          relativePath: agent.relativePath,
+        })) ?? [],
+        project?.topology.agentOrderIds ?? null,
+        project?.topology.rootAgentId ?? null,
+      ),
+    [project],
+  );
   const autoLayout = useMemo(() => {
     if (!draft) {
       return {
@@ -795,6 +986,7 @@ export function TopologyGraph({
     return computeNodeLayout(
       {
         ...draft,
+        agentOrderIds: draft.agentOrderIds.length > 0 ? draft.agentOrderIds : defaultAgentOrderIds,
         rootAgentId: draft.rootAgentId ?? defaultRootAgentId,
       },
       agentRoles,
@@ -805,14 +997,15 @@ export function TopologyGraph({
         nodeColumnHeight: MAIN_NODE_COLUMN_HEIGHT,
         horizontalInsetLeft: MAIN_FLOW_LEFT_INSET,
         horizontalInsetRight: MAIN_FLOW_RIGHT_INSET,
-        topInset: FLOW_TOP_INSET,
+        topInset: MAIN_FLOW_TOP_INSET,
+        stretchCards: false,
         bottomInset: MAIN_FLOW_BOTTOM_INSET,
         maxNodeCardWidth: MAIN_NODE_CARD_MAX_WIDTH,
         minNodeCardWidth: MAIN_NODE_CARD_MIN_WIDTH,
         minNodeGap: NODE_COLUMN_MIN_GAP,
       },
     );
-  }, [agentRoles, defaultRootAgentId, draft, mainViewportSize.height, mainViewportSize.width]);
+  }, [agentRoles, defaultAgentOrderIds, defaultRootAgentId, draft, mainViewportSize.height, mainViewportSize.width]);
   const expandedAutoLayout = useMemo(() => {
     if (!draft) {
       return {
@@ -824,6 +1017,7 @@ export function TopologyGraph({
     return computeNodeLayout(
       {
         ...draft,
+        agentOrderIds: draft.agentOrderIds.length > 0 ? draft.agentOrderIds : defaultAgentOrderIds,
         rootAgentId: draft.rootAgentId ?? defaultRootAgentId,
       },
       agentRoles,
@@ -834,14 +1028,15 @@ export function TopologyGraph({
         nodeColumnHeight: EXPANDED_NODE_COLUMN_HEIGHT,
         horizontalInsetLeft: EXPANDED_FLOW_LEFT_INSET,
         horizontalInsetRight: EXPANDED_FLOW_RIGHT_INSET,
-        topInset: FLOW_TOP_INSET,
+        topInset: EXPANDED_FLOW_TOP_INSET,
         bottomInset: EXPANDED_FLOW_BOTTOM_INSET,
         maxNodeCardWidth: EXPANDED_NODE_CARD_MAX_WIDTH,
         minNodeCardWidth: EXPANDED_NODE_CARD_MIN_WIDTH,
         minNodeGap: NODE_COLUMN_MIN_GAP,
+        stretchCards: true,
       },
     );
-  }, [agentRoles, defaultRootAgentId, draft, expandedViewportSize.height, expandedViewportSize.width]);
+  }, [agentRoles, defaultAgentOrderIds, defaultRootAgentId, draft, expandedViewportSize.height, expandedViewportSize.width]);
   const agentHistories = useMemo(() => {
     const taskMessages = task?.messages ?? [];
     const histories = new Map<string, ReturnType<typeof getAgentHistoryFromMessages>>();
@@ -864,6 +1059,23 @@ export function TopologyGraph({
     );
   }, [draft, hoveredAgentId]);
 
+  useEffect(() => {
+    const frameId = window.requestAnimationFrame(() => {
+      historyScrollRefs.current.forEach((elements, agentId) => {
+        if (!historyAutoStickToBottom.current.get(agentId)) {
+          return;
+        }
+        elements.forEach((element) => {
+          element.scrollTop = element.scrollHeight;
+        });
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [agentHistories, expandedOpen, runtimeSnapshots, task?.messages, taskStatuses]);
+
   function buildNodes(
     layoutByNode: Map<
       string,
@@ -883,6 +1095,7 @@ export function TopologyGraph({
 
     return draft.nodes.map((node) => {
       const agentState = taskStatuses.get(node.id) ?? "idle";
+      const agentColor = getAgentColorToken(node.id);
       const active = node.id === selectedAgentId;
       const hovered = node.id === hoveredAgentId;
       const connectedFromHovered = highlightedOutgoingTargets.has(node.id);
@@ -894,19 +1107,68 @@ export function TopologyGraph({
       };
       const runtime = agentState === "running" ? runtimeSnapshots[node.id] : undefined;
       const runtimeTooltip = buildRuntimeTooltip(runtime);
-      const runtimeHeadline = runtime?.headline ?? "运行中，等待实时消息...";
-      const toolNames = runtime?.activeToolNames ?? [];
-      const hasActiveTools = toolNames.length > 0;
       const agentBlockHeight = getAgentBlockHeight(agentState);
       const historyItems = agentHistories.get(node.id) ?? [];
-      const appearance = getAgentCardAppearance(agentState);
+      const appearance = getAgentCardAppearance(agentState, agentColor);
       const visibleHistory =
         runtime && agentState === "running"
-          ? [...getRuntimeHistoryItems(runtime, node.id), ...historyItems].slice(0, MAX_VISIBLE_HISTORY_ITEMS)
+          ? [...historyItems, ...getRuntimeHistoryItems(runtime, node.id)]
+              .sort((left, right) => left.sortTimestamp.localeCompare(right.sortTimestamp))
+              .slice(-MAX_VISIBLE_HISTORY_ITEMS)
           : historyItems;
-      const historyBottomOffset = agentBlockHeight + HISTORY_STACK_GAP;
+      const historyTopOffset = agentBlockHeight + HISTORY_STACK_GAP;
+      const bindHistoryScrollRef = (element: HTMLDivElement | null) => {
+        const current = historyScrollRefs.current.get(node.id) ?? new Set<HTMLDivElement>();
+        current.forEach((registeredElement) => {
+          if (!registeredElement.isConnected) {
+            current.delete(registeredElement);
+          }
+        });
+
+        if (element) {
+          current.add(element);
+          if (!historyAutoStickToBottom.current.has(node.id)) {
+            historyAutoStickToBottom.current.set(node.id, true);
+          }
+        }
+
+        if (current.size > 0) {
+          historyScrollRefs.current.set(node.id, current);
+        } else {
+          historyScrollRefs.current.delete(node.id);
+          historyAutoStickToBottom.current.delete(node.id);
+        }
+      };
+      const updateHoveredHistoryPreview = (
+        event: MouseEvent<HTMLButtonElement>,
+        record: SelectedHistoryRecord,
+      ) => {
+        if (selectedHistoryRecord) {
+          return;
+        }
+
+        const cardRect = event.currentTarget.getBoundingClientRect();
+        const previewWidth = 420;
+        const previewHeight = 320;
+        const gap = 14;
+        const horizontalSpaceOnRight = window.innerWidth - cardRect.right;
+        const left =
+          horizontalSpaceOnRight >= previewWidth + gap
+            ? cardRect.right + gap
+            : Math.max(16, cardRect.left - previewWidth - gap);
+        const top = Math.min(
+          Math.max(16, cardRect.top - 8),
+          Math.max(16, window.innerHeight - previewHeight - 16),
+        );
+
+        setHoveredHistoryPreview({
+          ...record,
+          x: left,
+          y: top,
+        });
+      };
       const cardStyle = {
-        borderRadius: "0 0 8px 8px",
+        borderRadius: "8px 8px 0 0",
         border:
           active || hovered || connectedFromHovered
             ? "2px solid #3E8F63"
@@ -932,43 +1194,7 @@ export function TopologyGraph({
           label: (
             <div className="relative h-full w-full" title={runtimeTooltip}>
               <div
-                className="absolute inset-x-0 top-0"
-                style={{
-                  bottom: historyBottomOffset,
-                }}
-              >
-                {visibleHistory.length > 0 ? (
-                  <div
-                    className="flex h-full flex-col rounded-t-[12px] rounded-b-none border border-border/70 border-b-0 bg-card/55 px-3 py-2 text-left text-foreground shadow-sm"
-                  >
-                    <div className="overflow-hidden">
-                      {visibleHistory.map((item) => (
-                        <div
-                          key={item.id}
-                          className={`rounded-[8px] border px-3 py-1.5 text-left text-[11px] leading-4 ${item.className}`}
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-semibold">{item.label}</span>
-                            {item.timestamp ? <span className="opacity-70">{item.timestamp}</span> : null}
-                          </div>
-                          <p className="mt-1 line-clamp-3 whitespace-pre-wrap break-all opacity-90">
-                            {item.detail}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div
-                    className="flex h-full flex-col rounded-t-[12px] rounded-b-none border border-border/70 border-b-0 bg-card/55 px-4 py-3 text-left text-[14px] font-medium text-muted-foreground shadow-sm"
-                  >
-                    待启动
-                  </div>
-                )}
-              </div>
-
-              <div
-                className={`absolute inset-x-0 bottom-0 flex flex-col px-2.5 text-center ${agentState === "running" ? "justify-start py-3" : "justify-center py-0.5"}`}
+                className="absolute inset-x-0 top-0 flex flex-col justify-center px-2.5 py-0.5 text-center"
                 style={{
                   ...cardStyle,
                   minHeight: agentBlockHeight,
@@ -981,26 +1207,103 @@ export function TopologyGraph({
                 >
                   {getAgentDisplayName(node.label)}
                 </p>
-                {agentState === "running" ? (
-                  <div className="mt-3 rounded-[8px] border border-white/35 bg-white/14 px-3 py-2 text-left shadow-sm backdrop-blur-sm">
-                    {hasActiveTools ? (
-                      <div className="flex flex-wrap gap-1.5">
-                        {toolNames.slice(0, 2).map((toolName) => (
-                          <span
-                            key={toolName}
-                            className="rounded-[6px] border border-white/35 bg-white/18 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.05em] text-white"
-                          >
-                            {`tool: ${toolName}`}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                    <p className={`${hasActiveTools ? "mt-2" : ""} truncate text-[11px] leading-4 text-white/92`}>
-                      {runtimeHeadline}
-                    </p>
-                  </div>
-                ) : null}
               </div>
+
+              <div
+                className="absolute inset-x-0 bottom-0"
+                style={{
+                  top: historyTopOffset,
+                }}
+              >
+                {visibleHistory.length > 0 ? (
+                  <div
+                    className="flex h-full flex-col rounded-b-[12px] rounded-t-none border border-t-0 px-3 py-2 text-left shadow-sm"
+                    style={{
+                      borderColor: agentColor.border,
+                      background: agentColor.soft,
+                      color: agentColor.text,
+                    }}
+                  >
+                    <div
+                      ref={bindHistoryScrollRef}
+                      onWheelCapture={(event) => {
+                        event.stopPropagation();
+                      }}
+                      onScroll={(event) => {
+                        const element = event.currentTarget;
+                        const distanceToBottom =
+                          element.scrollHeight - element.clientHeight - element.scrollTop;
+                        historyAutoStickToBottom.current.set(node.id, distanceToBottom <= 12);
+                      }}
+                      className="nowheel min-h-0 flex-1 space-y-1 overflow-y-auto pr-1"
+                    >
+                      {visibleHistory.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className={`block w-full rounded-[8px] border px-3 py-1.5 text-left text-[11px] leading-4 transition hover:brightness-[0.98] ${item.className}`}
+                          onMouseDown={(event) => {
+                            event.stopPropagation();
+                          }}
+                          onMouseEnter={(event) => {
+                            event.stopPropagation();
+                            updateHoveredHistoryPreview(event, {
+                              agentName: getAgentDisplayName(node.label),
+                              label: item.label,
+                              timestamp: item.timestamp,
+                              content: item.fullDetail,
+                            });
+                          }}
+                          onMouseMove={(event) => {
+                            updateHoveredHistoryPreview(event, {
+                              agentName: getAgentDisplayName(node.label),
+                              label: item.label,
+                              timestamp: item.timestamp,
+                              content: item.fullDetail,
+                            });
+                          }}
+                          onMouseLeave={() => {
+                            if (!selectedHistoryRecord) {
+                              setHoveredHistoryPreview(null);
+                            }
+                          }}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setSelectedHistoryRecord({
+                              agentName: getAgentDisplayName(node.label),
+                              label: item.label,
+                              timestamp: item.timestamp,
+                              content: item.fullDetail,
+                            });
+                          }}
+                        >
+                          {item.label || item.timestamp ? (
+                            <div className="flex items-center justify-between gap-2">
+                              {item.label ? <span className="font-semibold">{item.label}</span> : null}
+                              {item.timestamp ? <span className="opacity-70">{item.timestamp}</span> : null}
+                            </div>
+                          ) : null}
+                          <p className={`${item.label || item.timestamp ? "mt-1" : ""} line-clamp-3 whitespace-pre-wrap break-all opacity-90`}>
+                            {item.detail}
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    className="flex h-full flex-col rounded-b-[12px] rounded-t-none border border-t-0 px-4 py-3 text-left text-[14px] font-medium shadow-sm"
+                    style={{
+                      borderColor: agentColor.border,
+                      background: agentColor.soft,
+                      color: agentColor.mutedText,
+                    }}
+                  >
+                    待启动
+                  </div>
+                )}
+              </div>
+
             </div>
           ),
         },
@@ -1055,86 +1358,56 @@ export function TopologyGraph({
       return left.id.localeCompare(right.id);
     });
 
-    return orderedEdges.map((edge, index) => ({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      type: "curvedTopology",
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        color:
-          hoveredAgentId &&
-          edge.source === hoveredAgentId &&
-          edge.target !== hoveredAgentId
-            ? "#3E8F63"
-            : edge.triggerOn === "manual"
-              ? "#C96F3B"
-              : "#2C4A3F",
-      },
-      style: {
-        stroke:
-          hoveredAgentId &&
-          edge.source === hoveredAgentId &&
-          edge.target !== hoveredAgentId
-            ? "#3E8F63"
-            : edge.triggerOn === "manual"
-              ? "#C96F3B"
-              : "#2C4A3F",
-        strokeWidth:
-          hoveredAgentId &&
-          edge.source === hoveredAgentId &&
-          edge.target !== hoveredAgentId
-            ? 3
-            : edge.triggerOn === "manual"
-              ? 2.1
-              : 2,
-        strokeDasharray:
-          hoveredAgentId &&
-          edge.source === hoveredAgentId &&
-          edge.target !== hoveredAgentId
-            ? undefined
-            : edge.triggerOn === "manual"
-              ? "7 6"
-              : undefined,
-      },
-      zIndex:
+    return orderedEdges.map((edge, index) => {
+      const triggerAppearance = getEdgeTriggerAppearance(edge.triggerOn);
+      const isHoveredEdge =
         hoveredAgentId &&
         edge.source === hoveredAgentId &&
-        edge.target !== hoveredAgentId
-          ? 3
-          : edge.triggerOn === "manual"
-            ? 2
-            : 1,
-      animated:
-        hoveredAgentId &&
-        edge.source === hoveredAgentId &&
-        edge.target !== hoveredAgentId
-          ? true
-          : edge.triggerOn === "manual",
-      interactionWidth: 24,
-      sourceHandle: null,
-      targetHandle: null,
-      data: {
-        edgeKind: edge.triggerOn,
-        laneIndex: index % 4,
-        span: Math.max(
-          1,
-          Math.abs((nodeOrder.get(edge.target) ?? 0) - (nodeOrder.get(edge.source) ?? 0)),
-        ),
-        horizontalPhase: (index % 3) - 1,
-        sourceBlockHeight: getAgentBlockHeight(taskStatuses.get(edge.source) ?? "idle"),
-        targetBlockHeight: getAgentBlockHeight(taskStatuses.get(edge.target) ?? "idle"),
-      },
-    }));
+        edge.target !== hoveredAgentId;
+
+      return {
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        type: "curvedTopology",
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: isHoveredEdge ? "#3E8F63" : triggerAppearance.color,
+        },
+        style: {
+          stroke: isHoveredEdge ? "#3E8F63" : triggerAppearance.color,
+          strokeWidth: isHoveredEdge ? 3 : triggerAppearance.strokeWidth,
+          strokeDasharray: isHoveredEdge ? undefined : triggerAppearance.strokeDasharray,
+        },
+        zIndex: isHoveredEdge ? 3 : triggerAppearance.zIndex,
+        animated: isHoveredEdge ? true : triggerAppearance.animated,
+        interactionWidth: 24,
+        sourceHandle: null,
+        targetHandle: null,
+        data: {
+          edgeKind: edge.triggerOn,
+          laneIndex: index % 4,
+          span: Math.max(
+            1,
+            Math.abs((nodeOrder.get(edge.target) ?? 0) - (nodeOrder.get(edge.source) ?? 0)),
+          ),
+          horizontalPhase: (index % 3) - 1,
+          sourceBlockHeight: getAgentBlockHeight(taskStatuses.get(edge.source) ?? "idle"),
+          targetBlockHeight: getAgentBlockHeight(taskStatuses.get(edge.target) ?? "idle"),
+        },
+      };
+    });
   }, [autoLayout, draft, hoveredAgentId, taskStatuses]);
 
   const editingAgent = project?.agentFiles.find((agent) => agent.name === editingAgentId);
-  const downstreamNames = useMemo(() => {
+  const downstreamTriggerByTarget = useMemo(() => {
     if (!draft || !editingAgentId) {
-      return new Set<string>();
+      return new Map<string, TopologyEdge["triggerOn"]>();
     }
-    return new Set(
-      draft.edges.filter((edge) => edge.source === editingAgentId).map((edge) => edge.target),
+    return new Map(
+      draft.edges
+        .filter((edge) => edge.source === editingAgentId)
+        .map((edge) => [edge.target, edge.triggerOn] as const),
     );
   }, [draft, editingAgentId]);
 
@@ -1151,7 +1424,10 @@ export function TopologyGraph({
     }
   }
 
-  async function toggleDownstream(target: string, checked: boolean) {
+  async function setDownstreamTrigger(
+    target: string,
+    triggerOn: TopologyEdge["triggerOn"] | null,
+  ) {
     if (!draft || !editingAgentId) {
       return;
     }
@@ -1159,14 +1435,14 @@ export function TopologyGraph({
     const retained = draft.edges.filter(
       (edge) => !(edge.source === editingAgentId && edge.target === target),
     );
-    const nextEdges = checked
+    const nextEdges = triggerOn
       ? [
           ...retained,
           {
-            id: createEdgeId(editingAgentId, target, "success"),
+            id: createEdgeId(editingAgentId, target, triggerOn),
             source: editingAgentId,
             target,
-            triggerOn: "success" as const,
+            triggerOn,
           },
         ]
       : retained;
@@ -1184,33 +1460,34 @@ export function TopologyGraph({
 
     await saveDraft({
       ...draft,
+      agentOrderIds: checked
+        ? [
+            agentId,
+            ...(draft.agentOrderIds.length > 0 ? draft.agentOrderIds : defaultAgentOrderIds).filter(
+              (item) => item !== agentId,
+            ),
+          ]
+        : draft.agentOrderIds.length > 0
+          ? draft.agentOrderIds
+          : defaultAgentOrderIds,
       rootAgentId: checked ? agentId : defaultRootAgentId,
     });
   }
 
   return (
-    <section className="PANEL-surface flex h-full min-h-0 flex-col overflow-hidden rounded-[10px] p-4">
-      <div className="mb-3">
-        <div className="flex items-start justify-between gap-4">
+    <section className="PANEL-surface relative flex h-full min-h-0 flex-col overflow-hidden rounded-[10px]">
+      <div className="min-h-[34px] border-b border-border/60 px-4 py-2">
+        <div className="flex h-full items-center justify-between gap-4">
           <div>
             <p className="font-display text-[1.45rem] font-bold text-primary">拓扑图</p>
-            <p className="text-xs text-muted-foreground">
-              {compact
-                ? "右上角显示拓扑图预览，点击整块区域即可放大查看和编辑。"
-                : "当前展示的是当前 Project 的生效拓扑图；运行中的 Agent 会在节点内显示实时工具和消息摘要，点击节点即可编辑下游关系。"}
-            </p>
+            {compact ? (
+              <p className="text-xs text-muted-foreground">
+                右上角显示拓扑图预览，点击整块区域即可放大查看和编辑。
+              </p>
+            ) : null}
           </div>
           {!compact && draft ? (
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="rounded-[8px] border border-border bg-card px-4 py-2 text-sm text-foreground transition hover:border-primary"
-                onClick={() => {
-                  setMainFitVersion((current) => current + 1);
-                }}
-              >
-                自动适配
-              </button>
               <button
                 type="button"
                 className="rounded-[8px] border border-border bg-card px-4 py-2 text-sm text-foreground transition hover:border-primary"
@@ -1228,15 +1505,15 @@ export function TopologyGraph({
       <div
         className={
           compact || !showEdgeList
-            ? "min-h-0 flex-1"
-            : "grid min-h-0 flex-1 grid-rows-[320px_minmax(0,1fr)] gap-4"
+            ? "min-h-0 flex-1 px-4 pb-4 pt-3"
+            : "grid min-h-0 flex-1 grid-rows-[320px_minmax(0,1fr)] gap-4 px-4 pb-4 pt-3"
         }
       >
         {compact ? (
           <button
             type="button"
             onClick={() => setExpandedOpen(true)}
-            className="group relative block h-full min-h-0 w-full overflow-hidden rounded-[8px] border border-border/70 bg-card text-left"
+            className="group relative block h-full min-h-0 w-full overflow-hidden rounded-[8px] text-left"
           >
             <div className="pointer-events-none h-full w-full">
               <BottomAnchoredFlow
@@ -1246,7 +1523,7 @@ export function TopologyGraph({
                 fitPadding={PREVIEW_FIT_PADDING}
                 horizontalInsetLeft={MAIN_FLOW_LEFT_INSET}
                 horizontalInsetRight={MAIN_FLOW_RIGHT_INSET}
-                topInset={FLOW_TOP_INSET}
+                topInset={MAIN_FLOW_TOP_INSET}
                 bottomInset={MAIN_FLOW_BOTTOM_INSET}
                 framed={false}
               />
@@ -1266,9 +1543,9 @@ export function TopologyGraph({
               fitPadding={MAIN_FIT_PADDING}
               horizontalInsetLeft={MAIN_FLOW_LEFT_INSET}
               horizontalInsetRight={MAIN_FLOW_RIGHT_INSET}
-              topInset={FLOW_TOP_INSET}
+              topInset={MAIN_FLOW_TOP_INSET}
               bottomInset={MAIN_FLOW_BOTTOM_INSET}
-              fitVersion={mainFitVersion}
+              framed={false}
               onNodeClick={(_event, node) => {
                 onSelectAgent(node.id);
                 setEditingAgentId(node.id);
@@ -1303,7 +1580,7 @@ export function TopologyGraph({
                     {getAgentDisplayName(edge.source)} {"->"} {getAgentDisplayName(edge.target)}
                   </span>
                   <span className="rounded-[6px] bg-muted px-2.5 py-1 text-[11px]">
-                    {edge.triggerOn}
+                    {getEdgeTriggerLabel(edge.triggerOn)}
                   </span>
                 </button>
               ))}
@@ -1313,9 +1590,9 @@ export function TopologyGraph({
       </div>
 
       <Dialog.Root open={expandedOpen} onOpenChange={setExpandedOpen}>
-        <Dialog.Portal>
+      <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 bg-black/25" />
-          <Dialog.Content className="PANEL-surface fixed left-1/2 top-1/2 h-[96vh] w-[98.5vw] -translate-x-1/2 -translate-y-1/2 rounded-[10px] p-6">
+          <Dialog.Content className="PANEL-surface fixed left-1/2 top-1/2 h-[96vh] w-[98.5vw] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[10px] p-6">
             <div className="flex h-full min-h-0 flex-col">
               <div className="mb-4 flex items-start justify-between gap-4">
                 <div>
@@ -1327,15 +1604,6 @@ export function TopologyGraph({
                   </Dialog.Description>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    className="rounded-[8px] border border-border bg-card px-4 py-2 text-sm text-foreground transition hover:border-primary"
-                    onClick={() => {
-                      setExpandedFitVersion((current) => current + 1);
-                    }}
-                  >
-                    自动适配
-                  </button>
                   <Dialog.Close asChild>
                     <button
                       type="button"
@@ -1347,7 +1615,7 @@ export function TopologyGraph({
                 </div>
               </div>
 
-              <div ref={expandedViewportRef} className="min-h-0 flex-1">
+              <div ref={expandedViewportRef} className="min-h-0 flex-1 overflow-hidden rounded-[8px]">
                 <BottomAnchoredFlow
                   nodes={expandedNodes}
                   edges={edges}
@@ -1355,9 +1623,10 @@ export function TopologyGraph({
                   fitPadding={EXPANDED_FIT_PADDING}
                   horizontalInsetLeft={EXPANDED_FLOW_LEFT_INSET}
                   horizontalInsetRight={EXPANDED_FLOW_RIGHT_INSET}
-                  topInset={FLOW_TOP_INSET}
+                  topInset={EXPANDED_FLOW_TOP_INSET}
                   bottomInset={EXPANDED_FLOW_BOTTOM_INSET}
-                  fitVersion={expandedFitVersion}
+                  framed={false}
+                  preserveLayoutViewport
                   onNodeClick={(_event, node) => {
                     onSelectAgent(node.id);
                     setEditingAgentId(node.id);
@@ -1423,16 +1692,22 @@ export function TopologyGraph({
               </label>
             </div>
 
+            <div className="mt-5 rounded-[8px] border border-border/70 bg-[#f8f4ea] px-4 py-3 text-xs text-muted-foreground">
+              <p className="font-semibold text-primary">触发方式</p>
+              <p className="mt-1">完成后自动触发：上游 Agent 正常完成后，100% 自动派发。</p>
+              <p className="mt-1">需要修改时触发：只有上游 Agent 决策为“需要修改”时，才会派发。</p>
+            </div>
+
             <div className="mt-5 space-y-2">
               {project?.agentFiles
                 .filter((agent) => agent.name !== editingAgentId)
                 .map((agent) => {
-                  const checked = downstreamNames.has(agent.name);
+                  const selectedTrigger = downstreamTriggerByTarget.get(agent.name) ?? "none";
                   const kindMeta = getAgentKindMeta(isBuiltinAgentPath(agent.relativePath));
                   return (
-                    <label
+                    <div
                       key={agent.name}
-                      className={`flex cursor-pointer items-center justify-between rounded-[8px] border px-4 py-3 ${kindMeta.panelClassName}`}
+                      className={`flex items-center justify-between gap-4 rounded-[8px] border px-4 py-3 ${kindMeta.panelClassName}`}
                     >
                       <div>
                         <div className="flex items-center gap-2">
@@ -1446,16 +1721,29 @@ export function TopologyGraph({
                           </span>
                         </div>
                         <p className="mt-1 text-xs text-muted-foreground">{agent.mode}</p>
+                        {selectedTrigger !== "none" ? (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {getEdgeTriggerDescription(selectedTrigger)}
+                          </p>
+                        ) : null}
                       </div>
-                      <input
-                        type="checkbox"
-                        checked={checked}
+                      <select
+                        value={selectedTrigger}
                         onChange={(event) => {
-                          void toggleDownstream(agent.name, event.target.checked);
+                          const nextValue = event.target.value;
+                          void setDownstreamTrigger(
+                            agent.name,
+                            nextValue === "none" ? null : (nextValue as TopologyEdge["triggerOn"]),
+                          );
                         }}
-                        className="h-4 w-4 accent-[#2C4A3F]"
-                      />
-                    </label>
+                        className="min-w-[178px] rounded-[8px] border border-border/70 bg-white/90 px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
+                      >
+                        <option value="none">不触发</option>
+                        <option value="success">完成后自动触发</option>
+                        <option value="failed">需要修改时触发</option>
+                        <option value="manual">仅显式指派时触发</option>
+                      </select>
+                    </div>
                   );
                 })}
             </div>
@@ -1470,6 +1758,77 @@ export function TopologyGraph({
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+
+      <Dialog.Root
+        open={!!selectedHistoryRecord}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedHistoryRecord(null);
+          }
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 bg-black/30" />
+          <Dialog.Content className="PANEL-surface fixed left-1/2 top-1/2 flex max-h-[82vh] w-[min(760px,92vw)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-[10px] p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <Dialog.Title className="font-display text-2xl font-bold text-primary">
+                  历史消息
+                </Dialog.Title>
+                <Dialog.Description className="mt-1 text-sm text-muted-foreground">
+                  {selectedHistoryRecord
+                    ? `${selectedHistoryRecord.agentName} · ${selectedHistoryRecord.label}${selectedHistoryRecord.timestamp ? ` · ${selectedHistoryRecord.timestamp}` : ""}`
+                    : "查看完整历史消息"}
+                </Dialog.Description>
+              </div>
+              <Dialog.Close asChild>
+                <button
+                  type="button"
+                  className="rounded-[8px] border border-border bg-card px-4 py-2 text-sm text-foreground transition hover:border-primary"
+                >
+                  关闭
+                </button>
+              </Dialog.Close>
+            </div>
+
+            <div className="mt-5 min-h-0 flex-1 overflow-y-auto rounded-[8px] border border-border/70 bg-card/70 px-5 py-4">
+              <p className="whitespace-pre-wrap break-words text-[15px] leading-8 text-foreground">
+                {selectedHistoryRecord?.content}
+              </p>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      {hoveredHistoryPreview && !selectedHistoryRecord ? (
+        <div
+          className="pointer-events-none fixed z-50 flex max-h-[min(320px,72vh)] w-[min(420px,calc(100vw-32px))] flex-col rounded-[10px] border border-border/80 bg-[#fffaf2]/95 p-4 shadow-[0_22px_54px_rgba(44,74,63,0.2)] backdrop-blur-sm"
+          style={{
+            left: hoveredHistoryPreview.x,
+            top: hoveredHistoryPreview.y,
+          }}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-display text-[1.1rem] font-bold text-primary">历史消息</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {`${hoveredHistoryPreview.agentName} · ${hoveredHistoryPreview.label}${
+                  hoveredHistoryPreview.timestamp ? ` · ${hoveredHistoryPreview.timestamp}` : ""
+                }`}
+              </p>
+            </div>
+            <span className="rounded-full bg-card/90 px-2.5 py-1 text-[10px] font-semibold tracking-[0.08em] text-foreground/70">
+              悬停预览
+            </span>
+          </div>
+
+          <div className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-[8px] border border-border/60 bg-card/75 px-4 py-3">
+            <p className="whitespace-pre-wrap break-words text-[13px] leading-6 text-foreground">
+              {hoveredHistoryPreview.content}
+            </p>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

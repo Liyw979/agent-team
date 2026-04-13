@@ -23,7 +23,6 @@ declare global {
       submitTask: (payload: SubmitTaskPayload) => Promise<TaskSnapshot>;
       deleteTask: (payload: DeleteTaskPayload) => Promise<ProjectSnapshot>;
       openTaskSession: (payload: OpenTaskSessionPayload) => Promise<void>;
-      selectAgentPANEL: (projectId: string, taskId: string, agentId: string) => Promise<void>;
       saveAgentFile: (payload: SaveAgentFilePayload) => Promise<ProjectSnapshot>;
       saveTopology: (payload: UpdateTopologyPayload) => Promise<ProjectSnapshot>;
       getTaskRuntime: (payload: GetTaskRuntimePayload) => Promise<AgentRuntimeSnapshot[]>;

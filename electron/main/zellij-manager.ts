@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn, type SpawnOptions } from "node:child_process";
 import { promisify } from "node:util";
 import type { TaskPanelRecord } from "@shared/types";
 
@@ -45,21 +45,8 @@ export class ZellijManager {
     return sessionName;
   }
 
-  async openTaskSession(sessionName: string, _cwd: string): Promise<void> {
-    if (process.platform === "darwin") {
-      spawn("open", ["-na", "Terminal", "--args", "zellij", "attach", sessionName, "--create"], {
-        detached: true,
-        stdio: "ignore",
-      }).unref();
-      return;
-    }
-
-    if (process.platform === "linux") {
-      spawn("x-terminal-emulator", ["-e", "zellij", "attach", sessionName, "--create"], {
-        detached: true,
-        stdio: "ignore",
-      }).unref();
-    }
+  async openTaskSession(sessionName: string, cwd: string): Promise<void> {
+    await this.openSessionInTerminal(sessionName, cwd);
   }
 
   async deleteTaskSession(sessionName: string | null | undefined): Promise<void> {
@@ -251,13 +238,7 @@ export class ZellijManager {
       "focus-pane-id",
       panel.paneId,
     ]).catch(() => undefined);
-
-    if (process.platform === "darwin") {
-      spawn("open", ["-na", "Terminal", "--args", "zellij", "attach", panel.sessionName], {
-        detached: true,
-        stdio: "ignore",
-      }).unref();
-    }
+    await this.openSessionInTerminal(panel.sessionName, panel.cwd);
   }
 
   async syncRunningAgentLayout(
@@ -564,6 +545,103 @@ export class ZellijManager {
 
   private sanitizePathSegment(value: string): string {
     return value.replace(/[^a-zA-Z0-9._-]/g, "_");
+  }
+
+  private async openSessionInTerminal(sessionName: string, cwd: string): Promise<void> {
+    const attachArgs = ["attach", sessionName, "--create"];
+
+    if (process.platform === "darwin") {
+      await this.openMacTerminalCommand(["zellij", ...attachArgs]);
+      return;
+    }
+
+    if (process.platform === "win32") {
+      const openedWithWindowsTerminal = await this.spawnDetachedProcess(
+        "wt",
+        ["new-window", "--startingDirectory", cwd, "zellij", ...attachArgs],
+        { cwd, windowsHide: false },
+      );
+      if (openedWithWindowsTerminal) {
+        return;
+      }
+
+      await this.spawnDetachedProcess("cmd.exe", ["/k", "zellij", ...attachArgs], {
+        cwd,
+        windowsHide: false,
+      });
+      return;
+    }
+
+    const linuxOpeners: Array<{ command: string; args: string[] }> = [
+      {
+        command: "x-terminal-emulator",
+        args: ["-e", "zellij", ...attachArgs],
+      },
+      {
+        command: "gnome-terminal",
+        args: ["--", "zellij", ...attachArgs],
+      },
+      {
+        command: "konsole",
+        args: ["-e", "zellij", ...attachArgs],
+      },
+      {
+        command: "xterm",
+        args: ["-e", "zellij", ...attachArgs],
+      },
+    ];
+
+    for (const opener of linuxOpeners) {
+      const opened = await this.spawnDetachedProcess(opener.command, opener.args, { cwd });
+      if (opened) {
+        return;
+      }
+    }
+  }
+
+  private async openMacTerminalCommand(command: string[]) {
+    const terminalCommand = command.map((part) => this.shellQuote(part)).join(" ");
+    const appleScript = [
+      'tell application "Terminal"',
+      "activate",
+      `do script ${JSON.stringify(terminalCommand)}`,
+      "end tell",
+    ];
+
+    await this.spawnDetachedProcess("osascript", appleScript.flatMap((line) => ["-e", line]));
+  }
+
+  private spawnDetachedProcess(
+    command: string,
+    args: string[],
+    options: Omit<SpawnOptions, "detached" | "stdio"> = {},
+  ): Promise<boolean> {
+    return new Promise((resolve) => {
+      let settled = false;
+      const child = spawn(command, args, {
+        ...options,
+        detached: true,
+        stdio: "ignore",
+      });
+
+      const finalize = (opened: boolean) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (opened) {
+          child.unref();
+        }
+        resolve(opened);
+      };
+
+      child.once("spawn", () => finalize(true));
+      child.once("error", () => finalize(false));
+    });
+  }
+
+  private shellQuote(value: string): string {
+    return `'${value.replace(/'/g, `'\\''`)}'`;
   }
 
   private normalizeAgentName(value: string): string {

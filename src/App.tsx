@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AgentConfigModal } from "./components/AgentConfigModal";
 import { ChatWindow } from "./components/ChatWindow";
 import { SidebarList } from "./components/SidebarList";
 import { TopologyGraph } from "./components/TopologyGraph";
+import { getAgentColorToken } from "./lib/agent-colors";
 import { useAgentFlowStore } from "./store/useAgentFlowStore";
-import { isBuiltinAgentPath } from "@shared/types";
-import type { AgentRuntimeSnapshot, MessageRecord, TaskSnapshot } from "@shared/types";
+import { isBuiltinAgentPath, resolveTopologyAgentOrder } from "@shared/types";
+import type { AgentRuntimeSnapshot, MessageRecord, TaskSnapshot, TopologyRecord } from "@shared/types";
 
 interface OptimisticSubmission {
   id: string;
@@ -21,14 +22,17 @@ function getAgentDisplayName(name: string) {
   return name.replace(/-Agent$/i, "");
 }
 
-function compareAgentDisplayOrder(left: { name: string }, right: { name: string }) {
-  if (left.name === "build" && right.name !== "build") {
-    return -1;
+function moveItemBefore(items: string[], sourceId: string, targetId: string) {
+  if (sourceId === targetId) {
+    return items;
   }
-  if (left.name !== "build" && right.name === "build") {
-    return 1;
+  const next = items.filter((item) => item !== sourceId);
+  const targetIndex = next.indexOf(targetId);
+  if (targetIndex < 0) {
+    return items;
   }
-  return left.name.localeCompare(right.name);
+  next.splice(targetIndex, 0, sourceId);
+  return next;
 }
 
 function getAgentStatusClassName(status: string) {
@@ -50,20 +54,6 @@ function getAgentMetricLabel(messageCount: number) {
   return `消息 · ${messageCount}`;
 }
 
-function getAgentKindMeta(isBuiltin: boolean) {
-  return isBuiltin
-    ? {
-        label: "Built-in",
-        badgeClassName: "border border-sky-200/90 bg-sky-100/90 text-sky-700",
-        rowClassName: "border-sky-200/70 bg-sky-50/65",
-      }
-    : {
-        label: "Custom",
-        badgeClassName: "border border-amber-200/90 bg-amber-100/90 text-amber-800",
-        rowClassName: "border-amber-200/70 bg-amber-50/55",
-      };
-}
-
 function App() {
   const {
     projects,
@@ -82,6 +72,9 @@ function App() {
   const [runtimeSnapshots, setRuntimeSnapshots] = useState<Record<string, AgentRuntimeSnapshot>>(
     {},
   );
+  const [draggingAgentId, setDraggingAgentId] = useState<string | null>(null);
+  const [dragOverAgentId, setDragOverAgentId] = useState<string | null>(null);
+  const suppressNextAgentCardClickRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -155,6 +148,18 @@ function App() {
     }
 
     const taskAgents = new Map(activeTaskView?.agents.map((agent) => [agent.name, agent]) ?? []);
+    const orderedAgentNames = resolveTopologyAgentOrder(
+      activeProject.agentFiles.map((agentFile) => ({
+        name: agentFile.name,
+        mode: agentFile.mode,
+        role: agentFile.role,
+        relativePath: agentFile.relativePath,
+      })),
+      activeProject.topology.agentOrderIds,
+      activeProject.topology.rootAgentId,
+    );
+    const orderIndex = new Map(orderedAgentNames.map((agentName, index) => [agentName, index]));
+
     return activeProject.agentFiles
       .map((agentFile) => {
         const runtime = taskAgents.get(agentFile.name);
@@ -173,8 +178,20 @@ function App() {
           isBuiltin: isBuiltinAgentPath(agentFile.relativePath),
         };
       })
-      .sort(compareAgentDisplayOrder);
+      .sort((left, right) => {
+        const leftIndex = orderIndex.get(left.name) ?? Number.MAX_SAFE_INTEGER;
+        const rightIndex = orderIndex.get(right.name) ?? Number.MAX_SAFE_INTEGER;
+        if (leftIndex !== rightIndex) {
+          return leftIndex - rightIndex;
+        }
+        return left.name.localeCompare(right.name);
+      });
   }, [activeProject, activeTaskView, runtimeSnapshots]);
+
+  useEffect(() => {
+    setDraggingAgentId(null);
+    setDragOverAgentId(null);
+  }, [activeProject?.project.id, activeTaskView?.task.id]);
 
   const panelMappings = activeTaskView?.panels ?? [];
   const runtimePollKey = useMemo(
@@ -237,6 +254,65 @@ function App() {
       }
     };
   }, [activeProject, activeTaskView, runtimePollKey]);
+
+  async function saveAgentOrder(nextOrderIds: string[]) {
+    if (!activeProject) {
+      return;
+    }
+
+    const validAgentNames = new Set(activeProject.agentFiles.map((agent) => agent.name));
+    const normalizedOrderIds = nextOrderIds.filter((agentName) => validAgentNames.has(agentName));
+    const currentOrderIds = resolveTopologyAgentOrder(
+      activeProject.agentFiles.map((agent) => ({
+        name: agent.name,
+        mode: agent.mode,
+        role: agent.role,
+        relativePath: agent.relativePath,
+      })),
+      activeProject.topology.agentOrderIds,
+      activeProject.topology.rootAgentId,
+    );
+    if (normalizedOrderIds.join("|") === currentOrderIds.join("|")) {
+      return;
+    }
+
+    const nodeById = new Map(activeProject.topology.nodes.map((node) => [node.id, node]));
+    const nextTopology: TopologyRecord = {
+      ...activeProject.topology,
+      agentOrderIds: normalizedOrderIds,
+      nodes: normalizedOrderIds.map(
+        (agentName) =>
+          nodeById.get(agentName) ?? {
+            id: agentName,
+            label: agentName,
+            kind: "agent",
+          },
+      ),
+    };
+
+    await window.agentFlow.saveTopology({
+      projectId: activeProject.project.id,
+      topology: nextTopology,
+    });
+  }
+
+  async function handleAgentCardDrop(targetAgentId: string) {
+    if (!draggingAgentId || draggingAgentId === targetAgentId) {
+      setDraggingAgentId(null);
+      setDragOverAgentId(null);
+      return;
+    }
+
+    const currentOrderIds = agentCards.map((agent) => agent.name);
+    const nextOrderIds = moveItemBefore(currentOrderIds, draggingAgentId, targetAgentId);
+    suppressNextAgentCardClickRef.current = true;
+    await saveAgentOrder(nextOrderIds);
+    setDraggingAgentId(null);
+    setDragOverAgentId(null);
+    window.setTimeout(() => {
+      suppressNextAgentCardClickRef.current = false;
+    }, 0);
+  }
 
   return (
     <>
@@ -343,64 +419,108 @@ function App() {
                   />
                 </div>
 
-              <aside className="PANEL-surface flex min-h-0 flex-col overflow-hidden rounded-[10px] p-4">
-                <div className="mb-3 flex items-start justify-between gap-3">
-                  <div>
-                    <p className="font-display text-[1.45rem] font-bold text-primary">
-                      团队成员 {agentCards.length > 0 ? agentCards.length : ""}
-                    </p>
+                <aside className="PANEL-surface flex min-h-0 flex-col overflow-hidden rounded-[10px]">
+                  <div className="min-h-[34px] border-b border-border/60 px-4 py-2">
+                    <div className="flex h-full items-center justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2.5">
+                          <p className="font-display text-[1.45rem] font-bold text-primary">团队成员</p>
+                          <span className="rounded-full bg-[#c96f3b] px-2.5 py-0.5 text-xs font-semibold text-white">
+                            {agentCards.length}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                </div>
 
-                <div className="mb-3 flex flex-wrap gap-2">
-                  <span className="rounded-[6px] bg-card px-3 py-1 text-[11px] text-foreground/80">
-                    {activeTaskView ? `当前 Task · ${activeTaskView.task.title}` : "当前还没有选中 Task"}
-                  </span>
-                  {activeTaskView && (
+                <div className="px-4 pb-4 pt-3">
+                  <div className="mb-3 flex flex-wrap gap-2">
                     <span className="rounded-[6px] bg-card px-3 py-1 text-[11px] text-foreground/80">
-                      入口 {getAgentDisplayName(activeTaskView.task.entryAgentId)}
+                      {activeTaskView ? `当前 Task · ${activeTaskView.task.title}` : "当前还没有选中 Task"}
                     </span>
-                  )}
-                  <span className="rounded-[6px] bg-card px-3 py-1 text-[11px] text-foreground/80">
-                    {panelMappings.length > 0
-                      ? `${panelMappings.length} 个 panel 已绑定`
-                      : "当前还没有 panel 绑定记录"}
-                  </span>
-                </div>
+                    {activeTaskView && (
+                      <span className="rounded-[6px] bg-card px-3 py-1 text-[11px] text-foreground/80">
+                        入口 {getAgentDisplayName(activeTaskView.task.entryAgentId)}
+                      </span>
+                    )}
+                    <span className="rounded-[6px] bg-card px-3 py-1 text-[11px] text-foreground/80">
+                      {panelMappings.length > 0
+                        ? `${panelMappings.length} 个 panel 已绑定`
+                        : "当前还没有 panel 绑定记录"}
+                    </span>
+                  </div>
 
-                <div className="min-h-0 overflow-y-auto rounded-[8px] border border-border/60 bg-card/80 px-2">
+                <div className="min-h-0 overflow-y-auto rounded-[8px] border border-border/60 bg-card/80 p-2">
                   {agentCards.map((agent) => {
                     const mappedPanel = panelMappings.find((panel) => panel.agentName === agent.name);
-                    const kindMeta = getAgentKindMeta(agent.isBuiltin);
+                    const agentColor = getAgentColorToken(agent.name);
+                    const isDragging = draggingAgentId === agent.name;
+                    const isDragOver = dragOverAgentId === agent.name && draggingAgentId !== agent.name;
                     return (
                     <button
                       key={agent.id}
                       type="button"
+                      draggable
+                      onDragStart={(event) => {
+                        setDraggingAgentId(agent.name);
+                        setDragOverAgentId(agent.name);
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("text/plain", agent.name);
+                      }}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = "move";
+                        if (dragOverAgentId !== agent.name) {
+                          setDragOverAgentId(agent.name);
+                        }
+                      }}
+                      onDrop={async (event) => {
+                        event.preventDefault();
+                        await handleAgentCardDrop(agent.name);
+                      }}
+                      onDragEnd={() => {
+                        setDraggingAgentId(null);
+                        setDragOverAgentId(null);
+                      }}
                       onClick={() => {
+                        if (suppressNextAgentCardClickRef.current) {
+                          return;
+                        }
                         if (!agent.relativePath.startsWith("builtin://")) {
                           setAgentConfigPath(agent.relativePath);
                           setAgentConfigOpen(true);
                         }
                       }}
-                      className={`flex w-full items-center gap-3 border-b px-3 py-3 text-left transition last:border-b-0 ${
-                        kindMeta.rowClassName
-                      } ${agent.relativePath.startsWith("builtin://") ? "" : "hover:brightness-[0.99]"}`}
+                      className={`mb-2 flex w-full cursor-grab items-center gap-3 rounded-[8px] border px-3 py-3 text-left transition active:cursor-grabbing last:mb-0 ${
+                        agent.relativePath.startsWith("builtin://") ? "" : "hover:brightness-[0.99]"
+                      }`}
+                      style={{
+                        background: agentColor.soft,
+                        borderColor: isDragOver ? agentColor.solid : agentColor.border,
+                        boxShadow: isDragOver
+                          ? `0 0 0 2px ${agentColor.solid}55 inset`
+                          : isDragging
+                            ? `0 14px 26px ${agentColor.solid}22`
+                            : undefined,
+                        opacity: isDragging ? 0.72 : 1,
+                      }}
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex min-w-0 items-center justify-between gap-3">
                           <div className="min-w-0 flex-1 py-1">
                             <div className="flex min-w-0 flex-wrap items-center gap-2">
-                              <p className="min-w-0 break-all text-[15px] font-semibold leading-5 text-foreground">
+                              <p
+                                className="min-w-0 break-all text-[15px] font-semibold leading-5"
+                                style={{ color: agentColor.text }}
+                              >
                                 {agent.displayName}
                               </p>
-                              <span
-                                className={`shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-semibold tracking-[0.06em] ${kindMeta.badgeClassName}`}
-                              >
-                                {kindMeta.label}
-                              </span>
                             </div>
                             {mappedPanel && (
-                              <div className="mt-1 break-all text-[11px] text-muted-foreground">
+                              <div
+                                className="mt-1 break-all text-[11px]"
+                                style={{ color: agentColor.mutedText }}
+                              >
                                 {mappedPanel.paneId}
                               </div>
                             )}
@@ -412,22 +532,6 @@ function App() {
                             >
                               {getAgentMetricLabel(agent.messageCount)}
                             </span>
-                            {activeTaskView && mappedPanel && (
-                              <button
-                                type="button"
-                                className="rounded-[6px] border border-border/60 bg-white/80 px-2.5 py-1 text-[11px] text-foreground/80 transition hover:border-primary"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  void window.agentFlow.selectAgentPANEL(
-                                    activeProject!.project.id,
-                                    activeTaskView.task.id,
-                                    agent.name,
-                                  );
-                                }}
-                              >
-                                PANEL
-                              </button>
-                            )}
                           </div>
                         </div>
                       </div>
@@ -440,6 +544,7 @@ function App() {
                       先创建或选择一个 Project。
                     </div>
                   )}
+                </div>
                 </div>
                 </aside>
               </div>

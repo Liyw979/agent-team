@@ -35,6 +35,7 @@ export interface OpenCodeNormalizedMessage {
 export interface OpenCodeExecutionResult {
   status: "completed" | "error";
   finalMessage: string;
+  fallbackMessage: string | null;
   messageId: string;
   timestamp: string;
   rawMessage: OpenCodeNormalizedMessage;
@@ -56,6 +57,9 @@ export interface OpenCodeSessionRuntime {
   activeToolNames: string[];
   activities: OpenCodeRuntimeActivity[];
 }
+
+const MAX_RUNTIME_MESSAGES = 100;
+const MAX_RUNTIME_ACTIVITIES = 24;
 
 interface SessionWaiter {
   sessionId: string;
@@ -215,6 +219,7 @@ export class OpenCodeClient {
       return {
         status: submitted.error ? "error" : "completed",
         finalMessage: submitted.content,
+        fallbackMessage: submitted.content.trim() || null,
         messageId: submitted.id,
         timestamp: submitted.completedAt ?? submitted.timestamp,
         rawMessage: submitted,
@@ -233,9 +238,12 @@ export class OpenCodeClient {
       (await this.getLatestAssistantMessage(projectPath, sessionId)) ??
       submitted;
 
+    const runtime = await this.getSessionRuntime(projectPath, sessionId).catch(() => null);
+
     return {
       status: latest.error ? "error" : "completed",
       finalMessage: latest.content || latest.error || "",
+      fallbackMessage: this.pickFallbackMessage(latest.content || latest.error || "", runtime?.activities ?? []),
       messageId: latest.id,
       timestamp: latest.completedAt ?? latest.timestamp,
       rawMessage: latest,
@@ -258,11 +266,8 @@ export class OpenCodeClient {
       };
     }
 
-    const response = await this.request(`/session/${sessionId}/message`, {
-      method: "GET",
-      projectPath,
-    });
-    if (!response.ok) {
+    const list = await this.listSessionMessages(projectPath, sessionId, MAX_RUNTIME_MESSAGES);
+    if (list.length === 0) {
       return {
         sessionId,
         messageCount: 0,
@@ -272,9 +277,6 @@ export class OpenCodeClient {
         activities: [],
       };
     }
-
-    const raw = (await response.json()) as unknown;
-    const list = Array.isArray(raw) ? raw : [];
     return this.buildRuntimeSnapshot(sessionId, list);
   }
 
@@ -542,8 +544,15 @@ export class OpenCodeClient {
     return this.normalizeMessageEnvelope((await response.json()) as Record<string, unknown>, "assistant");
   }
 
-  private async listSessionMessages(projectPath: string, sessionId: string): Promise<unknown[]> {
-    const response = await this.request(`/session/${sessionId}/message`, {
+  private async listSessionMessages(
+    projectPath: string,
+    sessionId: string,
+    limit?: number,
+  ): Promise<unknown[]> {
+    const pathname = limit
+      ? `/session/${sessionId}/message?limit=${limit}`
+      : `/session/${sessionId}/message`;
+    const response = await this.request(pathname, {
       method: "GET",
       projectPath,
     });
@@ -624,7 +633,7 @@ export class OpenCodeClient {
     const toolNames: string[] = [];
     const seen = new Set<string>();
 
-    for (let messageIndex = messages.length - 1; messageIndex >= 0 && activities.length < 8; messageIndex -= 1) {
+    for (let messageIndex = 0; messageIndex < messages.length; messageIndex += 1) {
       const raw = messages[messageIndex];
       const normalized = this.normalizeMessageEnvelope(raw, "assistant");
       if (normalized.sender === "user") {
@@ -658,19 +667,25 @@ export class OpenCodeClient {
             toolNames.push(toolName);
           }
         }
-        if (activities.length >= 8) {
-          break;
-        }
       }
     }
+
+    const recentActivities = activities.slice(-MAX_RUNTIME_ACTIVITIES);
+    const latestActivity = recentActivities.at(-1) ?? null;
+    const recentToolNames = recentActivities
+      .filter((activity) => activity.kind === "tool")
+      .map((activity) => activity.label.replace(/^tool:\s*/i, "").trim())
+      .filter((toolName, index, all) => Boolean(toolName) && all.indexOf(toolName) === index)
+      .slice(-2)
+      .reverse();
 
     return {
       sessionId,
       messageCount: messages.length,
-      updatedAt: activities[0]?.timestamp ?? null,
-      headline: activities[0]?.detail ?? null,
-      activeToolNames: toolNames.slice(0, 2),
-      activities,
+      updatedAt: latestActivity?.timestamp ?? null,
+      headline: latestActivity?.detail ?? null,
+      activeToolNames: recentToolNames.length > 0 ? recentToolNames : toolNames.slice(-2).reverse(),
+      activities: recentActivities,
     };
   }
 
@@ -703,12 +718,12 @@ export class OpenCodeClient {
     const detail = this.extractPartDetail(part);
 
     if (toolName) {
-      const toolDetail = this.extractToolCallDetail(part) || detail;
+      const toolDetail = this.extractToolCallDetail(part);
       return {
         id: `${message.id}:${messageIndex}:${partIndex}:tool`,
         kind: "tool",
-        label: `tool: ${toolName}`,
-        detail: toolDetail || `正在调用 ${toolName}`,
+        label: toolName,
+        detail: toolDetail || "未获取到调用参数",
         timestamp,
       };
     }
@@ -734,6 +749,29 @@ export class OpenCodeClient {
       detail,
       timestamp,
     };
+  }
+
+  private pickFallbackMessage(finalMessage: string, activities: OpenCodeRuntimeActivity[]): string | null {
+    const normalizedFinal = finalMessage.trim();
+    if (normalizedFinal && !/^【DECISION】/u.test(normalizedFinal)) {
+      return normalizedFinal;
+    }
+
+    for (const activity of activities) {
+      if (activity.kind === "tool") {
+        continue;
+      }
+      const detail = activity.detail.trim();
+      if (!detail) {
+        continue;
+      }
+      if (/^【DECISION】/u.test(detail)) {
+        continue;
+      }
+      return detail;
+    }
+
+    return null;
   }
 
   private extractToolName(part: Record<string, unknown>): string | null {
@@ -786,18 +824,114 @@ export class OpenCodeClient {
   private extractToolCallDetail(part: Record<string, unknown>): string {
     const callRecord = this.asRecord(part.call);
     const toolRecord = this.asRecord(part.tool);
+    const metadataRecord = this.asRecord(part.metadata);
+    const stateRecord = this.asRecord(part.state);
     const argsValue =
       part.input ??
       part.args ??
       part.arguments ??
+      part.payload ??
+      part.options ??
+      part.params ??
+      part.data ??
+      part.body ??
       callRecord.input ??
       callRecord.args ??
       callRecord.arguments ??
+      callRecord.payload ??
+      callRecord.options ??
+      callRecord.params ??
+      callRecord.data ??
+      callRecord.body ??
       toolRecord.input ??
       toolRecord.args ??
-      toolRecord.arguments;
-    const summary = this.extractStructuredDetail(argsValue);
+      toolRecord.arguments ??
+      toolRecord.payload ??
+      toolRecord.options ??
+      toolRecord.params ??
+      toolRecord.data ??
+      toolRecord.body ??
+      metadataRecord.input ??
+      metadataRecord.args ??
+      metadataRecord.arguments ??
+      metadataRecord.payload ??
+      metadataRecord.options ??
+      metadataRecord.params ??
+      metadataRecord.data ??
+      metadataRecord.body ??
+      stateRecord.input ??
+      stateRecord.args ??
+      stateRecord.arguments ??
+      stateRecord.payload ??
+      stateRecord.options ??
+      stateRecord.params ??
+      stateRecord.data ??
+      stateRecord.body;
+    const summary = this.extractStructuredArgsDetail(argsValue);
     return summary ? `参数: ${summary}` : "";
+  }
+
+  private extractStructuredArgsDetail(value: unknown, depth = 0): string {
+    if (value == null || depth > 4) {
+      return "";
+    }
+
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return "";
+      }
+      if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+        try {
+          return this.extractStructuredArgsDetail(JSON.parse(trimmed), depth + 1);
+        } catch {
+          return this.shortenText(trimmed, 160);
+        }
+      }
+      return this.shortenText(trimmed, 160);
+    }
+
+    if (typeof value === "number" || typeof value === "boolean") {
+      return String(value);
+    }
+
+    if (Array.isArray(value)) {
+      const items = value
+        .map((item) => this.extractStructuredArgsDetail(item, depth + 1))
+        .filter(Boolean)
+        .slice(0, 6);
+      return items.length > 0 ? this.shortenText(`[${items.join(", ")}]`, 180) : "";
+    }
+
+    const record = this.asRecord(value);
+    const preferredEntries = Object.entries(record)
+      .filter(([key, item]) => {
+        if (item == null || item === "") {
+          return false;
+        }
+        return !["output", "result", "response", "summary", "reasoning"].includes(key);
+      })
+      .slice(0, 6)
+      .map(([key, item]) => {
+        const summarized = this.extractStructuredArgsDetail(item, depth + 1);
+        return summarized ? `${key}=${summarized}` : "";
+      })
+      .filter(Boolean);
+
+    if (preferredEntries.length > 0) {
+      return this.shortenText(preferredEntries.join(", "), 220);
+    }
+
+    for (const key of ["input", "args", "arguments", "payload", "options", "params", "data", "body"]) {
+      if (key in record) {
+        const nested = this.extractStructuredArgsDetail(record[key], depth + 1);
+        if (nested) {
+          return nested;
+        }
+      }
+    }
+
+    return "";
   }
 
   private extractStructuredDetail(value: unknown, depth = 0): string {

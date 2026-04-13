@@ -14,12 +14,12 @@ const DEFAULT_AGENT_TEMPLATES: Record<string, string> = {
   "BA.md": `---
 mode: primary
 role: business_analyst
-tools:
-  read: true
-  grep: true
-  glob: true
-  list: true
-  webfetch: true
+permission:
+  read: allow
+  grep: allow
+  glob: allow
+  list: allow
+  webfetch: allow
 ---
 你是 BA。
 你的职责：
@@ -31,11 +31,11 @@ tools:
   "CodeReview.md": `---
 mode: subagent
 role: code_review
-tools:
-  read: true
-  grep: true
-  glob: true
-  list: true
+permission:
+  read: allow
+  grep: allow
+  glob: allow
+  list: allow
 ---
 你是代码审查角色，关注冗余实现、可读性和是否符合 BA 定义的使用旅程。
 
@@ -46,11 +46,11 @@ tools:
   "DocsReview.md": `---
 mode: subagent
 role: docs_review
-tools:
-  read: true
-  grep: true
-  glob: true
-  list: true
+permission:
+  read: allow
+  grep: allow
+  glob: allow
+  list: allow
 ---
 你是文档审查角色，负责检查当前改动是否已经同步反映到 README.md、AGENTS.md 和其他协作文档。
 
@@ -59,11 +59,11 @@ tools:
   "IntegrationTest.md": `---
 mode: subagent
 role: integration_test
-tools:
-  read: true
-  grep: true
-  glob: true
-  list: true
+permission:
+  read: allow
+  grep: allow
+  glob: allow
+  list: allow
 ---
 你是集成测试审查角色，负责检查实现是否提供了覆盖充分、可直接执行通过的集成测试。
 
@@ -72,11 +72,11 @@ tools:
   "UnitTest.md": `---
 mode: subagent
 role: unit_test
-tools:
-  read: true
-  grep: true
-  glob: true
-  list: true
+permission:
+  read: allow
+  grep: allow
+  glob: allow
+  list: allow
 ---
 你是单元测试审查角色，负责检查单元测试是否遵循四条标准：单功能单测试、每个测试有注释、执行要快、尽量使用纯函数而不是 Mock。
 
@@ -114,12 +114,6 @@ function sortToolPermissions(tools: ToolPermission[]): ToolPermission[] {
 }
 
 function normalizePermissionMode(value: unknown): PermissionMode | null {
-  if (value === true || value === "true") {
-    return "allow";
-  }
-  if (value === false || value === "false") {
-    return "deny";
-  }
   if (typeof value !== "string") {
     return null;
   }
@@ -132,16 +126,6 @@ function normalizePermissionMode(value: unknown): PermissionMode | null {
 }
 
 function toPermissionList(rawTools: unknown): ToolPermission[] {
-  if (Array.isArray(rawTools)) {
-    const unique = new Set(rawTools.filter((item): item is string => typeof item === "string"));
-    return sortToolPermissions(
-      [...unique].map((name) => ({
-        name,
-        mode: DEFAULT_TOOL_MODE_MAP.get(name) ?? "allow",
-      })),
-    );
-  }
-
   if (rawTools && typeof rawTools === "object") {
     const permissions = Object.entries(rawTools as Record<string, unknown>)
       .map(([name, value]) => {
@@ -280,7 +264,7 @@ function buildAgentRecord(projectId: string, projectPath: string, absolutePath: 
     absolutePath,
     mode,
     role: typeof parsed.data.role === "string" ? parsed.data.role : null,
-    tools: toPermissionList(parsed.data.tools),
+    tools: toPermissionList(parsed.data.permission),
     prompt: parsed.prompt,
     content,
   };

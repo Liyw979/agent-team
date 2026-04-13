@@ -123,6 +123,7 @@ function MessageBubble({ message }: { message: MessageRecord }) {
   const isAgent = !isUser && !isSystem;
   const kind = message.meta?.kind;
   const agentColor = isAgent ? getAgentColorToken(message.sender) : null;
+  const senderLabel = isUser ? "User" : isAgent ? getAgentDisplayName(message.sender) : message.sender;
   const badge =
     kind === "high-level-trigger"
       ? "Agent -> Agent"
@@ -152,12 +153,22 @@ function MessageBubble({ message }: { message: MessageRecord }) {
           background: agentColor.solid,
           color: agentColor.badgeText,
         }
+      : isUser
+        ? {
+            background: "#D8C27A",
+            color: "#43350D",
+            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.22)",
+          }
       : undefined;
   const metaTextStyle =
     isAgent && agentColor
       ? {
           color: agentColor.mutedText,
         }
+      : isUser
+        ? {
+            color: "rgba(247, 251, 249, 0.8)",
+          }
       : undefined;
 
   return (
@@ -181,11 +192,12 @@ function MessageBubble({ message }: { message: MessageRecord }) {
           <span
             className={cn(
               "shrink-0 rounded-full px-2.5 py-0.5 font-semibold tracking-[0.02em]",
-              !isAgent && "bg-black/8 text-current",
+              isUser && "border border-white/10",
+              !isAgent && !isUser && "bg-black/8 text-current",
             )}
             style={senderBadgeStyle}
           >
-            {message.sender}
+            {senderLabel}
           </span>
           {badge ? (
             <span className="truncate opacity-80" style={metaTextStyle}>
@@ -225,7 +237,13 @@ export function ChatWindow({
     }
   }, [task?.task.id]);
 
-  const messages = useMemo(() => task?.messages ?? [], [task]);
+  const messages = useMemo(
+    () =>
+      [...(task?.messages ?? [])].sort((left, right) =>
+        left.timestamp.localeCompare(right.timestamp),
+      ),
+    [task],
+  );
   const mentionOptions = useMemo(() => {
     if (!mentionContext) {
       return [];
@@ -314,7 +332,7 @@ export function ChatWindow({
 
   return (
     <section className="PANEL-surface flex h-full min-h-0 flex-col rounded-[10px]">
-      <header className="flex items-center justify-between gap-3 border-b border-border/60 px-5 py-3">
+      <header className="flex min-h-[34px] items-center justify-between gap-3 border-b border-border/60 px-5 py-2">
         <div className="flex items-center gap-2.5">
           <p className="font-display text-[1.45rem] font-bold text-primary">消息</p>
           <span className="rounded-full bg-[#c96f3b] px-2.5 py-0.5 text-xs font-semibold text-white">
@@ -351,7 +369,7 @@ export function ChatWindow({
           await handleSubmit();
         }}
       >
-        <div>
+        <div className="w-full">
           <div className="relative">
             <textarea
               ref={textareaRef}
@@ -406,7 +424,7 @@ export function ChatWindow({
                   ? "输入消息，按 @ 选择 Agent"
                   : `例如：@${preferredEntryAgent} 请先分析需求并推动实现。`
               }
-              className="no-drag block min-h-[92px] w-full resize-none rounded-[8px] border border-border bg-card px-4 py-3 text-sm leading-6 outline-none transition focus:border-primary"
+              className="no-drag block min-h-[68px] w-full resize-none rounded-[8px] border border-border bg-card px-4 py-2.5 text-sm leading-6 outline-none transition focus:border-primary"
             />
 
             {mentionContext && mentionOptions.length > 0 && (

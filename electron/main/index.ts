@@ -169,17 +169,6 @@ app.whenReady().then(async () => {
     (_event, payload: OpenTaskSessionPayload) => orchestrator.openTaskSession(payload),
   );
   ipcMain.handle(
-    IPC_CHANNELS.selectAgentPANEL,
-    (
-      _event,
-      {
-        projectId,
-        taskId,
-        agentId,
-      }: { projectId: string; taskId: string; agentId: string },
-    ) => orchestrator.focusAgentPANEL(projectId, taskId, agentId),
-  );
-  ipcMain.handle(
     IPC_CHANNELS.saveAgentFile,
     (_event, payload: SaveAgentFilePayload) => orchestrator.saveAgentFile(payload),
   );

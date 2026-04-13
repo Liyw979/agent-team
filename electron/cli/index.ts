@@ -147,7 +147,7 @@ function printAgentList(agentFiles: AgentFileRecord[]) {
         `- ${agent.name}`,
         `  path: ${isBuiltinAgent(agent) ? "OpenCode built-in agent" : agent.relativePath}`,
         `  mode: ${agent.mode}`,
-        `  tools: ${agent.tools.map((tool) => `${tool.name}:${tool.mode}`).join(", ")}`,
+        `  permission: ${agent.tools.map((tool) => `${tool.name}:${tool.mode}`).join(", ")}`,
         `  prompt: ${summarizePrompt(agent.prompt) || (isBuiltinAgent(agent) ? "OpenCode 内置 build agent" : "-")}`,
       ].join("\n") + "\n",
     );
@@ -483,6 +483,11 @@ function buildHelp() {
   --plain         不进入 Zellij，回退到纯文本
   --json          输出 JSON
 
+触发语义：
+  success         当前 Agent 完成后自动触发下游
+  failed          当前 Agent 决策为“需要修改”时触发下游
+  manual          当前 Agent 显式指定 NEXT_AGENTS 时触发下游
+
 说明：
   - CLI 会直接复用 Orchestrator、文件存储、OpenCode client、Zellij manager 这套主逻辑。
   - 若当前目录尚未注册为 Project，涉及 Project 语义的命令会自动创建该 Project。
@@ -700,7 +705,7 @@ async function handleAgents(context: CliContext, parsed: ParsedArgv) {
     printKeyValue("Agent", agent.name);
     printKeyValue("Path", isBuiltinAgent(agent) ? "OpenCode built-in agent" : agent.relativePath);
     printKeyValue("Mode", agent.mode);
-    printKeyValue("Tools", agent.tools.map((tool) => `${tool.name}:${tool.mode}`).join(", "));
+    printKeyValue("Permission", agent.tools.map((tool) => `${tool.name}:${tool.mode}`).join(", "));
     printSection("Prompt");
     process.stdout.write(`${agent.prompt || "OpenCode 内置 build agent\n"}\n`);
     return;

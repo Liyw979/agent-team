@@ -1,9 +1,9 @@
 ---
 mode: primary
 role: business_analyst
-tools:
-  write: false
-  bash: false
+permission:
+  write: deny
+  bash: deny
 ---
 
 你是 BA。

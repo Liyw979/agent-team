@@ -25,8 +25,6 @@ const api = {
     ipcRenderer.invoke(IPC_CHANNELS.deleteTask, payload),
   openTaskSession: (payload: OpenTaskSessionPayload): Promise<void> =>
     ipcRenderer.invoke(IPC_CHANNELS.openTaskSession, payload),
-  selectAgentPANEL: (projectId: string, taskId: string, agentId: string): Promise<void> =>
-    ipcRenderer.invoke(IPC_CHANNELS.selectAgentPANEL, { projectId, taskId, agentId }),
   saveAgentFile: (payload: SaveAgentFilePayload): Promise<ProjectSnapshot> =>
     ipcRenderer.invoke(IPC_CHANNELS.saveAgentFile, payload),
   saveTopology: (payload: UpdateTopologyPayload): Promise<ProjectSnapshot> =>

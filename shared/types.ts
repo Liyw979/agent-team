@@ -111,6 +111,7 @@ export interface TopologyEdge {
 export interface TopologyRecord {
   projectId: string;
   rootAgentId: string | null;
+  agentOrderIds: string[];
   nodes: TopologyNode[];
   edges: TopologyEdge[];
 }
@@ -270,10 +271,59 @@ export function resolveTopologyRootAgent(
   );
 }
 
+export function resolveTopologyAgentOrder(
+  agents: Array<Pick<TopologyAgentSeed, "name" | "mode" | "role" | "relativePath">>,
+  preferredOrderIds?: string[] | null,
+  preferredRootAgentId?: string | null,
+): string[] {
+  const availableAgentNames = agents.map((agent) => agent.name);
+  const availableAgentSet = new Set(availableAgentNames);
+  const order: string[] = [];
+  const push = (name: string | null | undefined) => {
+    if (!name || !availableAgentSet.has(name) || order.includes(name)) {
+      return;
+    }
+    order.push(name);
+  };
+
+  for (const name of preferredOrderIds ?? []) {
+    push(name);
+  }
+
+  if (order.length === availableAgentNames.length) {
+    return order;
+  }
+
+  const rootAgentName = resolveTopologyRootAgent(agents, preferredRootAgentId);
+  const primaryAgents = agents.filter((agent) => agent.mode === "primary");
+  const builtinPrimaryAgents = primaryAgents.filter((agent) => isBuiltinAgentPath(agent.relativePath));
+  const implementationAgent =
+    findAgentByRole(agents as TopologyAgentSeed[], "implementation") ??
+    builtinPrimaryAgents[0] ??
+    primaryAgents.find((agent) => agent.name !== rootAgentName) ??
+    null;
+
+  push(rootAgentName);
+  push(implementationAgent?.name);
+  push(findAgentByRole(agents as TopologyAgentSeed[], "docs_review")?.name);
+  push(findAgentByRole(agents as TopologyAgentSeed[], "unit_test")?.name);
+  push(findAgentByRole(agents as TopologyAgentSeed[], "integration_test")?.name);
+  push(findAgentByRole(agents as TopologyAgentSeed[], "code_review")?.name);
+
+  for (const agent of primaryAgents) {
+    push(agent.name);
+  }
+  for (const agentName of availableAgentNames) {
+    push(agentName);
+  }
+
+  return order;
+}
+
 export function createDefaultTopology(projectId: string, agents: TopologyAgentSeed[]): TopologyRecord {
-  const agentNames = agents.map((agent) => agent.name);
-  const names = new Set(agentNames);
-  const nodes = agentNames.map(createNode);
+  const agentOrderIds = resolveTopologyAgentOrder(agents);
+  const names = new Set(agentOrderIds);
+  const nodes = agentOrderIds.map(createNode);
   const edges: TopologyEdge[] = [];
 
   const entryAgentName = resolveTopologyRootAgent(agents);
@@ -310,6 +360,7 @@ export function createDefaultTopology(projectId: string, agents: TopologyAgentSe
   return {
     projectId,
     rootAgentId: entryAgent?.name ?? null,
+    agentOrderIds,
     nodes,
     edges,
   };

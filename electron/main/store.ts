@@ -62,6 +62,7 @@ function createDefaultProjectState(projectId: string): ProjectStateFile {
     topology: {
       projectId,
       rootAgentId: null,
+      agentOrderIds: [],
       nodes: [],
       edges: [],
     },
@@ -409,6 +410,9 @@ export class StoreService {
               projectId,
               rootAgentId:
                 typeof parsed.topology.rootAgentId === "string" ? parsed.topology.rootAgentId : null,
+              agentOrderIds: Array.isArray(parsed.topology.agentOrderIds)
+                ? parsed.topology.agentOrderIds.filter((item): item is string => typeof item === "string")
+                : [],
               nodes: Array.isArray(parsed.topology.nodes) ? parsed.topology.nodes : [],
               edges: Array.isArray(parsed.topology.edges) ? parsed.topology.edges : [],
             }
@@ -455,6 +459,14 @@ export class StoreService {
                     typeof (topology as TopologyRecord).rootAgentId === "string"
                       ? (topology as TopologyRecord).rootAgentId
                       : null,
+                  agentOrderIds:
+                    topology &&
+                    typeof topology === "object" &&
+                    Array.isArray((topology as TopologyRecord).agentOrderIds)
+                      ? (topology as TopologyRecord).agentOrderIds.filter(
+                          (item): item is string => typeof item === "string",
+                        )
+                      : [],
                   nodes:
                     topology && typeof topology === "object" && Array.isArray((topology as TopologyRecord).nodes)
                       ? (topology as TopologyRecord).nodes
