@@ -90,8 +90,6 @@ const MAIN_FLOW_TOP_INSET = TOPOLOGY_EDGE_LANE_HEIGHT;
 const EXPANDED_FLOW_TOP_INSET = TOPOLOGY_EDGE_LANE_HEIGHT;
 const MAIN_FLOW_BOTTOM_INSET = 8;
 const EXPANDED_FLOW_BOTTOM_INSET = 10;
-const AGENT_HEADER_SIDE_PADDING = 10;
-const AGENT_HEADER_BADGE_RESERVED_WIDTH = 88;
 
 const preferredRoleRank: Partial<Record<AgentRole, number>> = {
   business_analyst: 0,
@@ -115,59 +113,6 @@ function getAgentDisplayName(name: string) {
 
 function getAgentBlockHeight(agentState: string) {
   return agentState === "running" ? 44 : 44;
-}
-
-function estimateAgentNameWidth(displayName: string, fontSize: number) {
-  return getDisplayWidthUnits(displayName) * 0.9 * fontSize;
-}
-
-function getAgentNameFontSize(
-  displayName: string,
-  nodeCardWidth: number,
-  options?: {
-    reserveBadgeSpace?: boolean;
-  },
-) {
-  const badgeReservedWidth = options?.reserveBadgeSpace ? AGENT_HEADER_BADGE_RESERVED_WIDTH : 0;
-  const availableWidth = Math.max(
-    92,
-    nodeCardWidth - AGENT_HEADER_SIDE_PADDING * 2 - badgeReservedWidth,
-  );
-  const widthUnits = Math.max(1, getDisplayWidthUnits(displayName));
-  const maxFontSize = nodeCardWidth >= 270 ? 17 : 15;
-  const computedFontSize = availableWidth / (widthUnits * 0.9);
-  return Math.max(9, Math.min(maxFontSize, computedFontSize));
-}
-
-function getAgentHeaderLayout(
-  displayName: string,
-  nodeCardWidth: number,
-  hasStatusBadge: boolean,
-) {
-  const centeredFontSize = getAgentNameFontSize(displayName, nodeCardWidth, {
-    reserveBadgeSpace: false,
-  });
-  const centeredSafeWidth = hasStatusBadge
-    ? Math.max(
-        48,
-        nodeCardWidth -
-          AGENT_HEADER_SIDE_PADDING * 2 -
-          AGENT_HEADER_BADGE_RESERVED_WIDTH * 2,
-      )
-    : Math.max(92, nodeCardWidth - AGENT_HEADER_SIDE_PADDING * 2);
-  const reserveBadgeSpace =
-    hasStatusBadge && estimateAgentNameWidth(displayName, centeredFontSize) > centeredSafeWidth;
-
-  return {
-    reserveBadgeSpace,
-    blockHeight: 44,
-    nameLeft: AGENT_HEADER_SIDE_PADDING,
-    nameWidth: reserveBadgeSpace
-      ? `calc(100% - ${
-          AGENT_HEADER_SIDE_PADDING + AGENT_HEADER_BADGE_RESERVED_WIDTH
-        }px)`
-      : `calc(100% - ${AGENT_HEADER_SIDE_PADDING * 2}px)`,
-  } as const;
 }
 
 function getAgentCardAppearance(
@@ -225,18 +170,17 @@ function getDisplayWidthUnits(value: string) {
   }, 0);
 }
 
-function getAgentNameStyle(
-  displayName: string,
-  nodeCardWidth: number,
-  options?: {
-    reserveBadgeSpace?: boolean;
-  },
-) {
-  const fontSize = getAgentNameFontSize(displayName, nodeCardWidth, options);
+function getAgentNameStyle(displayName: string, nodeCardWidth: number) {
+  const availableWidth = Math.max(108, nodeCardWidth - 40);
+  const widthUnits = Math.max(1, getDisplayWidthUnits(displayName));
+  const isShortName = widthUnits <= 2.2;
+  const maxFontSize = isShortName ? 16 : nodeCardWidth >= 270 ? 20 : 18;
+  const computedFontSize = availableWidth / (widthUnits * 0.9);
+  const fontSize = Math.max(14, Math.min(maxFontSize, computedFontSize));
 
   return {
     fontSize: `${fontSize}px`,
-    lineHeight: fontSize <= 16 ? 1.15 : 1.08,
+    lineHeight: fontSize <= 16 ? 1.05 : 1,
     letterSpacing: "0",
   } as const;
 }
@@ -277,11 +221,6 @@ function getAgentStatusBadge(agentName: string, agentState: string) {
   const reviewAgent = isReviewAgentName(agentName);
 
   switch (agentState) {
-    case "idle":
-      return {
-        label: "未启动",
-        className: "border border-[#c9d6ce]/85 bg-[#f7fbf8] text-[#5f7267]",
-      };
     case "running":
       return {
         label: "运行中",
@@ -303,10 +242,7 @@ function getAgentStatusBadge(agentName: string, agentState: string) {
         className: "border border-[#a95c42]/20 bg-[#fff0ea] text-[#8f4a34]",
       };
     default:
-      return {
-        label: "未启动",
-        className: "border border-[#c9d6ce]/85 bg-[#f7fbf8] text-[#5f7267]",
-      };
+      return null;
   }
 }
 
@@ -1141,7 +1077,6 @@ export function TopologyGraph({
     }
 
     return draft.nodes.map((node) => {
-      const displayName = getAgentDisplayName(node.label);
       const agentState = taskStatuses.get(node.id) ?? "idle";
       const agentColor = getAgentColorToken(node.id);
       const active = node.id === selectedAgentId;
@@ -1154,9 +1089,8 @@ export function TopologyGraph({
         targetPosition: Position.Left,
       };
       const runtime = agentState === "running" ? runtimeSnapshots[node.id] : undefined;
+      const agentBlockHeight = getAgentBlockHeight(agentState);
       const statusBadge = getAgentStatusBadge(node.id, agentState);
-      const headerLayout = getAgentHeaderLayout(displayName, nodeCardWidth, Boolean(statusBadge));
-      const agentBlockHeight = headerLayout.blockHeight;
       const historyItems = agentHistories.get(node.id) ?? [];
       const appearance = getAgentCardAppearance(agentState, agentColor);
       const visibleHistory =
@@ -1245,36 +1179,26 @@ export function TopologyGraph({
           label: (
             <div className="relative h-full w-full">
               <div
-                className="absolute inset-x-0 top-0 px-2.5 py-1 text-center"
+                className="absolute inset-x-0 top-0 flex flex-col justify-center px-2.5 py-0.5 text-center"
                 style={{
                   ...cardStyle,
                   minHeight: agentBlockHeight,
                   maxHeight: agentBlockHeight,
                 }}
               >
-                <div
-                  className="absolute left-2.5 top-0 bottom-0 flex items-center justify-center overflow-hidden"
-                  style={{
-                    left: headerLayout.nameLeft,
-                    width: headerLayout.nameWidth,
-                  }}
-                >
-                  <p
-                    className="whitespace-nowrap font-semibold"
-                    style={getAgentNameStyle(displayName, nodeCardWidth, {
-                      reserveBadgeSpace: headerLayout.reserveBadgeSpace,
-                    })}
-                  >
-                    {displayName}
-                  </p>
-                </div>
                 {statusBadge ? (
                   <span
-                    className={`absolute right-3 top-1/2 inline-flex min-h-7 -translate-y-1/2 shrink-0 items-center rounded-full px-3 py-1 text-[12px] font-semibold leading-none tracking-[0.01em] shadow-[0_1px_0_rgba(255,255,255,0.45)] ${statusBadge.className}`}
+                    className={`absolute right-3 top-1/2 inline-flex min-h-7 -translate-y-1/2 items-center rounded-full px-3 py-1 text-[12px] font-semibold leading-none tracking-[0.01em] shadow-[0_1px_0_rgba(255,255,255,0.45)] ${statusBadge.className}`}
                   >
                     {statusBadge.label}
                   </span>
                 ) : null}
+                <p
+                  className="mx-auto max-w-full break-all text-balance font-semibold"
+                  style={getAgentNameStyle(getAgentDisplayName(node.label), nodeCardWidth)}
+                >
+                  {getAgentDisplayName(node.label)}
+                </p>
               </div>
 
               <div

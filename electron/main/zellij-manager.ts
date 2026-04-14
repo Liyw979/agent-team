@@ -525,11 +525,17 @@ export class ZellijManager {
     const terminalCommand = ["zellij", ...attachArgs].map((part) => this.shellQuote(part)).join(" ");
     const startupCommand = `cd ${this.shellQuote(cwd)}; exec ${terminalCommand}`;
     const appleScript = [
-'tell application "Terminal"',
-"reopen",
-// Always create a fresh Terminal window so opening Zellij does not depend
-// on whether Terminal was already running or what the front window is.
-`do script ${JSON.stringify(startupCommand)}`,
+      'set terminalWasRunning to application "Terminal" is running',
+      'tell application "Terminal"',
+      'if terminalWasRunning then',
+      "if (count of windows) = 0 then",
+      "reopen",
+      "end if",
+      `do script ${JSON.stringify(startupCommand)} in front window`,
+      "else",
+      "reopen",
+      `do script ${JSON.stringify(startupCommand)} in window 1`,
+      "end if",
       "activate",
       "end tell",
       "delay 0.25",

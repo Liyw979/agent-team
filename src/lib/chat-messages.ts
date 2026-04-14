@@ -18,9 +18,44 @@ function isNonSystemAgent(sender: string | undefined) {
   return sender !== undefined && sender !== "user" && sender !== "system";
 }
 
+function stripTrailingMentions(content: string): string {
+  const trimmed = content.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const lines = trimmed.split(/\r?\n/);
+  while (lines.length > 0) {
+    const lastLine = lines.at(-1)?.trim() ?? "";
+    if (!/^(?:@\S+\s*)+$/u.test(lastLine)) {
+      break;
+    }
+    lines.pop();
+  }
+
+  return lines.join("\n").trim();
+}
+
+function stripRevisionFeedbackLabel(content: string): string {
+  return content.replace(/^具体修改意见[:：]\s*/u, "").trim();
+}
+
 function getRevisionRequestFeedback(content: string): string {
-  const match = content.match(/具体修改意见[:：]\s*([\s\S]*)$/);
-  return match?.[1]?.trim() ?? "";
+  const normalized = stripTrailingMentions(content);
+  const marker = /具体修改意见[:：]/gu;
+  let lastMatch: RegExpExecArray | null = null;
+  let match: RegExpExecArray | null = marker.exec(normalized);
+
+  while (match) {
+    lastMatch = match;
+    match = marker.exec(normalized);
+  }
+
+  if (!lastMatch) {
+    return "";
+  }
+
+  return normalized.slice(lastMatch.index + lastMatch[0].length).trim();
 }
 
 function hasMeaningfulText(value: string): boolean {
@@ -66,8 +101,19 @@ function buildMergedRevisionRequestContent(previous: ChatMessageItem, current: M
 
   const normalizedSummary = summary.replace(/\s+/g, " ").trim();
   const normalizedFeedback = feedback.replace(/\s+/g, " ").trim();
-  if (!normalizedSummary || normalizedSummary === normalizedFeedback) {
+  const normalizedSummaryFeedback = stripRevisionFeedbackLabel(summary)
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalizedSummary) {
     return formatRevisionRequestContent(feedback, current.meta?.targetAgentId);
+  }
+
+  if (
+    normalizedSummary === normalizedFeedback ||
+    normalizedSummaryFeedback === normalizedFeedback
+  ) {
+    return formatRevisionRequestContent(summary, current.meta?.targetAgentId);
   }
 
   return formatRevisionRequestContent(
