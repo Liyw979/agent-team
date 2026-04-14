@@ -16,6 +16,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "test": "tsx --test",
     "preview": "vite preview",
     "cli": "node electron/cli/launcher.cjs",
     "electron:dev": "electron-vite dev",

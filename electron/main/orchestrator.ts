@@ -52,6 +52,7 @@ interface OrchestratorOptions {
   userDataPath: string;
   autoOpenTaskSession?: boolean;
   enableEventStream?: boolean;
+  zellijManager?: ZellijManager;
 }
 
 interface ParsedSignal {
@@ -100,7 +101,7 @@ export class Orchestrator {
   private readonly agentFiles = new AgentFileService();
   private readonly opencodeClient: OpenCodeClient;
   private readonly opencodeRunner: OpenCodeRunner;
-  private readonly zellijManager = new ZellijManager();
+  private readonly zellijManager: ZellijManager;
   private readonly events = new EventEmitter();
   private readonly taskRuntime = new Map<string, TaskRuntimeState>();
   private readonly autoOpenTaskSession: boolean;
@@ -114,6 +115,7 @@ export class Orchestrator {
     this.opencodeRunner = new OpenCodeRunner(this.opencodeClient);
     this.autoOpenTaskSession = options.autoOpenTaskSession ?? false;
     this.enableEventStream = options.enableEventStream ?? true;
+    this.zellijManager = options.zellijManager ?? new ZellijManager();
   }
 
   async initialize() {

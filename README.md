@@ -31,7 +31,6 @@
 - 当一个 Agent 同时触发多个下游 Agent 时，群聊会合并展示为一条批量 `agent -> agent` 派发消息，而不是拆成多条重复消息
 - 同一个 Agent 的最终回复后若紧接着自动触发下游，群聊会把“最终回复 + 下游派发提示”合并成同一条消息；合并后只追加 `@目标Agent` 标记，避免连续出现两条重复的同名 Agent 卡片
 - 审查类 Agent 给出“需要修改 / 审查不通过”后，群聊会把该 Agent 的高层结论与发给下游整改 Agent 的请求合并展示成同一条消息；默认先展示高层结论与整改细节，再在消息末尾统一追加 `@目标Agent` 标记
-- 审查失败自动回流给下游 Agent 时，`[@来源 Agent Message]` 段会直接保留上游 Agent 的原始公开文本，不会额外拼接“当前阶段高层结果”或 Orchestrator 代写总结
 - Agent 最终回复写入群聊时，会优先提取其最终交付的尾部章节展示；像 BA 这类先分析再给正式结果的回复，群聊默认只展示最后的正式交付内容，不展示前面的自我分析过程
 - 群聊落库与 Agent 间转发只使用 OpenCode 返回消息里的公开 `text` part；`reasoning`、步骤和工具调用不会混入群聊正文或下游 Prompt
 - 这类批量 `agent -> agent` 派发消息仅用于群聊展示给人看；Agent 自动派发下游时，不再补充任何群聊历史，但会携带完整用户消息与当前这一次的上游结果；若上游结果已完整包含用户消息，会自动去重
@@ -43,7 +42,7 @@
 - 右上角为 Project 级真实拓扑图，点击节点即可编辑“这个 Agent 会去跟哪些 Agent”，也支持整块面板放大查看；放大视图会直接把当前拓扑图放大，Agent 卡片会随视口横向和纵向一起拉伸铺满面板，连线固定走在 Agent 顶部的上方通道内，不会越出拓扑 panel；节点顺序稳定，未显式保存顺序时默认优先取 `BA` 作为最左侧起点
 - 拓扑边现在分为两种关系：`association` 表示当前 Agent 只要完成本轮任务就 100% 自动触发下游；`review` 表示当前 Agent 本轮失败、给出“需要修改 / 审视不通过”时才触发下游
 - 拓扑图里的 Agent 节点颜色用于表达当前运行状态，不再用颜色区分 built-in / custom；内置与本地类型信息仅在编辑面板等辅助信息里展示
-- 拓扑节点顶部会直接展示 Agent 当前状态徽标，包括 `未启动 / 运行中 / 已完成 / 执行失败`，审查类 Agent 则显示 `审查通过 / 审查不通过`；若存在 `review` 下游边，审视不通过时会自动派发到这些下游继续修复；审视通过则停在当前节点显示已完成，不再继续触发 `review`
+- 拓扑节点会在标题栏最右侧展示一个最小化状态 icon，对应 `未启动 / 运行中 / 已完成 / 执行失败`，审查类 Agent 则对应 `审查通过 / 审查不通过`；完整状态文案仅在鼠标悬停 icon 时显示，标题栏主体优先留给 Agent 名称；若存在 `review` 下游边，审视不通过时会自动派发到这些下游继续修复；审视通过则停在当前节点显示已完成，不再继续触发 `review`
 - 当某个 Task 已运行到当前节点、但拓扑里不存在可自动继续推进的下游节点时，Task 状态会切换为 `waiting`，与群聊中的“保持等待状态”系统消息保持一致
 - 拓扑图在面板尺寸变化时会保持“Agent 在上、历史区在下、首尾节点贴近左右边界但保留少量留白、顶部预留连线通道”的布局约束，而不是把整张图简单等比缩放后居中
 - 拓扑图历史区会优先展示 Agent 最近的运行活动，并明确区分思考、普通消息、步骤与 Tool Call 参数摘要，而不只是单行运行状态
@@ -54,7 +53,6 @@
 - 当前默认 Agent 集合为 `BA / Build / CodeReview / DocsReview / IntegrationTest / UnitTest`
 - `Build` 是项目内部名称，底层使用 OpenCode 内置 `build` agent，不需要项目自己在 `.opencode/agents` 里额外定义 Markdown 文件
 - 除 `Build` 外，其余 Agent 一律按审查类 Agent 处理；只有 `Build` 是实际执行实现的 Agent
-- 只有审查类 Agent 会被编排器注入 system prompt，并使用 `【DECISION】检查通过 / 需要修改` 这套最终决策协议；`Build` 不会被注入任何 system prompt
 - 审查类 Agent 通过 OpenCode HTTP 配置接口会被默认强制注入 `write / edit / bash: deny`
 - 当前处于项目开发初期，不要求兼容历史数据；如果现有 Project 状态、拓扑或运行数据与当前实现不一致，优先直接修正当前数据与实现，不额外为旧数据添加兼容分支
 - 默认工作流里，`BA -> Build`、`Build -> (DocsReview / UnitTest / IntegrationTest)`、`IntegrationTest -> BA` 使用 `association`；`BA / DocsReview / UnitTest / IntegrationTest -> Build` 使用 `review`

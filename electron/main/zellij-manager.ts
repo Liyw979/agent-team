@@ -342,7 +342,7 @@ export class ZellijManager {
       .filter(Boolean);
   }
 
-  private async ensureSessionActive(sessionName: string): Promise<void> {
+  protected async ensureSessionActive(sessionName: string): Promise<void> {
     if (!(await this.isAvailable())) {
       return;
     }
@@ -387,7 +387,7 @@ export class ZellijManager {
       }));
   }
 
-  private async ensureSessionLayout(sessionName: string, targetPaneId?: string): Promise<void> {
+  protected async ensureSessionLayout(sessionName: string, targetPaneId?: string): Promise<void> {
     const panes = await this.listTerminalPanes(sessionName);
     const fullscreenPane = panes.find((pane) => pane.isFullscreen && !pane.exited);
 
@@ -428,7 +428,7 @@ export class ZellijManager {
     ]).catch(() => undefined);
   }
 
-  private filterVisibleAgents(agents: AgentPaneSpec[]): AgentPaneSpec[] {
+  protected filterVisibleAgents(agents: AgentPaneSpec[]): AgentPaneSpec[] {
     return agents.filter((agent) => !HIDDEN_PANEL_AGENTS.has(agent.name));
   }
 
@@ -443,7 +443,7 @@ export class ZellijManager {
     ]);
   }
 
-  private async runAgentPane(
+  protected async runAgentPane(
     sessionName: string,
     cwd: string,
     agentName: string,
@@ -470,7 +470,7 @@ export class ZellijManager {
     return stdout.trim() || `terminal_${agentName}`;
   }
 
-  private buildOpencodePaneCommand(
+  protected buildOpencodePaneCommand(
     sessionName: string,
     cwd: string,
     agentName: string,
@@ -488,7 +488,7 @@ export class ZellijManager {
     });
   }
 
-  private ensurePaneRuntimeDir(cwd: string, sessionName: string, agentName: string): string {
+  protected ensurePaneRuntimeDir(cwd: string, sessionName: string, agentName: string): string {
     const runtimeDir = path.join(
       cwd,
       ".agentflow",
@@ -500,11 +500,11 @@ export class ZellijManager {
     return runtimeDir;
   }
 
-  private sanitizePathSegment(value: string): string {
+  protected sanitizePathSegment(value: string): string {
     return value.replace(/[^a-zA-Z0-9._-]/g, "_");
   }
 
-  private async openSessionInTerminal(sessionName: string, cwd: string): Promise<void> {
+  protected async openSessionInTerminal(sessionName: string, cwd: string): Promise<void> {
     const terminalCommand = buildInlineCommand({
       command: this.getZellijCommand(),
       args: ["attach", sessionName, "--create"],
@@ -512,7 +512,7 @@ export class ZellijManager {
     await this.openCommandInTerminal(cwd, terminalCommand);
   }
 
-  private async openCommandInTerminal(cwd: string, terminalCommand: string): Promise<void> {
+  protected async openCommandInTerminal(cwd: string, terminalCommand: string): Promise<void> {
     if (process.platform === "darwin") {
       await this.openMacTerminalCommand(cwd, terminalCommand);
       return;
@@ -567,7 +567,7 @@ export class ZellijManager {
     }
   }
 
-  private async openMacTerminalCommand(cwd: string, terminalCommand: string) {
+  protected async openMacTerminalCommand(cwd: string, terminalCommand: string) {
     const startupCommand = `cd ${this.shellQuote(cwd)}; exec /bin/sh -lc ${this.shellQuote(terminalCommand)}`;
     const appleScript = [
       'tell application "Terminal"',
@@ -627,7 +627,7 @@ export class ZellijManager {
     await this.spawnDetachedProcess("osascript", appleScript.flatMap((line) => ["-e", line]));
   }
 
-  private async openWindowsCmdSession(cwd: string, terminalCommand: string): Promise<boolean> {
+  protected async openWindowsCmdSession(cwd: string, terminalCommand: string): Promise<boolean> {
     const argumentList = ["/k", terminalCommand]
       .map((part) => `'${this.escapePowerShellSingleQuotedString(part)}'`)
       .join(", ");
@@ -657,7 +657,7 @@ export class ZellijManager {
     );
   }
 
-  private spawnDetachedProcess(
+  protected spawnDetachedProcess(
     command: string,
     args: string[],
     options: Omit<SpawnOptions, "detached" | "stdio"> = {},
@@ -686,19 +686,19 @@ export class ZellijManager {
     });
   }
 
-  private shellQuote(value: string): string {
+  protected shellQuote(value: string): string {
     return `'${value.replace(/'/g, `'\\''`)}'`;
   }
 
-  private escapePowerShellSingleQuotedString(value: string): string {
+  protected escapePowerShellSingleQuotedString(value: string): string {
     return value.replace(/'/g, "''");
   }
 
-  private getLayoutCreationOrder(agents: AgentPaneSpec[]): AgentPaneSpec[] {
+  protected getLayoutCreationOrder(agents: AgentPaneSpec[]): AgentPaneSpec[] {
     return agents.slice();
   }
 
-  private async applyAgentGridLayout(
+  protected async applyAgentGridLayout(
     sessionName: string,
     cwd: string,
     agents: AgentPaneSpec[],
@@ -719,7 +719,7 @@ export class ZellijManager {
     return true;
   }
 
-  private buildAgentGridLayout(
+  protected buildAgentGridLayout(
     sessionName: string,
     cwd: string,
     agents: AgentPaneSpec[],
@@ -754,7 +754,7 @@ export class ZellijManager {
     ].join("\n");
   }
 
-  private buildGridColumnKdl(
+  protected buildGridColumnKdl(
     sessionName: string,
     cwd: string,
     agents: AgentPaneSpec[],
@@ -779,7 +779,7 @@ export class ZellijManager {
     ].join("\n");
   }
 
-  private buildAgentPaneKdl(
+  protected buildAgentPaneKdl(
     sessionName: string,
     cwd: string,
     agent: AgentPaneSpec,
@@ -799,7 +799,7 @@ export class ZellijManager {
     ].join("\n");
   }
 
-  private partitionAgentsForGrid(agents: AgentPaneSpec[]): AgentPaneSpec[][] {
+  protected partitionAgentsForGrid(agents: AgentPaneSpec[]): AgentPaneSpec[][] {
     if (agents.length <= 1) {
       return [agents.slice()];
     }
@@ -814,11 +814,11 @@ export class ZellijManager {
     return columns.filter((column) => column.length > 0);
   }
 
-  private toKdlString(value: string): string {
+  protected toKdlString(value: string): string {
     return JSON.stringify(value);
   }
 
-  private distributePercentages(count: number): number[] {
+  protected distributePercentages(count: number): number[] {
     if (count <= 0) {
       return [];
     }
