@@ -71,6 +71,8 @@ function App() {
     );
   const [draggingAgentId, setDraggingAgentId] = useState<string | null>(null);
   const [dragOverAgentId, setDragOverAgentId] = useState<string | null>(null);
+  const [openingAgentPaneId, setOpeningAgentPaneId] = useState<string | null>(null);
+  const [agentPaneActionError, setAgentPaneActionError] = useState<string | null>(null);
   const suppressNextAgentCardClickRef = useRef(false);
 
   useEffect(() => {
@@ -214,6 +216,8 @@ function App() {
   useEffect(() => {
     setDraggingAgentId(null);
     setDragOverAgentId(null);
+    setOpeningAgentPaneId(null);
+    setAgentPaneActionError(null);
   }, [activeProject?.project.id, activeTaskView?.task.id]);
 
   const panelMappings = activeTaskView?.panels ?? [];
@@ -361,6 +365,28 @@ function App() {
     }, 0);
   }
 
+  async function handleOpenAgentPane(agentName: string) {
+    if (!activeProject || !activeTaskView || openingAgentPaneId === agentName) {
+      return;
+    }
+
+    setOpeningAgentPaneId(agentName);
+    setAgentPaneActionError(null);
+    try {
+      await window.agentFlow.openAgentPane({
+        projectId: activeProject.project.id,
+        taskId: activeTaskView.task.id,
+        agentName,
+      });
+    } catch (error) {
+      setAgentPaneActionError(
+        error instanceof Error ? error.message : `打开 ${agentName} 对应 pane 失败，请稍后重试。`,
+      );
+    } finally {
+      setOpeningAgentPaneId((current) => (current === agentName ? null : current));
+    }
+  }
+
   return (
     <>
       <div className="flex h-screen flex-col overflow-hidden text-foreground">
@@ -497,6 +523,11 @@ function App() {
                             : "当前还没有 panel 绑定记录"}
                         </span>
                       </div>
+                      {agentPaneActionError ? (
+                        <div className="rounded-[8px] border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-700">
+                          {agentPaneActionError}
+                        </div>
+                      ) : null}
                     </div>
 
                     <div className="min-h-0 overflow-y-auto rounded-[8px] border border-border/60 bg-card/80 p-2">
@@ -505,10 +536,13 @@ function App() {
                         const agentColor = getAgentColorToken(agent.name);
                         const isDragging = draggingAgentId === agent.name;
                         const isDragOver = dragOverAgentId === agent.name && draggingAgentId !== agent.name;
+                        const isOpeningPane = openingAgentPaneId === agent.name;
+                        const canOpenPane = Boolean(activeTaskView);
                         return (
-                          <button
+                          <div
                             key={agent.id}
-                            type="button"
+                            role="button"
+                            tabIndex={0}
                             draggable
                             onDragStart={(event) => {
                               setDraggingAgentId(agent.name);
@@ -540,6 +574,16 @@ function App() {
                                 setAgentConfigOpen(true);
                               }
                             }}
+                            onKeyDown={(event) => {
+                              if (event.key !== "Enter" && event.key !== " ") {
+                                return;
+                              }
+                              event.preventDefault();
+                              if (!agent.relativePath.startsWith("builtin://")) {
+                                setAgentConfigPath(agent.relativePath);
+                                setAgentConfigOpen(true);
+                              }
+                            }}
                             className={`mb-2 flex w-full cursor-grab items-center gap-3 rounded-[8px] border px-3 py-3 text-left transition active:cursor-grabbing last:mb-0 ${
                               agent.relativePath.startsWith("builtin://") ? "" : "hover:brightness-[0.99]"
                             }`}
@@ -564,6 +608,31 @@ function App() {
                                     >
                                       {agent.displayName}
                                     </p>
+                                    <button
+                                      type="button"
+                                      draggable={false}
+                                      disabled={!canOpenPane || isOpeningPane}
+                                      title={
+                                        canOpenPane
+                                          ? `打开 ${agent.displayName} 对应的 Zellij pane`
+                                          : "请先选择一个 Task"
+                                      }
+                                      onPointerDown={(event) => {
+                                        event.stopPropagation();
+                                      }}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        void handleOpenAgentPane(agent.name);
+                                      }}
+                                      className="no-drag rounded-[6px] border px-2 py-1 text-[11px] font-semibold transition hover:brightness-[0.98] disabled:cursor-not-allowed disabled:hover:brightness-100 disabled:opacity-45"
+                                      style={{
+                                        borderColor: agentColor.border,
+                                        color: agentColor.text,
+                                        background: "rgba(255,255,255,0.7)",
+                                      }}
+                                    >
+                                      {isOpeningPane ? "打开中..." : "打开 Pane"}
+                                    </button>
                                   </div>
                                   {mappedPanel && (
                                     <div
@@ -584,7 +653,7 @@ function App() {
                                 </div>
                               </div>
                             </div>
-                          </button>
+                          </div>
                         );
                       })}
 

@@ -24,6 +24,7 @@
 - 全新 Task 初始化 Zellij pane 时，会优先按最多三列的 tiled grid 摆放，避免默认布局过宽过扁；pane 顺序直接使用当前前端拖拽后保存的 Agent 排序
 - Zellij pane 不再按运行态动态重排，后续顺序只跟随前端拓扑/团队成员区里用户保存的 Agent 排序
 - GUI 聊天区标题栏支持直接打开当前 Task 对应的 Zellij session；打开前会先补齐当前 Task 的全部 Agent pane；macOS 和 Windows 下都会尽量把新拉起的终端窗口自动切到全屏
+- 右下角团队成员面板里，每个 Agent 名称旁都会提供“打开 Pane”按钮；点击后会优先补齐当前 Task 的 pane 绑定，并直接聚焦到该 Agent 对应的 Zellij pane，而不是只打开整个 session 的默认视图
 - 若当前电脑未安装 `zellij`，Task 创建后会追加系统提醒；GUI 点击“打开 Zellij”和 CLI 进入 session 时也会直接提示先安装 `zellij`
 - Task 群聊支持 `@AgentName` 提交任务，输入 `@` 会弹出候选 Agent 列表，支持方向键、鼠标和 `Tab` 自动补全
 - 群聊中同时展示 `user -> agent`、`agent -> agent` 高层协作消息，以及 Agent 最终回复
@@ -45,7 +46,7 @@
 - 当某个 Task 已运行到当前节点、但拓扑里不存在可自动继续推进的下游节点时，Task 状态会切换为 `waiting`，与群聊中的“保持等待状态”系统消息保持一致
 - 拓扑图在面板尺寸变化时会保持“Agent 在上、历史区在下、首尾节点贴近左右边界但保留少量留白、顶部预留连线通道”的布局约束，而不是把整张图简单等比缩放后居中
 - 拓扑图历史区会优先展示 Agent 最近的运行活动，并明确区分思考、普通消息、步骤与 Tool Call 参数摘要，而不只是单行运行状态
-- 右下角展示 Project 全量 Agent，以及它们在当前 Task 语境下的状态；点击 Agent 会直接打开原始配置文件查看器
+- 右下角展示 Project 全量 Agent，以及它们在当前 Task 语境下的状态；点击 Agent 会直接打开原始配置文件查看器，名称旁按钮则会打开该 Agent 对应的 Zellij pane
 - `.opencode/agents/**/*.md` 动态加载，前端只读查看 OpenCode 原始 Agent 文件，不支持直接编辑
 - Agent frontmatter 采用最新的 `permission:` 配置字段，值使用 `allow / ask / deny`
 - 对只读 Agent，除了 `write / edit / bash` 之外，还需要一并限制 `patch / task`；运行时也会把这类缺省项自动硬化为 `deny`，避免通过子代理间接改文件

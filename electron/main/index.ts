@@ -6,6 +6,7 @@ import type {
   CreateProjectPayload,
   DeleteTaskPayload,
   GetTaskRuntimePayload,
+  OpenAgentPanePayload,
   OpenTaskSessionPayload,
   ReadAgentFilePayload,
   SubmitTaskPayload,
@@ -163,6 +164,10 @@ app.whenReady().then(async () => {
   ipcMain.handle(
     IPC_CHANNELS.deleteTask,
     (_event, payload: DeleteTaskPayload) => orchestrator.deleteTask(payload),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.openAgentPane,
+    (_event, payload: OpenAgentPanePayload) => orchestrator.focusAgentPANEL(payload),
   );
   ipcMain.handle(
     IPC_CHANNELS.openTaskSession,

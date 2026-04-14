@@ -5,6 +5,7 @@ import type {
   CreateProjectPayload,
   DeleteTaskPayload,
   GetTaskRuntimePayload,
+  OpenAgentPanePayload,
   OpenTaskSessionPayload,
   ProjectSnapshot,
   ReadAgentFilePayload,
@@ -23,6 +24,8 @@ const api = {
     ipcRenderer.invoke(IPC_CHANNELS.submitTask, payload),
   deleteTask: (payload: DeleteTaskPayload): Promise<ProjectSnapshot> =>
     ipcRenderer.invoke(IPC_CHANNELS.deleteTask, payload),
+  openAgentPane: (payload: OpenAgentPanePayload): Promise<void> =>
+    ipcRenderer.invoke(IPC_CHANNELS.openAgentPane, payload),
   openTaskSession: (payload: OpenTaskSessionPayload): Promise<void> =>
     ipcRenderer.invoke(IPC_CHANNELS.openTaskSession, payload),
   readAgentFile: (payload: ReadAgentFilePayload) =>

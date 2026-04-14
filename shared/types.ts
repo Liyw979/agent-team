@@ -196,6 +196,12 @@ export interface OpenTaskSessionPayload {
   taskId: string;
 }
 
+export interface OpenAgentPanePayload {
+  projectId: string;
+  taskId: string;
+  agentName: string;
+}
+
 export interface DeleteTaskPayload {
   projectId: string;
   taskId: string;

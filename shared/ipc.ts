@@ -4,6 +4,7 @@ export const IPC_CHANNELS = {
   pickProjectPath: "agentflow/pick-project-path",
   submitTask: "agentflow/submit-task",
   deleteTask: "agentflow/delete-task",
+  openAgentPane: "agentflow/open-agent-pane",
   openTaskSession: "agentflow/open-task-session",
   readAgentFile: "agentflow/read-agent-file",
   saveTopology: "agentflow/save-topology",

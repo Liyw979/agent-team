@@ -880,15 +880,13 @@ async function handlePanels(context: CliContext, parsed: ParsedArgv) {
     assertPositionals(parsed, 4, "panels focus <taskId> <agentName> [--cwd <path>]");
     const taskId = parsed.positionals[2] ?? "";
     const agentName = parsed.positionals[3] ?? "";
-    const task = findTaskOrThrow(project, taskId);
-    const panel = task.panels.find(
-      (item) => item.agentName === agentName,
-    );
-    if (!panel) {
-      fail(`Task ${taskId} 中不存在 Agent 面板：${agentName}`);
-    }
-    await context.orchestrator.focusAgentPANEL(project.project.id, taskId, panel.agentName);
-    process.stdout.write(`已请求打开 ${panel.agentName} 对应的 panel。\n`);
+    findTaskOrThrow(project, taskId);
+    await context.orchestrator.focusAgentPANEL({
+      projectId: project.project.id,
+      taskId,
+      agentName,
+    });
+    process.stdout.write(`已请求打开 ${agentName} 对应的 panel。\n`);
     return;
   }
 

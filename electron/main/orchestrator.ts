@@ -18,6 +18,7 @@ import {
   isBuiltinAgentPath,
   getProjectNameFromPath,
   type MessageRecord,
+  type OpenAgentPanePayload,
   type OpenTaskSessionPayload,
   type ProjectRecord,
   type ProjectSnapshot,
@@ -290,12 +291,31 @@ export class Orchestrator {
     });
   }
 
-  async focusAgentPANEL(_projectId: string, taskId: string, agentId: string) {
-    const panel = this.store.listTaskPanels(taskId).find((item) => item.agentName === agentId);
-    if (!panel) {
-      return;
+  async focusAgentPANEL(payload: OpenAgentPanePayload) {
+    const project = this.store.getProject(payload.projectId);
+    const task = this.store.getTask(payload.taskId);
+    if (task.projectId !== project.id) {
+      throw new Error("Task 不属于当前 Project");
     }
-    await this.zellijManager.assertAvailable(`无法打开 Agent ${agentId} 对应的 Zellij pane`);
+
+    const snapshot = await this.ensureTaskInitialized(
+      project,
+      task,
+      this.agentFiles.listAgentFiles(project.id, project.path),
+    );
+    this.emit({
+      type: "task-updated",
+      projectId: project.id,
+      payload: snapshot,
+    });
+
+    const panel = this.store
+      .listTaskPanels(task.id)
+      .find((item) => item.agentName === payload.agentName);
+    if (!panel) {
+      throw new Error(`未找到 Agent ${payload.agentName} 对应的 Zellij pane。`);
+    }
+    await this.zellijManager.assertAvailable(`无法打开 Agent ${payload.agentName} 对应的 Zellij pane`);
     await this.zellijManager.focusAgentPANEL(panel);
   }
 

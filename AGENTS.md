@@ -50,12 +50,13 @@
 - 拓扑图在面板尺寸变化时会保持“Agent 在上、历史区在下、首尾节点贴近左右边界但保留少量留白、顶部预留连线通道”的布局约束，而不是把整张图简单等比缩放后居中
 - 拓扑图历史区会优先展示 Agent 最近的运行活动，并明确区分思考、普通消息、步骤与 Tool Call 参数摘要，而不只是单行运行状态
 - GUI 聊天区标题栏支持直接打开当前 Task 对应的 Zellij session；打开前会先补齐当前 Task 的全部 Agent pane；macOS 和 Windows 下都会尽量把新拉起的终端窗口自动切到全屏
+- 右下角团队成员面板中，每个 Agent 名称旁都会提供一个“打开 Pane”按钮；点击后会优先补齐当前 Task 的 pane 绑定，并直接聚焦到该 Agent 对应的 Zellij pane，而不是只打开整个 session
 - 若当前电脑未安装 `zellij`，Task 创建后会追加系统提醒；GUI 点击“打开 Zellij”和 CLI 进入 session 时会直接提示先安装 `zellij`
 - GUI 聊天区里的 `Task Started` 系统消息会附带当前 Task 的 `Zellij Session` 名称与可直接执行的 attach 调试命令，方便 debug 当前会话
 - Zellij pane 顺序只跟随前端拓扑/团队成员区里用户拖拽后保存的 Agent 排序，不再根据运行态动态重排
 - 全新 Task 首次初始化、且当前还没有托管 pane 时，Zellij 会优先按最多三列的 tiled grid 创建初始 pane 布局，内部 pane 顺序直接使用当前保存的 Agent 排序
 - 运行中的 Agent 会通过 OpenCode HTTP session 消息接口轮询实时工具调用与摘要，并显示在拓扑图节点内
-- GUI 中点击 Agent 只支持查看对应原始配置文件，不支持在应用内直接编辑 `.opencode/agents/**/*.md`
+- GUI 中点击 Agent 卡片只支持查看对应原始配置文件，不支持在应用内直接编辑 `.opencode/agents/**/*.md`；名称旁“打开 Pane”按钮用于进入该 Agent 对应的 Zellij pane
 - 用户在 Task 群聊里直接 `@Agent` 时，群聊展示仍保留原始 `@Agent` 文本；底层以 `raw` 方式转发给目标 Agent 的消息会统一封装成单行 `[发送者] <正文>`，并自动去掉仅用于寻址的开头或结尾 `@Agent`
 - 这类批量 `Agent -> Agent` 派发消息仅用于聊天区展示给人看；Agent 自动派发下游时，不再补充任何群聊历史，但会携带完整用户消息与当前这一次的上游结果；若上游结果已完整包含用户消息，会自动去重
 - 群聊落库与 Agent 间转发只使用 OpenCode 返回消息里的公开 `text` part；`reasoning`、步骤和工具调用不会混入群聊正文或下游 Prompt
