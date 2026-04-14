@@ -1321,10 +1321,10 @@ export class Orchestrator {
     fallbackMessage?: string | null,
   ): string {
     if (parsedReview.cleanContent.trim()) {
-      return this.extractDisplaySummary(parsedReview.cleanContent) ?? parsedReview.cleanContent.trim();
+      return parsedReview.cleanContent.trim();
     }
     if (fallbackMessage?.trim()) {
-      return this.extractDisplaySummary(fallbackMessage) ?? fallbackMessage.trim();
+      return fallbackMessage.trim();
     }
     if (parsedReview.decision === "needs_revision") {
       return this.isReviewAgent(agent)

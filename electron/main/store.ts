@@ -55,6 +55,28 @@ function uniqueById<T extends { id: string }>(items: T[]): T[] {
   return [...map.values()];
 }
 
+function normalizeMessageMeta(meta: unknown): Record<string, string> | undefined {
+  if (!meta || typeof meta !== "object") {
+    return undefined;
+  }
+
+  const normalizedEntries = Object.entries(meta).filter(
+    (entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string",
+  );
+  return normalizedEntries.length > 0 ? Object.fromEntries(normalizedEntries) : undefined;
+}
+
+function normalizeMessageContent(content: string, meta?: Record<string, string>) {
+  if (meta?.kind === "agent-final") {
+    const finalMessage = meta.finalMessage?.trim();
+    if (finalMessage) {
+      return finalMessage;
+    }
+  }
+
+  return content;
+}
+
 function createDefaultProjectState(projectId: string): ProjectStateFile {
   return {
     version: 1,
@@ -518,7 +540,26 @@ export class StoreService {
             }))
             .filter((panel) => panel.id && panel.taskId && panel.agentName)
         : [],
-      messages: Array.isArray(parsed.messages) ? parsed.messages.filter(Boolean) : [],
+      messages: Array.isArray(parsed.messages)
+        ? parsed.messages
+            .filter((message): message is Partial<MessageRecord> => Boolean(message) && typeof message === "object")
+            .map((message) => {
+              const meta = normalizeMessageMeta(message.meta);
+              const content =
+                typeof message.content === "string" ? normalizeMessageContent(message.content, meta) : "";
+              return {
+                id: typeof message.id === "string" ? message.id : "",
+                projectId,
+                taskId: typeof message.taskId === "string" ? message.taskId : null,
+                content,
+                sender: typeof message.sender === "string" ? message.sender : "system",
+                timestamp:
+                  typeof message.timestamp === "string" ? message.timestamp : new Date(0).toISOString(),
+                meta,
+              } satisfies MessageRecord;
+            })
+            .filter((message) => message.id)
+        : [],
     };
 
     return state;
