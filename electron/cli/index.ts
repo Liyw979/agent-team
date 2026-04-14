@@ -158,7 +158,6 @@ function printTaskSummary(taskSnapshot: TaskSnapshot) {
   printKeyValue("Task", taskSnapshot.task.id);
   printKeyValue("Title", taskSnapshot.task.title);
   printKeyValue("Status", taskSnapshot.task.status);
-  printKeyValue("Entry Agent", taskSnapshot.task.entryAgentId);
   printKeyValue("Zellij Session", taskSnapshot.task.zellijSessionId);
   printKeyValue("Initialized At", formatTimestamp(taskSnapshot.task.initializedAt));
   printKeyValue("Created At", formatTimestamp(taskSnapshot.task.createdAt));
@@ -263,7 +262,6 @@ function buildTaskInterface(taskSnapshot: TaskSnapshot) {
     ["Task", taskSnapshot.task.id],
     ["Title", taskSnapshot.task.title],
     ["Status", taskSnapshot.task.status],
-    ["Entry Agent", taskSnapshot.task.entryAgentId],
     ["Zellij Session", taskSnapshot.task.zellijSessionId ?? "-"],
     ["Initialized At", formatTimestamp(taskSnapshot.task.initializedAt)],
     ["Created At", formatTimestamp(taskSnapshot.task.createdAt)],
@@ -455,7 +453,7 @@ function buildHelp() {
   project current [--cwd <path>]
 
   task list [--cwd <path>]
-  task init [--cwd <path>] [--title <title>] [--agent <agentName>] [--plain]
+  task init [--cwd <path>] [--title <title>] [--plain]
   task show <taskId> [--cwd <path>] [--plain]
   task messages <taskId> [--cwd <path>]
   task panels <taskId> [--cwd <path>]
@@ -485,7 +483,7 @@ function buildHelp() {
 说明：
   - CLI 会直接复用 Orchestrator、文件存储、OpenCode client、Zellij manager 这套主逻辑。
   - 若当前目录尚未注册为 Project，涉及 Project 语义的命令会自动创建该 Project。
-  - \`task init\` 会先创建 Task，并把当前 Project 的全部 Agent 会话 / Zellij pane 初始化好，但不会发送首条业务消息。
+  - \`task init\` 会先创建 Task，并把当前 Project 的全部 Agent 会话 / Zellij pane 初始化好；GUI 群聊默认会优先选中 \`build\`，CLI 仍通过 \`task send <agent>\` 指定目标。
   - \`task send\` 会像 GUI 一样通过 Orchestrator 触发真实 Task 创建/推进与下游调度。
   - \`task show\` 在交互式终端里默认直接进入对应 Task 的 Zellij session。`;
 }
@@ -559,19 +557,16 @@ async function handleTasks(context: CliContext, parsed: ParsedArgv) {
 
     for (const task of project.tasks) {
       process.stdout.write(
-        `- ${task.task.id} | ${task.task.title} | status=${task.task.status} | entry=${task.task.entryAgentId} | init=${task.task.initializedAt ? "yes" : "no"}\n`,
+        `- ${task.task.id} | ${task.task.title} | status=${task.task.status} | init=${task.task.initializedAt ? "yes" : "no"}\n`,
       );
     }
     return;
   }
 
   if (action === "init") {
-    const entryAgentName = getOptionString(parsed, "agent");
-    const entryAgent = entryAgentName ? findAgentOrThrow(project, entryAgentName) : undefined;
     const payload: InitializeTaskPayload = {
       projectId: project.project.id,
       title: getOptionString(parsed, "title"),
-      entryAgent: entryAgent?.name,
     };
     const snapshot = await context.orchestrator.initializeTask(payload);
 
@@ -581,7 +576,7 @@ async function handleTasks(context: CliContext, parsed: ParsedArgv) {
     }
 
     process.stdout.write(
-      `已完成 Task 初始化：${snapshot.task.id}，等待向 @${snapshot.task.entryAgentId} 发送首条消息。\n`,
+      `已完成 Task 初始化：${snapshot.task.id}。GUI 群聊会默认优先选中 build；若走 CLI，请继续使用 \`task send <agent>\` 指定目标。\n`,
     );
 
     if (!hasFlag(parsed, "plain") && process.stdout.isTTY && process.stdin.isTTY) {
@@ -590,7 +585,7 @@ async function handleTasks(context: CliContext, parsed: ParsedArgv) {
     }
 
     printTaskSummary(snapshot);
-    printPanelOpenCommand(snapshot, snapshot.task.entryAgentId);
+    printPanelOpenCommand(snapshot, "");
     return;
   }
 

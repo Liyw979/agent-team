@@ -376,6 +376,11 @@ function App() {
                       if (!activeProject) {
                         return;
                       }
+                      const resolvedMentionAgent =
+                        mentionAgent ||
+                        (activeProject.agentFiles.some((agent) => agent.name === "build")
+                          ? "build"
+                          : activeProject.agentFiles[0]?.name);
                       let optimisticId: string | null = null;
                       if (activeTask) {
                         optimisticId = globalThis.crypto.randomUUID();
@@ -384,7 +389,7 @@ function App() {
                           {
                             id: optimisticId,
                             taskId: activeTask.task.id,
-                            mentionAgent,
+                            mentionAgent: resolvedMentionAgent,
                             message: {
                               id: optimisticId,
                               projectId: activeProject.project.id,
@@ -404,7 +409,7 @@ function App() {
                           projectId: activeProject.project.id,
                           taskId: activeTask?.task.id ?? null,
                           content,
-                          mentionAgent,
+                          mentionAgent: resolvedMentionAgent,
                         });
                       } finally {
                         if (optimisticId) {
@@ -436,11 +441,6 @@ function App() {
                     <span className="rounded-[6px] bg-card px-3 py-1 text-[11px] text-foreground/80">
                       {activeTaskView ? `当前 Task · ${activeTaskView.task.title}` : "当前还没有选中 Task"}
                     </span>
-                    {activeTaskView && (
-                      <span className="rounded-[6px] bg-card px-3 py-1 text-[11px] text-foreground/80">
-                        入口 {getAgentDisplayName(activeTaskView.task.entryAgentId)}
-                      </span>
-                    )}
                     <span className="rounded-[6px] bg-card px-3 py-1 text-[11px] text-foreground/80">
                       {panelMappings.length > 0
                         ? `${panelMappings.length} 个 panel 已绑定`

@@ -91,7 +91,6 @@ async function main() {
     const task = await orchestrator.initializeTask({
       projectId: project.project.id,
       title: "BA 权限回归",
-      entryAgent: "BA",
     });
 
     assert.deepEqual(

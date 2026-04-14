@@ -39,6 +39,7 @@
 - 拓扑图在面板尺寸变化时会保持“Agent 在上、历史区在下、首尾节点贴近左右边界但保留少量留白、顶部预留连线通道”的布局约束，而不是把整张图简单等比缩放后居中
 - 拓扑图历史区会优先展示 Agent 最近的运行活动，包括普通消息与 Tool Call 参数摘要，而不只是单行运行状态
 - GUI 聊天区标题栏支持直接打开当前 Task 对应的 Zellij session；打开前会先补齐当前 Task 的全部 Agent pane
+- GUI 聊天区里的 `Task Started` 系统消息会附带当前 Task 的 `Zellij Session` 名称与可直接执行的 attach 调试命令，方便 debug 当前会话
 - Zellij pane 顺序只跟随前端拓扑/团队成员区里用户拖拽后保存的 Agent 排序，不再根据运行态动态重排
 - 全新 Task 首次初始化、且当前还没有托管 pane 时，Zellij 会优先按最多三列的 tiled grid 创建初始 pane 布局，内部 pane 顺序直接使用当前保存的 Agent 排序
 - 运行中的 Agent 会通过 OpenCode HTTP session 消息接口轮询实时工具调用与摘要，并显示在拓扑图节点内
@@ -48,7 +49,7 @@
 - Agent 间显式派发下游任务时，会自动在转发 Prompt 的 `[Requeirement]` 段附带当前 Project Git Diff 的精简摘要，帮助下游 Agent 快速感知最新改动；返工链路不附带该摘要
 - CLI 默认使用当前目录作为 project cwd
 - CLI 只支持当前 Agent 名称
-- CLI 支持单独的 `task init` 初始化步骤：先创建 Task，并把全部 Agent 的 OpenCode session / Zellij pane 启动完成，再通过 `task send --task <taskId>` 向入口 Agent 发送第一条消息
+- CLI 支持单独的 `task init` 初始化步骤：先创建 Task，并把全部 Agent 的 OpenCode session / Zellij pane 启动完成；GUI 输入框会优先弹出候选 Agent 并默认选中 `build`，CLI 仍通过 `task send <agent> <message...>` 指定目标
 - `task send <agent> <message...>` 成功后会打印可复制的 panel 打开命令
 
 ## 文档同步要求

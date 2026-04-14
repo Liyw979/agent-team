@@ -39,6 +39,14 @@ import { ZellijManager } from "./zellij-manager";
 
 const execFileAsync = promisify(execFile);
 
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function buildAttachSessionCommand(sessionName: string) {
+  return `zellij attach --create-background ${shellQuote(sessionName)} && zellij attach ${shellQuote(sessionName)} --create`;
+}
+
 interface OrchestratorOptions {
   userDataPath: string;
   autoOpenTaskSession?: boolean;
@@ -248,13 +256,19 @@ export class Orchestrator {
     const project = this.store.getProject(payload.projectId);
     const agentFiles = this.agentFiles.listAgentFiles(project.id, project.path);
     this.syncTopology(project, agentFiles);
+    const mentionName =
+      payload.mentionAgent ||
+      this.extractMention(payload.content) ||
+      this.findAgentFile(agentFiles, "build")?.name;
+    if (!mentionName) {
+      throw new Error("当前没有可用的目标 Agent。");
+    }
 
     if (payload.taskId) {
-      return this.continueTask(project, payload.taskId, payload.content, payload.mentionAgent, agentFiles);
+      return this.continueTask(project, payload.taskId, payload.content, mentionName, agentFiles);
     }
 
     const initialized = await this.createTask(project, agentFiles, {
-      preferredEntryAgent: payload.mentionAgent || this.extractMention(payload.content),
       title: this.createTaskTitle(payload.content),
       source: "submit",
     });
@@ -263,7 +277,7 @@ export class Orchestrator {
       project,
       initialized.task.id,
       payload.content,
-      payload.mentionAgent,
+      mentionName,
       agentFiles,
     );
   }
@@ -274,7 +288,6 @@ export class Orchestrator {
     this.syncTopology(project, agentFiles);
 
     return this.createTask(project, agentFiles, {
-      preferredEntryAgent: payload.entryAgent,
       title: (payload.title ?? "").trim() || "未命名任务",
       source: "initialize",
     });
@@ -365,17 +378,11 @@ export class Orchestrator {
     project: ProjectRecord,
     agentFiles: AgentFileRecord[],
     options: {
-      preferredEntryAgent?: string;
       title: string;
       source: "initialize" | "submit";
     },
   ): Promise<TaskSnapshot> {
-    const entryAgent = this.resolveEntryAgent(
-      project.id,
-      agentFiles,
-      options.preferredEntryAgent,
-    );
-    if (!entryAgent) {
+    if (agentFiles.length === 0) {
       throw new Error("当前项目没有可用的 Agent 文件");
     }
 
@@ -386,7 +393,6 @@ export class Orchestrator {
       id: taskId,
       projectId: project.id,
       title: options.title,
-      entryAgentId: entryAgent.name,
       status: "pending",
       cwd: project.path,
       zellijSessionId,
@@ -412,14 +418,18 @@ export class Orchestrator {
 
     await this.ensureTaskInitialized(project, task, agentFiles);
 
+    const zellijDebugInfo = task.zellijSessionId
+      ? `\nZellij Session: ${task.zellijSessionId}\nDebug Attach: ${buildAttachSessionCommand(task.zellijSessionId)}`
+      : "";
+
     const taskCreatedMessage: MessageRecord = {
       id: randomUUID(),
       projectId: project.id,
       taskId,
       content:
         options.source === "initialize"
-          ? `Task 已初始化，入口 Agent 为 @${entryAgent.name}。系统已扫描 ${agentFiles.length} 个 Project 级 Agent，并完成当前 Task 的 Zellij / OpenCode 运行时初始化，等待首条发送给 @${entryAgent.name} 的消息。`
-          : `Task 已创建并完成初始化，入口 Agent 为 @${entryAgent.name}。系统已扫描 ${agentFiles.length} 个 Project 级 Agent，并已为当前 Task 准备好全部 Agent pane 与会话。`,
+          ? `Task 已初始化。系统已扫描 ${agentFiles.length} 个 Project 级 Agent，并完成当前 Task 的 Zellij / OpenCode 运行时初始化。群聊输入框会优先弹出 Agent 候选，默认选中 build；若直接发送且未显式指定，也会默认投递给 build。${zellijDebugInfo}`
+          : `Task 已创建并完成初始化。系统已扫描 ${agentFiles.length} 个 Project 级 Agent，并已为当前 Task 准备好全部 Agent pane 与会话。群聊输入框会优先弹出 Agent 候选，默认选中 build；若直接发送且未显式指定，也会默认投递给 build。${zellijDebugInfo}`,
       sender: "system",
       timestamp: new Date().toISOString(),
       meta: {
@@ -453,7 +463,7 @@ export class Orchestrator {
     project: ProjectRecord,
     taskId: string,
     content: string,
-    mentionAgent: string | undefined,
+    mentionAgent: string,
     agentFiles: AgentFileRecord[],
   ): Promise<TaskSnapshot> {
     const task = this.store.getTask(taskId);
@@ -462,18 +472,13 @@ export class Orchestrator {
     }
 
     this.syncTaskAgents(task, agentFiles);
-    const mentionName = mentionAgent || this.extractMention(content) || task.entryAgentId;
-    const targetAgent = this.findAgentFile(agentFiles, mentionName);
+    const targetAgent = this.findAgentFile(agentFiles, mentionAgent);
 
     if (!targetAgent) {
-      throw new Error(`未找到被 @ 的 Agent：${mentionName}`);
+      throw new Error(`未找到被 @ 的 Agent：${mentionAgent}`);
     }
 
     await this.ensureTaskInitialized(project, task, agentFiles);
-    const runtime = this.getRuntime(task.id);
-    if (targetAgent.name === task.entryAgentId && !runtime.lastSignatureByAgent.has(targetAgent.name)) {
-      runtime.lastSignatureByAgent.set(targetAgent.name, `entry:${task.id}`);
-    }
 
     const message = this.createUserMessage(project.id, task.id, task.title, content);
     this.store.insertMessage(message);
@@ -681,9 +686,9 @@ export class Orchestrator {
 
       if (
         signal.done ||
-        (agentName === task.entryAgentId &&
-          triggered === 0 &&
-          this.hasCompletedIncomingSuccess(topology, runtime.completedEdges, agentName))
+        (triggered === 0 &&
+          this.hasCompletedIncomingSuccess(topology, runtime.completedEdges, agentName) &&
+          this.hasCompletedOutgoingSuccess(topology, runtime.completedEdges, agentName))
       ) {
         await this.completeTask(task.id, "success");
       }
@@ -933,6 +938,19 @@ export class Orchestrator {
     return topology.edges.some(
       (edge) =>
         edge.target === agentName &&
+        edge.triggerOn === "success" &&
+        completedEdges.has(edge.id),
+    );
+  }
+
+  private hasCompletedOutgoingSuccess(
+    topology: TopologyRecord,
+    completedEdges: Set<string>,
+    agentName: string,
+  ): boolean {
+    return topology.edges.some(
+      (edge) =>
+        edge.source === agentName &&
         edge.triggerOn === "success" &&
         completedEdges.has(edge.id),
     );
@@ -1285,7 +1303,6 @@ export class Orchestrator {
     signal: ParsedSignal,
     visibleContent: string,
   ) {
-    const task = this.store.getTask(taskId);
     const topology = this.store.getTopology(project.id);
     const downstreamAgents = this.collectReachableTargets(topology, sourceAgentId);
     for (const agentName of downstreamAgents) {
@@ -1293,7 +1310,7 @@ export class Orchestrator {
     }
     this.store.updateTaskStatus(taskId, "needs_revision", null);
 
-    const revisionTargets = this.resolveRevisionTargets(task, topology, sourceAgentId, signal);
+    const revisionTargets = this.resolveRevisionTargets(topology, sourceAgentId, signal);
     const feedback = parsedReview.feedback ?? "请根据当前审查意见补充必要修改。";
     const contextSummary = visibleContent.trim()
       ? `当前阶段高层结果：\n${visibleContent.trim()}\n\n`
@@ -1360,7 +1377,6 @@ export class Orchestrator {
   }
 
   private resolveRevisionTargets(
-    task: TaskRecord,
     topology: TopologyRecord,
     sourceAgentId: string,
     signal: ParsedSignal,
@@ -1388,10 +1404,6 @@ export class Orchestrator {
     const outgoingSuccessTargets = topology.edges
       .filter((edge) => edge.source === sourceAgentId && edge.triggerOn === "success")
       .map((edge) => edge.target);
-
-    if (sourceAgentId === task.entryAgentId && outgoingSuccessTargets.length > 0) {
-      return [...new Set(outgoingSuccessTargets)];
-    }
 
     const incomingSources = topology.edges
       .filter((edge) => edge.target === sourceAgentId && edge.triggerOn === "success")
@@ -1441,30 +1453,6 @@ export class Orchestrator {
   private extractMention(content: string): string | undefined {
     const match = content.match(/@([^\s]+)/);
     return match?.[1];
-  }
-
-  private resolveEntryAgent(
-    projectId: string,
-    agentFiles: AgentFileRecord[],
-    preferredEntryAgent: string | undefined,
-  ): AgentFileRecord | undefined {
-    const preferred = this.findAgentFile(agentFiles, preferredEntryAgent);
-    if (preferred) {
-      return preferred;
-    }
-
-    const topology = this.store.getTopology(projectId);
-    const orderedAgentNames = resolveTopologyAgentOrder(
-      agentFiles.map((agent) => ({
-        name: agent.name,
-        mode: agent.mode,
-        role: agent.role,
-        relativePath: agent.relativePath,
-      })),
-      topology.agentOrderIds,
-    );
-
-    return this.findAgentFile(agentFiles, orderedAgentNames[0]) ?? agentFiles[0];
   }
 
   private findAgentFile(agentFiles: AgentFileRecord[], name: string | undefined): AgentFileRecord | undefined {

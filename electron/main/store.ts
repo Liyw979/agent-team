@@ -409,7 +409,6 @@ export class StoreService {
               id: typeof task.id === "string" ? task.id : "",
               projectId,
               title: typeof task.title === "string" ? task.title : "未命名任务",
-              entryAgentId: typeof task.entryAgentId === "string" ? task.entryAgentId : "",
               status:
                 task.status === "running" ||
                 task.status === "success" ||

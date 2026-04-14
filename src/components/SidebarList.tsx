@@ -33,13 +33,6 @@ const taskStatusStyles: Record<string, string> = {
   failed: "bg-primary text-primary-foreground",
 };
 
-function getAgentDisplayName(name: string) {
-  if (name === "build") {
-    return "Build";
-  }
-  return name;
-}
-
 export function SidebarList({
   projects,
   selectedProjectId,
@@ -169,7 +162,7 @@ export function SidebarList({
                               activeTask ? "text-primary-foreground/75" : "text-muted-foreground",
                             )}
                           >
-                            {getAgentDisplayName(task.task.entryAgentId)} · {task.task.agentCount} Agents
+                            {task.task.agentCount} Agents
                           </p>
                         </div>
                         <span
