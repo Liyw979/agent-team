@@ -44,7 +44,7 @@ export interface OpenCodeExecutionResult {
 
 export interface OpenCodeRuntimeActivity {
   id: string;
-  kind: "tool" | "message" | "step";
+  kind: "tool" | "message" | "thinking" | "step";
   label: string;
   detail: string;
   timestamp: string;
@@ -480,7 +480,10 @@ export class OpenCodeClient {
     }
 
     const rawConfig = await current.text();
-    const parsed = rawConfig.trim() ? (JSON.parse(rawConfig) as Record<string, unknown>) : {};
+    const normalizedRawConfig = this.normalizeRestrictedAgentConfig(rawConfig);
+    const parsed = normalizedRawConfig.trim()
+      ? (JSON.parse(normalizedRawConfig) as Record<string, unknown>)
+      : {};
     const agentConfig =
       parsed.agent && typeof parsed.agent === "object"
         ? { ...(parsed.agent as Record<string, unknown>) }
@@ -498,6 +501,12 @@ export class OpenCodeClient {
       permission.write = "deny";
       permission.edit = "deny";
       permission.bash = "deny";
+      if (typeof permission.patch !== "string") {
+        permission.patch = "deny";
+      }
+      if (typeof permission.task !== "string") {
+        permission.task = "deny";
+      }
       agentConfig[agentName] = {
         ...existing,
         permission,
@@ -513,6 +522,50 @@ export class OpenCodeClient {
     });
     if (!patched.ok) {
       throw new Error(`写入 global/config 失败: ${patched.status}`);
+    }
+  }
+
+  private normalizeRestrictedAgentConfig(rawConfig: string): string {
+    try {
+      const parsed = JSON.parse(rawConfig) as Record<string, unknown>;
+      const agents = this.asRecord(parsed.agent);
+      let changed = false;
+
+      for (const [agentName, agentValue] of Object.entries(agents)) {
+        const agentRecord = this.asRecord(agentValue);
+        const permission = this.asRecord(agentRecord.permission);
+        const denyWrite = permission.write === "deny";
+        const denyEdit = permission.edit === "deny";
+        const denyBash = permission.bash === "deny";
+
+        if (!denyWrite || !denyEdit || !denyBash) {
+          continue;
+        }
+
+        if (typeof permission.patch !== "string") {
+          permission.patch = "deny";
+          changed = true;
+        }
+
+        if (typeof permission.task !== "string") {
+          permission.task = "deny";
+          changed = true;
+        }
+
+        agents[agentName] = {
+          ...agentRecord,
+          permission,
+        };
+      }
+
+      if (!changed) {
+        return rawConfig;
+      }
+
+      parsed.agent = agents;
+      return JSON.stringify(parsed);
+    } catch {
+      return rawConfig;
     }
   }
 
@@ -783,7 +836,6 @@ export class OpenCodeClient {
     const type = typeof part.type === "string" ? part.type : "";
     const timestamp = message.completedAt ?? message.timestamp;
     const toolName = this.extractToolName(part);
-    const detail = this.extractPartDetail(part);
 
     if (toolName) {
       const toolDetail = this.extractToolCallDetail(part);
@@ -796,7 +848,19 @@ export class OpenCodeClient {
       };
     }
 
+    const reasoningDetail = this.extractReasoningDetail(part);
+    if (reasoningDetail) {
+      return {
+        id: `${message.id}:${messageIndex}:${partIndex}:thinking`,
+        kind: "thinking",
+        label: this.shortenText(reasoningDetail, 48),
+        detail: reasoningDetail,
+        timestamp,
+      };
+    }
+
     if (type === "step-start" && typeof part.name === "string" && part.name.trim()) {
+      const detail = this.extractPartDetail(part);
       return {
         id: `${message.id}:${messageIndex}:${partIndex}:step`,
         kind: "step",
@@ -806,6 +870,7 @@ export class OpenCodeClient {
       };
     }
 
+    const detail = this.extractPartDetail(part);
     if (!detail) {
       return null;
     }
@@ -826,7 +891,7 @@ export class OpenCodeClient {
     }
 
     for (const activity of activities) {
-      if (activity.kind === "tool") {
+      if (activity.kind === "tool" || activity.kind === "thinking") {
         continue;
       }
       const detail = activity.detail.trim();
@@ -850,7 +915,7 @@ export class OpenCodeClient {
       (typeof part.name === "string" && part.name.trim()) ||
       null;
 
-    if (directTool && (type.includes("tool") || type === "step-start")) {
+    if (directTool && type.includes("tool")) {
       return directTool;
     }
 
@@ -876,7 +941,6 @@ export class OpenCodeClient {
       typeof part.text === "string" ? part.text : "",
       typeof part.title === "string" ? part.title : "",
       typeof part.description === "string" ? part.description : "",
-      typeof part.reasoning === "string" ? part.reasoning : "",
       this.extractStructuredDetail(part.input),
       this.extractStructuredDetail(part.args),
       this.extractStructuredDetail(part.arguments),
@@ -887,6 +951,14 @@ export class OpenCodeClient {
       .filter(Boolean);
 
     return textCandidates[0] ?? "";
+  }
+
+  private extractReasoningDetail(part: Record<string, unknown>): string {
+    if (typeof part.reasoning !== "string") {
+      return "";
+    }
+
+    return part.reasoning.trim();
   }
 
   private extractToolCallDetail(part: Record<string, unknown>): string {

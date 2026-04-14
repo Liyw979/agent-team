@@ -33,17 +33,18 @@
 - Agent 自动派发下游时会封装 `[From]`、`[Message]`；系统会把当前 Project Git Diff 的精简摘要附加到转发 Prompt 的 `[Requeirement]` 段
 - 每个 Agent 都会按名称自动分配一套稳定配色；聊天记录里会使用对应的浅色底、描边与标签色来区分不同 Agent
 - 右下角团队成员列表支持直接调整 Agent 顺序；该顺序会持久化到拓扑配置，并直接决定右上角拓扑图从左到右的节点排列
-- 团队成员面板顶部展示当前 Task 最后一条群聊消息，以及当前 Task 的 panel 绑定摘要
+- 团队成员面板顶部仅展示当前 Task 的 panel 绑定摘要，不再额外显示最后一条群聊消息预览
 - 右上角为 Project 级真实拓扑图，点击节点即可编辑“这个 Agent 会去跟哪些 Agent”，也支持整块面板放大查看；放大视图会直接把当前拓扑图放大，Agent 卡片会随视口横向和纵向一起拉伸铺满面板，连线固定走在 Agent 顶部的上方通道内，不会越出拓扑 panel；节点顺序稳定，未显式保存顺序时默认优先取 `BA` 作为最左侧起点
 - 拓扑边只保留 `success` 一种触发语义，表示当前 Agent 审查通过或执行完成后自动触发下游
 - 拓扑图里的 Agent 节点颜色用于表达当前运行状态，不再用颜色区分 built-in / custom；内置与本地类型信息仅在编辑面板等辅助信息里展示
 - 审查类 Agent 的“审查通过 / 审查不通过”状态会直接展示在拓扑节点顶部；审查不通过时系统会固定触发 `Build`，并把当前 Task 直接收口为“不通过”
 - 当某个 Task 已运行到当前节点、但拓扑里不存在可自动继续推进的下游节点时，Task 状态会切换为 `waiting`，与群聊中的“保持等待状态”系统消息保持一致
 - 拓扑图在面板尺寸变化时会保持“Agent 在上、历史区在下、首尾节点贴近左右边界但保留少量留白、顶部预留连线通道”的布局约束，而不是把整张图简单等比缩放后居中
-- 拓扑图历史区会优先展示 Agent 最近的运行活动，包括普通消息与 Tool Call 参数摘要，而不只是单行运行状态
+- 拓扑图历史区会优先展示 Agent 最近的运行活动，并明确区分思考、普通消息、步骤与 Tool Call 参数摘要，而不只是单行运行状态
 - 右下角展示 Project 全量 Agent，以及它们在当前 Task 语境下的状态；点击 Agent 会直接打开原始配置文件查看器
 - `.opencode/agents/**/*.md` 动态加载，前端只读查看 OpenCode 原始 Agent 文件，不支持直接编辑
 - Agent frontmatter 采用最新的 `permission:` 配置字段，值使用 `allow / ask / deny`
+- 对只读 Agent，除了 `write / edit / bash` 之外，还需要一并限制 `patch / task`；运行时也会把这类缺省项自动硬化为 `deny`，避免通过子代理间接改文件
 - 当前默认 Agent 集合为 `BA / Build / CodeReview / DocsReview / IntegrationTest / UnitTest`
 - `Build` 是项目内部名称，底层使用 OpenCode 内置 `build` agent，不需要项目自己在 `.opencode/agents` 里额外定义 Markdown 文件
 - 除 `Build` 外，其余 Agent 一律按审查类 Agent 处理；只有 `Build` 是实际执行实现的 Agent

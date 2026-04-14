@@ -536,16 +536,21 @@ function buildFullToolHistory(toolName: string, detail: string) {
   );
 }
 
-function getRuntimeActivityAppearance(kind: string, label: string) {
+function getRuntimeActivityAppearance(kind: string) {
   switch (kind) {
     case "tool":
       return {
         label: "工具",
         className: "border-[#d4b07b] bg-[#fff3e1] text-[#7a4d15]",
       };
+    case "thinking":
+      return {
+        label: "思考",
+        className: "border-[#b7b8cb] bg-[#f5f5fb] text-[#43455f]",
+      };
     case "step":
       return {
-        label: "消息",
+        label: "步骤",
         className: "border-[#9cb9d7] bg-[#edf4fb] text-[#27496b]",
       };
     default:
@@ -613,7 +618,7 @@ function getRuntimeHistoryItems(snapshot: AgentRuntimeSnapshot | undefined, agen
     .sort((left, right) => left.timestamp.localeCompare(right.timestamp))
     .slice(-MAX_VISIBLE_HISTORY_ITEMS)
     .map((activity, index) => {
-      const appearance = getRuntimeActivityAppearance(activity.kind, activity.label);
+      const appearance = getRuntimeActivityAppearance(activity.kind);
       const detail =
         activity.kind === "tool"
           ? summarizeToolHistory(activity.label, activity.detail)

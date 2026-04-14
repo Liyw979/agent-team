@@ -125,7 +125,7 @@ export interface MessageRecord {
 
 export interface AgentRuntimeActivity {
   id: string;
-  kind: "tool" | "message" | "step";
+  kind: "tool" | "message" | "thinking" | "step";
   label: string;
   detail: string;
   timestamp: string;
@@ -222,6 +222,7 @@ export const DEFAULT_TOOL_PERMISSIONS: ToolPermission[] = [
   { name: "glob", mode: "allow" },
   { name: "list", mode: "allow" },
   { name: "patch", mode: "ask" },
+  { name: "task", mode: "ask" },
   { name: "lsp", mode: "allow" },
   { name: "todowrite", mode: "allow" },
   { name: "webfetch", mode: "allow" },
