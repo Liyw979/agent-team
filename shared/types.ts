@@ -98,11 +98,13 @@ export interface TopologyNode {
   kind: "agent" | "checkpoint";
 }
 
+export type TopologyEdgeTrigger = "association" | "review";
+
 export interface TopologyEdge {
   id: string;
   source: string;
   target: string;
-  triggerOn: "success";
+  triggerOn: TopologyEdgeTrigger;
 }
 
 export interface TopologyRecord {
@@ -349,8 +351,13 @@ export function createDefaultTopology(projectId: string, agents: TopologyAgentSe
   const docsReviewAgent = findAgentByRole(agents, "docs_review");
   const unitTestAgent = findAgentByRole(agents, "unit_test");
   const integrationTestAgent = findAgentByRole(agents, "integration_test");
+  const codeReviewAgent = findAgentByRole(agents, "code_review");
 
-  const push = (source: string | null | undefined, target: string | null | undefined, triggerOn: TopologyEdge["triggerOn"]) => {
+  const push = (
+    source: string | null | undefined,
+    target: string | null | undefined,
+    triggerOn: TopologyEdge["triggerOn"],
+  ) => {
     if (!source || !target) {
       return;
     }
@@ -361,12 +368,18 @@ export function createDefaultTopology(projectId: string, agents: TopologyAgentSe
   };
 
   if (startAgent && implementationAgent && startAgent.name !== implementationAgent.name) {
-    push(startAgent.name, implementationAgent.name, "success");
+    push(startAgent.name, implementationAgent.name, "association");
+    push(startAgent.name, implementationAgent.name, "review");
   }
-  push(implementationAgent?.name, docsReviewAgent?.name, "success");
-  push(implementationAgent?.name, unitTestAgent?.name, "success");
-  push(implementationAgent?.name, integrationTestAgent?.name, "success");
-  push(integrationTestAgent?.name, startAgent?.name, "success");
+  push(implementationAgent?.name, docsReviewAgent?.name, "association");
+  push(implementationAgent?.name, unitTestAgent?.name, "association");
+  push(implementationAgent?.name, integrationTestAgent?.name, "association");
+  push(implementationAgent?.name, codeReviewAgent?.name, "association");
+  push(docsReviewAgent?.name, implementationAgent?.name, "review");
+  push(unitTestAgent?.name, implementationAgent?.name, "review");
+  push(integrationTestAgent?.name, implementationAgent?.name, "review");
+  push(codeReviewAgent?.name, implementationAgent?.name, "review");
+  push(integrationTestAgent?.name, startAgent?.name, "association");
 
   return {
     projectId,

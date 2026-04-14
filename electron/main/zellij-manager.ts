@@ -17,6 +17,8 @@ interface ZellijPaneInfo {
   title: string;
   isPlugin: boolean;
   exited: boolean;
+  isFocused: boolean;
+  isFullscreen: boolean;
   isFloating: boolean;
   x: number;
   y: number;
@@ -86,6 +88,7 @@ export class ZellijManager {
   async openTaskSession(sessionName: string, cwd: string): Promise<void> {
     await this.assertAvailable("无法打开 Zellij Session");
     await this.ensureSessionActive(sessionName);
+    await this.ensureSessionLayout(sessionName);
     await this.openSessionInTerminal(sessionName, cwd);
   }
 
@@ -359,12 +362,55 @@ export class ZellijManager {
         title: typeof pane.title === "string" ? pane.title : `terminal_${pane.id}`,
         isPlugin: false,
         exited: Boolean(pane.exited),
+        isFocused: Boolean(pane.is_focused),
+        isFullscreen: Boolean(pane.is_fullscreen),
         isFloating: Boolean(pane.is_floating),
         x: typeof pane.pane_x === "number" ? pane.pane_x : 0,
         y: typeof pane.pane_y === "number" ? pane.pane_y : 0,
         rows: typeof pane.pane_rows === "number" ? pane.pane_rows : 0,
         columns: typeof pane.pane_columns === "number" ? pane.pane_columns : 0,
       }));
+  }
+
+  private async ensureSessionLayout(sessionName: string, targetPaneId?: string): Promise<void> {
+    const panes = await this.listTerminalPanes(sessionName);
+    const fullscreenPane = panes.find((pane) => pane.isFullscreen && !pane.exited);
+
+    if (!targetPaneId) {
+      if (fullscreenPane) {
+        await this.togglePaneFullscreen(sessionName, fullscreenPane.id);
+      }
+      return;
+    }
+
+    const targetPane = panes.find((pane) => pane.id === targetPaneId && !pane.exited);
+    if (!targetPane) {
+      throw new Error(`未找到 pane ${targetPaneId}`);
+    }
+
+    if (fullscreenPane && fullscreenPane.id !== targetPaneId) {
+      await this.togglePaneFullscreen(sessionName, fullscreenPane.id);
+    }
+
+    const refreshedPanes = await this.listTerminalPanes(sessionName);
+    const refreshedTargetPane = refreshedPanes.find((pane) => pane.id === targetPaneId && !pane.exited);
+    if (!refreshedTargetPane) {
+      throw new Error(`未找到 pane ${targetPaneId}`);
+    }
+    if (!refreshedTargetPane.isFullscreen) {
+      await this.togglePaneFullscreen(sessionName, targetPaneId);
+    }
+  }
+
+  private async togglePaneFullscreen(sessionName: string, paneId: string): Promise<void> {
+    await execFileAsync("zellij", [
+      "-s",
+      sessionName,
+      "action",
+      "toggle-fullscreen",
+      "-p",
+      paneId,
+    ]).catch(() => undefined);
   }
 
   private filterVisibleAgents(agents: AgentPaneSpec[]): AgentPaneSpec[] {

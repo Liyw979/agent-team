@@ -25,8 +25,12 @@ const MENTION_MENU_HEADER_HEIGHT = 28;
 const MENTION_MENU_VERTICAL_PADDING = 16;
 const MENTION_MENU_GAP = 12;
 const MENTION_MENU_VIEWPORT_MARGIN = 12;
+const SYSTEM_SENDER_LABEL = "Ocustrater";
 
 function getAgentDisplayName(name: string) {
+  if (name === "system") {
+    return SYSTEM_SENDER_LABEL;
+  }
   return name;
 }
 
@@ -136,7 +140,7 @@ function MessageBubble({
   const hasRevisionRequest = message.kinds.includes("revision-request");
   const hasTopologyBlocked = message.kinds.includes("topology-blocked");
   const agentColor = isAgent ? getAgentColorToken(message.sender) : null;
-  const senderLabel = isUser ? null : isAgent ? getAgentDisplayName(message.sender) : message.sender;
+  const senderLabel = isUser ? null : getAgentDisplayName(message.sender);
   const bubbleStyle =
     isAgent && agentColor
       ? {
@@ -152,6 +156,12 @@ function MessageBubble({
           background: agentColor.solid,
           color: agentColor.badgeText,
         }
+      : isSystem
+        ? {
+            background: "#5867C8",
+            color: "#F8FAFF",
+            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.16)",
+          }
       : isUser
         ? {
             background: "#D8C27A",
@@ -192,7 +202,7 @@ function MessageBubble({
             <span
               className={cn(
                 "inline-flex max-w-full shrink-0 rounded-[8px] px-2 py-0.5 text-center text-xs font-semibold leading-5 tracking-[0.02em]",
-                !isAgent && !isUser && "bg-black/8 text-current",
+                !isAgent && !isUser && !isSystem && "bg-black/8 text-current",
               )}
               style={senderBadgeStyle}
             >
@@ -388,7 +398,7 @@ export function ChatWindow({
 
   return (
     <section className="PANEL-surface flex h-full min-h-0 flex-col rounded-[10px]">
-      <header className="flex min-h-[34px] items-center justify-between gap-3 border-b border-border/60 px-5 py-2">
+      <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border/60 px-5">
         <div className="flex items-center gap-2.5">
           <p className="font-display text-[1.45rem] font-bold text-primary">消息</p>
           <span className="rounded-full bg-[#c96f3b] px-2.5 py-0.5 text-xs font-semibold text-white">
@@ -401,14 +411,14 @@ export function ChatWindow({
             onClick={() => {
               void handleOpenTaskSession();
             }}
-            className="no-drag rounded-[8px] border border-border bg-card px-3.5 py-1.5 text-xs font-semibold text-foreground transition hover:border-primary"
+            className="no-drag rounded-[8px] border border-border bg-card px-3 py-1 text-xs font-semibold text-foreground transition hover:border-primary"
           >
             打开 Zellij
           </button>
         ) : null}
       </header>
 
-      <div className="flex-1 min-h-0 space-y-3 overflow-y-auto px-5 py-4">
+      <div className="flex-1 min-h-0 space-y-3 overflow-y-auto px-5 py-3">
         {messages.length > 0 ? (
           messages.map((message) => (
             <MessageBubble key={message.id} message={message} />
@@ -421,7 +431,7 @@ export function ChatWindow({
       </div>
 
       <form
-        className="border-t border-border/60 px-5 py-4"
+        className="border-t border-border/60 px-5 py-3"
         onSubmit={async (event) => {
           event.preventDefault();
           await handleSubmit();

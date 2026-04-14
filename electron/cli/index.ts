@@ -491,8 +491,8 @@ function buildHelp() {
 
   topology show [--cwd <path>]
   topology set-downstream <sourceAgent> [targetAgent... ] [--cwd <path>]
-  topology allow <sourceAgent> <targetAgent> [--cwd <path>]
-  topology deny <sourceAgent> <targetAgent> [--cwd <path>]
+  topology allow <sourceAgent> <targetAgent> [--relation <association|review>] [--cwd <path>]
+  topology deny <sourceAgent> <targetAgent> [--relation <association|review>] [--cwd <path>]
 
   panel focus <taskId> <agentName> [--cwd <path>]
 
@@ -501,12 +501,9 @@ function buildHelp() {
   --plain         不进入 Zellij，回退到纯文本
   --json          输出 JSON
 
-触发语义：
-  success         当前 Agent 审查通过或执行完成后自动触发下游
-
-固定规则：
-  - 所有非 Build Agent 都视为审查 Agent。
-  - 审查 Agent 不通过时会固定触发 Build，并把当前 Task 直接收口为“不通过”。
+关系语义：
+  association     当前 Agent 只要完成本轮任务就自动触发下游
+  review          当前 Agent 本轮失败、给出“需要修改 / 审视不通过”时才触发下游
 
 说明：
   - CLI 会直接复用 Orchestrator、文件存储、OpenCode client、Zellij manager 这套主逻辑。
@@ -741,21 +738,21 @@ async function handleAgents(context: CliContext, parsed: ParsedArgv) {
   fail(`未知命令：agents ${action}`);
 }
 
-function replaceSuccessDownstream(
+function replaceAssociationDownstream(
   topology: TopologyRecord,
   sourceAgent: string,
   targets: string[],
 ): TopologyRecord {
   const retained = topology.edges.filter(
-    (edge) => !(edge.source === sourceAgent && edge.triggerOn === "success"),
+    (edge) => !(edge.source === sourceAgent && edge.triggerOn === "association"),
   );
   const nextEdges = [
     ...retained,
     ...targets.map((target) => ({
-      id: createTopologyEdgeId(sourceAgent, target, "success" as const),
+      id: createTopologyEdgeId(sourceAgent, target, "association" as const),
       source: sourceAgent,
       target,
-      triggerOn: "success" as const,
+      triggerOn: "association" as const,
     })),
   ];
 
@@ -763,6 +760,17 @@ function replaceSuccessDownstream(
     ...topology,
     edges: nextEdges,
   };
+}
+
+function parseTopologyRelation(parsed: ParsedArgv): TopologyEdge["triggerOn"] {
+  const relation = getOptionString(parsed, "relation");
+  if (!relation) {
+    return "association";
+  }
+  if (relation === "association" || relation === "review") {
+    return relation;
+  }
+  fail(`未知关系类型：${relation}。可选值：association / review`);
 }
 
 async function saveTopology(
@@ -808,13 +816,13 @@ async function handleTopology(context: CliContext, parsed: ParsedArgv) {
     const sourceAgent = parsed.positionals[2] ?? "";
     const targets = parsed.positionals.slice(3);
     ensureAgentNames(project, [sourceAgent, ...targets]);
-    const next = replaceSuccessDownstream(project.topology, sourceAgent, [...new Set(targets)]);
+    const next = replaceAssociationDownstream(project.topology, sourceAgent, [...new Set(targets)]);
     const updated = await saveTopology(context, project, next);
     if (json) {
       printJson(updated.topology);
       return;
     }
-    process.stdout.write(`已更新 ${sourceAgent} 的通过后下游集合。\n`);
+    process.stdout.write(`已更新 ${sourceAgent} 的关联下游集合。\n`);
     return;
   }
 
@@ -822,12 +830,12 @@ async function handleTopology(context: CliContext, parsed: ParsedArgv) {
     assertPositionals(
       parsed,
       4,
-      `topology ${action} <sourceAgent> <targetAgent> [--cwd <path>]`,
+      `topology ${action} <sourceAgent> <targetAgent> [--relation <association|review>] [--cwd <path>]`,
     );
     const sourceAgent = parsed.positionals[2] ?? "";
     const targetAgent = parsed.positionals[3] ?? "";
     ensureAgentNames(project, [sourceAgent, targetAgent]);
-    const trigger = "success" as TopologyEdge["triggerOn"];
+    const trigger = parseTopologyRelation(parsed);
 
     const edgeId = createTopologyEdgeId(sourceAgent, targetAgent, trigger);
     const exists = project.topology.edges.some((edge) => edge.id === edgeId);
