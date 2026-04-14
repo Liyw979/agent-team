@@ -12,16 +12,16 @@
 
 另外还会附带一个 OpenCode 内置 agent：
 
-- `build`
+- `Build`
 
 ## 当前约定
 
 - Agent 文件位于 `.opencode/agents/**/*.md`
 - Agent frontmatter 使用最新的 `permission:` 配置字段，值使用 `allow / ask / deny`
-- `build` 是 OpenCode 自带内置 agent，不对应本地 Markdown 文件
+- `Build` 是项目内部名称，底层对应 OpenCode 自带内置 `build` agent，不对应本地 Markdown 文件
 - 当前处于项目开发初期，不要求兼容历史数据；如果现有 Project 状态、拓扑或运行数据与当前实现不一致，优先直接修正当前数据与实现，不额外为旧数据添加兼容分支
 - 默认拓扑只在 Project 首次初始化、且当前还没有拓扑数据时按 `role / mode / 是否内置` 自动推断
-- 当前默认工作流是：`BA -> build -> (DocsReview / UnitTest / IntegrationTest)`，随后 `IntegrationTest -> BA`
+- 当前默认工作流是：`BA -> Build -> (DocsReview / UnitTest / IntegrationTest)`，随后 `IntegrationTest -> BA`
 - `CodeReview` 目前保留为可选 Agent，不会自动加入默认链路，只有用户手动改拓扑时才会接入
 - Project 一旦已有拓扑，后续运行时只认当前拓扑，不会再根据固定名字做调度判断
 - Task 不再快照 Agent 的 prompt / permission 定义；运行时始终读取当前 Project 下 `.opencode/agents/**/*.md` 的最新内容，`.agentflow/state.json` 里的 `taskAgents` 只保留运行态字段
@@ -47,11 +47,12 @@
 - 运行中的 Agent 会通过 OpenCode HTTP session 消息接口轮询实时工具调用与摘要，并显示在拓扑图节点内
 - GUI 中点击 Agent 只支持查看对应原始配置文件，不支持在应用内直接编辑 `.opencode/agents/**/*.md`
 - 用户在 Task 群聊里直接 `@Agent` 时，底层会把原始消息原样发送给目标 Agent，不额外拼接结构化前缀
+- 这类批量 `Agent -> Agent` 派发消息仅用于聊天区展示给人看，不会作为“尚未收到的群聊历史”再次转发给下游 Agent
 - Agent `@` 下游 Agent 时，只有显式指定下游或返工链路才会封装 `[From]`、`[Message]`、`[Requeirement]`；对于 `success` 的 100% 自动触发，只会保留 `[From]`、`[Message]`，不会额外拼接 `[Requeirement]`
 - Agent 间显式派发下游任务时，会自动在转发 Prompt 的 `[Requeirement]` 段附带当前 Project Git Diff 的精简摘要，帮助下游 Agent 快速感知最新改动；返工链路不附带该摘要
 - CLI 默认使用当前目录作为 project cwd
 - CLI 只支持当前 Agent 名称
-- CLI 支持单独的 `task init` 初始化步骤：先创建 Task，并把全部 Agent 的 OpenCode session / Zellij pane 启动完成；GUI 输入框会优先弹出候选 Agent 并默认选中 `build`，CLI 仍通过 `task send <agent> <message...>` 指定目标
+- CLI 支持单独的 `task init` 初始化步骤：先创建 Task，并把全部 Agent 的 OpenCode session / Zellij pane 启动完成；GUI 输入框会优先弹出候选 Agent 并默认选中 `Build`，CLI 仍通过 `task send <agent> <message...>` 指定目标
 - `task send <agent> <message...>` 成功后会打印可复制的 panel 打开命令
 
 ## 文档同步要求

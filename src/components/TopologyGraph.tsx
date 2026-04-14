@@ -107,9 +107,6 @@ const preferredRoleRowOrder: Partial<Record<AgentRole, number>> = {
 };
 
 function getAgentDisplayName(name: string) {
-  if (name === "build") {
-    return "Build";
-  }
   return name;
 }
 

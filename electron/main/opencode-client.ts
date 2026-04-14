@@ -1047,7 +1047,7 @@ export class OpenCodeClient {
         }
         return withDecision("我已整理当前 Task 的目标、范围与交付标准，并给出可执行的实现方案。");
       case "Code":
-      case "build":
+      case "Build":
         return withDecision(
           "我已完成主要实现与本地自检，当前代码、验证步骤和交付说明已经整理完成。",
         );

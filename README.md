@@ -19,13 +19,14 @@
 - 左侧 Task 列表支持右键删除 Task；删除时会同时清理该 Task 对应的 Zellij session
 - 左侧 Task 列表会定期与 Zellij session 状态同步；如果对应 session 已被外部删除，或只剩 `EXITED - attach to resurrect` 这类非活跃残留，关联 Task 会自动从列表中移除
 - 每个 Task 对应独立 Zellij session，并为当前 Project 的全部 Agent 建立 `panel <-> agent` 运行时映射
-- 支持先单独执行 Task 初始化：先把当前 Project 的全部 Agent 会话与 Zellij pane 启动完成；GUI 输入框会立刻弹出候选 Agent，并默认选中 `build`
+- 支持先单独执行 Task 初始化：先把当前 Project 的全部 Agent 会话与 Zellij pane 启动完成；GUI 输入框会立刻弹出候选 Agent，并默认选中 `Build`
 - 全新 Task 初始化 Zellij pane 时，会优先按最多三列的 tiled grid 摆放，避免默认布局过宽过扁；pane 顺序直接使用当前前端拖拽后保存的 Agent 排序
 - Zellij pane 不再按运行态动态重排，后续顺序只跟随前端拓扑/团队成员区里用户保存的 Agent 排序
 - GUI 聊天区标题栏支持直接打开当前 Task 对应的 Zellij session；打开前会先补齐当前 Task 的全部 Agent pane；macOS 和 Windows 下都会尽量把新拉起的终端窗口自动切到全屏
 - Task 群聊支持 `@AgentName` 提交任务，输入 `@` 会弹出候选 Agent 列表，支持方向键、鼠标和 `Tab` 自动补全
 - 群聊中同时展示 `user -> agent`、`agent -> agent` 高层协作消息，以及 Agent 最终回复
 - 当一个 Agent 同时触发多个下游 Agent 时，群聊会合并展示为一条批量 `agent -> agent` 派发消息，而不是拆成多条重复消息
+- 这类批量 `agent -> agent` 派发消息仅用于群聊展示给人看，不会作为“尚未收到的群聊历史”再次转发给下游 Agent
 - 用户在 Task 群聊里直接 `@Agent` 时，底层会把原始消息原样发送给目标 Agent，不额外拼接结构化前缀
 - Agent 派发下游时，只有显式指定下游或返工链路才会封装 `[From]`、`[Message]`、`[Requeirement]`；对于 `success` 的 100% 自动触发，只会保留 `[From]`、`[Message]`，不会额外拼接 `[Requeirement]`
 - 当 Agent 显式派发下游 Agent 时，系统会把当前 Project Git Diff 的精简摘要附加到转发 Prompt 的 `[Requeirement]` 段；返工链路不附带该摘要
@@ -40,10 +41,10 @@
 - 右下角展示 Project 全量 Agent，以及它们在当前 Task 语境下的状态；点击 Agent 会直接打开原始配置文件查看器
 - `.opencode/agents/**/*.md` 动态加载，前端只读查看 OpenCode 原始 Agent 文件，不支持直接编辑
 - Agent frontmatter 采用最新的 `permission:` 配置字段，值使用 `allow / ask / deny`
-- 当前默认 Agent 集合为 `BA / build / CodeReview / DocsReview / IntegrationTest / UnitTest`
-- `build` 使用 OpenCode 内置 Agent，不需要项目自己在 `.opencode/agents` 里额外定义 Markdown 文件
+- 当前默认 Agent 集合为 `BA / Build / CodeReview / DocsReview / IntegrationTest / UnitTest`
+- `Build` 是项目内部名称，底层使用 OpenCode 内置 `build` agent，不需要项目自己在 `.opencode/agents` 里额外定义 Markdown 文件
 - 当前处于项目开发初期，不要求兼容历史数据；如果现有 Project 状态、拓扑或运行数据与当前实现不一致，优先直接修正当前数据与实现，不额外为旧数据添加兼容分支
-- 默认工作流是 `BA -> build -> (DocsReview / UnitTest / IntegrationTest)`，随后 `IntegrationTest -> BA`
+- 默认工作流是 `BA -> Build -> (DocsReview / UnitTest / IntegrationTest)`，随后 `IntegrationTest -> BA`
 - `CodeReview` 默认保留为可选 Agent，不会自动接入默认链路，只有用户手动修改拓扑时才会加入
 - Project 是全局注册信息；拓扑、Task、消息、panel 绑定等运行数据都保存在各自 Project 目录下的 `.agentflow/`
 - Project 拓扑是唯一真源；Task 后续执行始终读取当前 Project 生效中的拓扑，而不是依赖固定 Agent 名称
@@ -119,9 +120,9 @@ npm run cli -- task panels <taskId>
 
 # 5. 查看和修改拓扑
 npm run cli -- topology show
-npm run cli -- topology set-downstream build DocsReview UnitTest IntegrationTest
-npm run cli -- topology allow BA build --trigger success
-npm run cli -- topology allow CodeReview build --trigger failed
+npm run cli -- topology set-downstream Build DocsReview UnitTest IntegrationTest
+npm run cli -- topology allow BA Build --trigger success
+npm run cli -- topology allow CodeReview Build --trigger failed
 
 # 6. 查看 Agent 原始配置文件
 npm run cli -- agent show BA
@@ -145,11 +146,11 @@ CLI 能力分组：
 
 - 当前实现使用单个 `opencode serve`，默认监听 `127.0.0.1:4096`
 - 不同 Project 通过 `x-opencode-directory` 请求头按目录路由到各自工作区实例
-- Project 级 Agent 配置按 OpenCode 原生格式读取 `.opencode/agents/**/*.md`，同时允许直接使用 OpenCode 内置 `build` Agent
-- 若当前 Project 为空目录，应用会补齐默认 Agent 模板：`BA / CodeReview / DocsReview / IntegrationTest / UnitTest`，并自动附带内置 `build`
+- Project 级 Agent 配置按 OpenCode 原生格式读取 `.opencode/agents/**/*.md`，同时允许直接使用项目内部名称为 `Build` 的内置 Agent；其底层仍调用 OpenCode 内置 `build` agent
+- 若当前 Project 为空目录，应用会补齐默认 Agent 模板：`BA / CodeReview / DocsReview / IntegrationTest / UnitTest`，并自动附带内置 `Build`
 - 默认拓扑只在首次初始化且当前还没有拓扑数据时按 Agent `role / mode / 是否内置` 自动推断；后续运行时不依赖固定名字
 - 每次创建 Task 或 Agent 间消息转发前，都会先尝试触发配置 Reload
-- `task init` 会先创建 Task，并完成该 Task 下全部 Agent 的 OpenCode session 与 Zellij pane 初始化；GUI 群聊会优先推荐并默认选中 `build`，若用户直接发送且未显式指定目标，也会默认投递给 `build`
+- `task init` 会先创建 Task，并完成该 Task 下全部 Agent 的 OpenCode session 与 Zellij pane 初始化；GUI 群聊会优先推荐并默认选中 `Build`，若用户直接发送且未显式指定目标，也会默认投递给 `Build`
 - GUI 聊天区里的 `Task Started` 系统消息会附带当前 Task 的 `Zellij Session` 名称与可直接执行的 attach 调试命令，方便排查会话问题
 - 点击 GUI 聊天区标题栏里的打开按钮时，macOS 会额外尝试把 Terminal 前台窗口切到全屏；Windows 会优先使用 Windows Terminal 全屏打开，回退到 `cmd.exe` 时也会尽量自动触发 `F11`
 - 对于首次初始化、尚无托管 pane 的 Task，Zellij 会优先生成最多三列的 tiled grid 初始布局，并直接使用当前保存的 Agent 排序来决定 pane 顺序

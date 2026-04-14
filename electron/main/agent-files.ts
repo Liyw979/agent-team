@@ -84,7 +84,7 @@ permission:
 `,
 };
 
-const BUILTIN_BUILD_AGENT_PATH = "builtin://build";
+const BUILTIN_BUILD_AGENT_PATH = "builtin://Build";
 
 const TOOL_PERMISSION_MODE_SET = new Set<PermissionMode>(["allow", "ask", "deny"]);
 const DEFAULT_TOOL_MODE_MAP = new Map(DEFAULT_TOOL_PERMISSIONS.map((tool) => [tool.name, tool.mode]));
@@ -263,16 +263,16 @@ function buildAgentRecord(projectId: string, projectPath: string, absolutePath: 
 }
 
 function buildBuiltinBuildAgentRecord(projectId: string): AgentFileRecord {
-  const content = `# OpenCode built-in agent: build
+  const content = `# OpenCode built-in agent: Build
 
-这个 Agent 使用 OpenCode 自带的内置 build agent。
+这个 Agent 在项目内部名称是 Build，底层使用 OpenCode 自带的内置 build agent。
 它不是项目里的 Markdown 文件，因此不会出现在 .opencode/agents 文件编辑链路里。
 `;
 
   return {
-    id: `${projectId}:build`,
+    id: `${projectId}:Build`,
     projectId,
-    name: "build",
+    name: "Build",
     relativePath: BUILTIN_BUILD_AGENT_PATH,
     absolutePath: BUILTIN_BUILD_AGENT_PATH,
     mode: "primary",
@@ -285,7 +285,7 @@ function buildBuiltinBuildAgentRecord(projectId: string): AgentFileRecord {
 
 function resolveAgentAbsolutePath(projectPath: string, relativePath: string): string {
   if (relativePath === BUILTIN_BUILD_AGENT_PATH) {
-    throw new Error("OpenCode 内置 build agent 不对应本地 Markdown 文件");
+    throw new Error("OpenCode 内置 Build agent 不对应本地 Markdown 文件");
   }
 
   const agentsDir = path.join(projectPath, ".opencode", "agents");

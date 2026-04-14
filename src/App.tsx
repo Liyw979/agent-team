@@ -17,9 +17,6 @@ interface OptimisticSubmission {
 }
 
 function getAgentDisplayName(name: string) {
-  if (name === "build") {
-    return "Build";
-  }
   return name;
 }
 
@@ -412,8 +409,8 @@ function App() {
                       }
                       const resolvedMentionAgent =
                         mentionAgent ||
-                        (activeProject.agentFiles.some((agent) => agent.name === "build")
-                          ? "build"
+                        (activeProject.agentFiles.some((agent) => agent.name === "Build")
+                          ? "Build"
                           : activeProject.agentFiles[0]?.name);
                       let optimisticId: string | null = null;
                       if (activeTask) {

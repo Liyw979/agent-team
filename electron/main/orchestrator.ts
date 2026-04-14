@@ -63,6 +63,7 @@ interface TaskRuntimeState {
   completedEdges: Set<string>;
   lastSignatureByAgent: Map<string, string>;
   runningAgents: Set<string>;
+  queuedAgents: Set<string>;
   deliveredMessageIdsByAgent: Map<string, Set<string>>;
 }
 
@@ -250,7 +251,7 @@ export class Orchestrator {
     const mentionName =
       payload.mentionAgent ||
       this.extractMention(payload.content) ||
-      this.findAgentFile(agentFiles, "build")?.name;
+      this.findAgentFile(agentFiles, "Build")?.name;
     if (!mentionName) {
       throw new Error("当前没有可用的目标 Agent。");
     }
@@ -433,6 +434,7 @@ export class Orchestrator {
       completedEdges: new Set(),
       lastSignatureByAgent: new Map(),
       runningAgents: new Set(),
+      queuedAgents: new Set(),
       deliveredMessageIdsByAgent: new Map(),
     });
 
@@ -479,11 +481,10 @@ export class Orchestrator {
       payload: message,
     });
 
-    const runPromise = this.runAgent(project, this.store.getTask(task.id), targetAgent.name, {
+    const runPromise = this.dispatchAgentRun(project, task.id, targetAgent.name, {
       mode: "raw",
       content,
-    });
-    this.markMessagesDelivered(task.id, targetAgent.name, [message.id]);
+    }, [message.id]);
     void runPromise.catch((error) => {
       console.error("[orchestrator] 后台发送任务失败", {
         taskId: task.id,
@@ -492,6 +493,51 @@ export class Orchestrator {
       });
     });
     return this.hydrateTask(task.id);
+  }
+
+  private async dispatchAgentRun(
+    project: ProjectRecord,
+    taskId: string,
+    agentName: string,
+    prompt: AgentExecutionPrompt,
+    deliveredMessageIds: string[] = [],
+  ) {
+    const runtime = this.getRuntime(taskId);
+    if (runtime.runningAgents.has(agentName)) {
+      runtime.queuedAgents.add(agentName);
+      return;
+    }
+
+    if (deliveredMessageIds.length > 0) {
+      this.markMessagesDelivered(taskId, agentName, deliveredMessageIds);
+    }
+
+    await this.runAgent(project, this.store.getTask(taskId), agentName, prompt);
+  }
+
+  private buildQueuedAgentPrompt(
+    taskId: string,
+    agentName: string,
+  ): { prompt: AgentExecutionPrompt; deliveredMessageIds: string[] } | null {
+    const incrementalContext = this.buildIncrementalAgentContext(taskId, agentName);
+    if (incrementalContext.messageIds.length === 0) {
+      return null;
+    }
+
+    const forwardedMessage =
+      incrementalContext.content.trim().length > 0
+        ? `${incrementalContext.content}\n\n请基于以上新增历史继续处理当前任务。`
+        : "请继续处理当前任务，并优先处理当前 Task 中最新新增的消息。";
+
+    return {
+      prompt: {
+        mode: "structured",
+        from: "Orchestrator",
+        message: forwardedMessage,
+        requirement: "请结合 [Message] 中新增的上下文继续推进你当前负责的工作，并避免遗漏后到达的新消息。",
+      },
+      deliveredMessageIds: incrementalContext.messageIds,
+    };
   }
 
   private createUserMessage(
@@ -638,7 +684,6 @@ export class Orchestrator {
       const agentStatus = parsedReview.decision === "needs_revision" ? "needs_revision" : "success";
       this.store.updateTaskAgentStatus(task.id, agentName, agentStatus);
       this.store.updateTaskStatus(task.id, agentStatus === "needs_revision" ? "needs_revision" : "running", null);
-      runtime.runningAgents.delete(agentName);
 
       this.emit({
         type: "message-created",
@@ -663,6 +708,10 @@ export class Orchestrator {
         payload: this.hydrateTask(task.id),
       });
 
+      if (runtime.queuedAgents.has(agentName)) {
+        return;
+      }
+
       const signal = this.parseSignal(response.finalMessage);
       if (parsedReview.decision === "needs_revision") {
         await this.handleRevision(project, task.id, agentName, parsedReview, signal, taskMessage.content);
@@ -676,17 +725,20 @@ export class Orchestrator {
 
       const triggered = await this.triggerDownstream(project, task.id, agentName, parsedReview.cleanContent, signal);
       const topology = this.store.getTopology(project.id);
+      const hasOtherRunningAgents = [...runtime.runningAgents].some((runningAgent) => runningAgent !== agentName);
+      const hasQueuedAgents = runtime.queuedAgents.size > 0;
 
       if (
-        signal.done ||
-        (triggered === 0 &&
+        (!hasOtherRunningAgents && !hasQueuedAgents && signal.done) ||
+        (!hasOtherRunningAgents &&
+          !hasQueuedAgents &&
+          triggered === 0 &&
           this.hasCompletedIncomingSuccess(topology, runtime.completedEdges, agentName) &&
           this.hasCompletedOutgoingSuccess(topology, runtime.completedEdges, agentName))
       ) {
         await this.completeTask(task.id, "success");
       }
     } catch (error) {
-      runtime.runningAgents.delete(agentName);
       this.store.updateTaskAgentStatus(task.id, agentName, "failed");
       await this.completeTask(task.id, "failed");
 
@@ -719,6 +771,36 @@ export class Orchestrator {
         type: "task-updated",
         projectId: project.id,
         payload: this.hydrateTask(task.id),
+      });
+    } finally {
+      runtime.runningAgents.delete(agentName);
+
+      if (!runtime.queuedAgents.delete(agentName)) {
+        return;
+      }
+
+      const latestTask = this.store.getTask(task.id);
+      if (latestTask.status === "failed" || latestTask.status === "success") {
+        return;
+      }
+
+      const queuedPrompt = this.buildQueuedAgentPrompt(task.id, agentName);
+      if (!queuedPrompt) {
+        return;
+      }
+
+      void this.dispatchAgentRun(
+        project,
+        task.id,
+        agentName,
+        queuedPrompt.prompt,
+        queuedPrompt.deliveredMessageIds,
+      ).catch((queuedError) => {
+        console.error("[orchestrator] 排队 Agent 重跑失败", {
+          taskId: task.id,
+          agentName,
+          error: queuedError instanceof Error ? queuedError.message : String(queuedError),
+        });
       });
     }
   }
@@ -763,11 +845,20 @@ export class Orchestrator {
       }
     }
 
-    const readyTargets = [...targetNames].filter((targetName) =>
-      this.canTriggerTarget(taskId, topology, completed, targetName, runtime),
-    );
+    const readyTargets: string[] = [];
+    const queuedTargets = new Set<string>();
+    for (const targetName of targetNames) {
+      if (runtime.runningAgents.has(targetName)) {
+        runtime.queuedAgents.add(targetName);
+        queuedTargets.add(targetName);
+        continue;
+      }
+      if (this.canTriggerTarget(taskId, topology, completed, targetName, runtime)) {
+        readyTargets.push(targetName);
+      }
+    }
 
-    if (readyTargets.length === 0) {
+    if (readyTargets.length === 0 && queuedTargets.size === 0) {
       const hasAutomaticOutgoing = outgoing.some((edge) => edge.triggerOn === "success");
       if (outgoing.length > 0 && !hasAutomaticOutgoing && signal.targets.length === 0 && !signal.done) {
         const waitingMessage = {
@@ -792,17 +883,19 @@ export class Orchestrator {
       return 0;
     }
 
+    const triggerTargets = [...readyTargets, ...queuedTargets];
+
     const triggerMessage: MessageRecord = {
       id: randomUUID(),
       projectId: project.id,
       taskId,
       sender: sourceAgentId,
       timestamp: new Date().toISOString(),
-      content: `${readyTargets.map((targetName) => `@${targetName}`).join(" ")} 请基于我刚刚完成的结果继续处理。`,
+      content: `${triggerTargets.map((targetName) => `@${targetName}`).join(" ")} 请基于我刚刚完成的结果继续处理。`,
       meta: {
         kind: "high-level-trigger",
         sourceAgentId,
-        targetAgentIds: readyTargets.join(","),
+        targetAgentIds: triggerTargets.join(","),
       },
     };
     this.store.insertMessage(triggerMessage);
@@ -826,7 +919,7 @@ export class Orchestrator {
         const forwardedMessage =
           incrementalContext.content.trim().length > 0
             ? `${incrementalContext.content}\n\n请基于以上新增历史继续处理当前任务。`
-            : `上游 Agent ${sourceAgentId} 已完成，请继续处理以下上下文：\n\n${content}`;
+            : `上游 Agent ${this.getAgentDisplayName(sourceAgentId)} 已完成，请继续处理以下上下文：\n\n${content}`;
         const forwardedRequirement =
           signal.targets.length > 0
             ? this.buildAgentHandoffRequirement(
@@ -836,17 +929,16 @@ export class Orchestrator {
             : undefined;
         const signature = this.buildTriggerSignature(topology, completed, targetName);
         runtime.lastSignatureByAgent.set(targetName, signature);
-        this.markMessagesDelivered(taskId, targetName, incrementalContext.messageIds);
-        await this.runAgent(project, this.store.getTask(taskId), targetName, {
+        await this.dispatchAgentRun(project, taskId, targetName, {
           mode: "structured",
           from: sourceAgentId,
           message: forwardedMessage,
           requirement: forwardedRequirement,
-        });
+        }, incrementalContext.messageIds);
       }),
     );
 
-    return readyTargets.length;
+    return triggerTargets.length;
   }
 
   private canTriggerTarget(
@@ -1079,7 +1171,7 @@ export class Orchestrator {
       return prompt.content.trim();
     }
 
-    const from = prompt.from.trim() || "System";
+    const from = this.getAgentDisplayName(prompt.from.trim() || "System");
     const message = prompt.message.trim() || "（无）";
     const sections = [`[From] ${from}`, `[Message]\n${message}`];
     if (prompt.requirement?.trim()) {
@@ -1358,14 +1450,13 @@ export class Orchestrator {
         const forwardedMessage =
           incrementalContext.content.trim().length > 0
             ? `${incrementalContext.content}\n\n请根据以上新增历史继续返工，并重点处理以下修改意见：\n${feedback}`
-            : `返工来源 Agent：${sourceAgentId}\n\n${contextSummary}具体修改意见：\n${feedback}`;
-        this.markMessagesDelivered(taskId, targetName, incrementalContext.messageIds);
-        await this.runAgent(project, this.store.getTask(taskId), targetName, {
+            : `返工来源 Agent：${this.getAgentDisplayName(sourceAgentId)}\n\n${contextSummary}具体修改意见：\n${feedback}`;
+        await this.dispatchAgentRun(project, taskId, targetName, {
           mode: "structured",
           from: sourceAgentId,
           message: forwardedMessage,
           requirement: "请根据 [Message] 中的返工背景与修改意见继续处理，并优先修复阻塞当前链路的问题。",
-        });
+        }, incrementalContext.messageIds);
       }),
     );
   }
@@ -1633,6 +1724,7 @@ export class Orchestrator {
         completedEdges: new Set(),
         lastSignatureByAgent: new Map(),
         runningAgents: new Set(),
+        queuedAgents: new Set(),
         deliveredMessageIdsByAgent: new Map(),
       };
       this.taskRuntime.set(taskId, runtime);
@@ -1655,7 +1747,11 @@ export class Orchestrator {
       if (message.meta?.optimistic === "true") {
         return false;
       }
-      if (message.meta?.kind === "task-created" || message.meta?.kind === "task-completed") {
+      if (
+        message.meta?.kind === "task-created" ||
+        message.meta?.kind === "task-completed" ||
+        message.meta?.kind === "high-level-trigger"
+      ) {
         return false;
       }
       return true;
@@ -1682,7 +1778,7 @@ export class Orchestrator {
   private renderContextMessage(message: MessageRecord): string {
     const time = this.toShortTime(message.timestamp);
     const sender = this.getMessageSenderLabel(message);
-    const content = message.content.trim();
+    const content = this.getMessageContextContent(message);
     if (!content) {
       return "";
     }
@@ -1708,7 +1804,21 @@ export class Orchestrator {
     if (message.sender === "system") {
       return "System";
     }
-    return message.sender;
+    return this.getAgentDisplayName(message.sender);
+  }
+
+  private getAgentDisplayName(name: string) {
+    return name;
+  }
+
+  private getMessageContextContent(message: MessageRecord) {
+    if (message.meta?.kind === "agent-final") {
+      const finalMessage = message.meta.finalMessage?.trim();
+      if (finalMessage) {
+        return finalMessage;
+      }
+    }
+    return message.content.trim();
   }
 
   private toShortTime(timestamp: string) {

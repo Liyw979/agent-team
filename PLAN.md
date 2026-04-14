@@ -147,12 +147,12 @@ Task 群聊中至少要出现三类消息：
 典型样子应当类似：
 
 1. 用户：
-   `@build 请实现登录流程并补测试。`
-2. build：
+   `@Build 请实现登录流程并补测试。`
+2. Build：
    `@DocsReview 请检查 README.md 与 AGENTS.md 是否需要同步更新。`
-3. build：
+3. Build：
    `@UnitTest 请开始单元测试。`
-4. build：
+4. Build：
    `@IntegrationTest 请开始集成测试。`
 5. DocsReview：
    `已完成文档审查，README.md 和 AGENTS.md 已同步核对。`
@@ -160,7 +160,7 @@ Task 群聊中至少要出现三类消息：
 这里要注意：
 
 - 前端看到的是一种群聊表达
-- “build @ DocsReview” 这类消息是协作可视化
+- “Build @ DocsReview” 这类消息是协作可视化
 - 底层真正的调度动作由 Orchestrator 统一完成
 - Agent 在执行中产生的大量工具调用、搜索、grep、编辑等 low-level 过程，不默认进入 Task 群聊
 - Task 群聊默认只展示对用户有意义的高层消息，尤其是该 Agent 本轮任务的最终回复
@@ -218,14 +218,14 @@ Task 群聊中至少要出现三类消息：
 
 也就是说，前端看到的可能是：
 
-- `build: @UnitTest 请开始单元测试。`
-- `build: @DocsReview 请检查 README.md 与 AGENTS.md。`
-- `build: @IntegrationTest 请开始集成测试。`
-- `BA: @build 请继续推进实现。`
+- `Build: @UnitTest 请开始单元测试。`
+- `Build: @DocsReview 请检查 README.md 与 AGENTS.md。`
+- `Build: @IntegrationTest 请开始集成测试。`
+- `BA: @Build 请继续推进实现。`
 
-但底层并不是“build 自己直接调用下游”，而是：
+但底层并不是“Build 自己直接调用下游”，而是：
 
-- build 完成
+- Build 完成
 - Orchestrator 根据 trigger 配置判断下游
 - Orchestrator 写入一条拟人化消息到 Task 群聊
 - Orchestrator 真实触发下游 Agent
@@ -296,14 +296,14 @@ Task 群聊中至少要出现三类消息：
 
 例如：
 
-- 点中 `build`
+- 点中 `Build`
 - 弹框里勾选 `UnitTest`
 - 再勾选 `DocsReview`
 - 再勾选 `IntegrationTest`
 - 保存后，拓扑图更新为：
-  `build -> UnitTest`
-  `build -> DocsReview`
-  `build -> IntegrationTest`
+  `Build -> UnitTest`
+  `Build -> DocsReview`
+  `Build -> IntegrationTest`
 
 也就是说，拓扑图本身就是配置结果的可视化：
 

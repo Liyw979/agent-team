@@ -48,10 +48,10 @@ async function main() {
     if (!rootAgent) {
       throw new Error("未找到可作为首个节点的 Agent");
     }
-    const buildAgent = project.agentFiles.find((agent) => agent.name === "build");
+    const buildAgent = project.agentFiles.find((agent) => agent.name === "Build");
     const codeReviewAgent = project.agentFiles.find((agent) => agent.role === "code_review");
     if (!buildAgent || !codeReviewAgent) {
-      throw new Error("未找到 build 或 CodeReview Agent，无法执行条件触发冒烟");
+      throw new Error("未找到 Build 或 CodeReview Agent，无法执行条件触发冒烟");
     }
 
     console.log("smoke: saveTopology");

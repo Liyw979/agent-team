@@ -148,7 +148,7 @@ function printAgentList(agentFiles: AgentFileRecord[]) {
         `  path: ${isBuiltinAgent(agent) ? "OpenCode built-in agent" : agent.relativePath}`,
         `  mode: ${agent.mode}`,
         `  permission: ${agent.tools.map((tool) => `${tool.name}:${tool.mode}`).join(", ")}`,
-        `  prompt: ${summarizePrompt(agent.prompt) || (isBuiltinAgent(agent) ? "OpenCode 内置 build agent" : "-")}`,
+        `  prompt: ${summarizePrompt(agent.prompt) || (isBuiltinAgent(agent) ? "OpenCode 内置 Build agent" : "-")}`,
       ].join("\n") + "\n",
     );
   }
@@ -483,7 +483,7 @@ function buildHelp() {
 说明：
   - CLI 会直接复用 Orchestrator、文件存储、OpenCode client、Zellij manager 这套主逻辑。
   - 若当前目录尚未注册为 Project，涉及 Project 语义的命令会自动创建该 Project。
-  - \`task init\` 会先创建 Task，并把当前 Project 的全部 Agent 会话 / Zellij pane 初始化好；GUI 群聊默认会优先选中 \`build\`，CLI 仍通过 \`task send <agent>\` 指定目标。
+  - \`task init\` 会先创建 Task，并把当前 Project 的全部 Agent 会话 / Zellij pane 初始化好；GUI 群聊默认会优先选中 \`Build\`，CLI 仍通过 \`task send <agent>\` 指定目标。
   - \`task send\` 会像 GUI 一样通过 Orchestrator 触发真实 Task 创建/推进与下游调度。
   - \`task show\` 在交互式终端里默认直接进入对应 Task 的 Zellij session。`;
 }
@@ -576,7 +576,7 @@ async function handleTasks(context: CliContext, parsed: ParsedArgv) {
     }
 
     process.stdout.write(
-      `已完成 Task 初始化：${snapshot.task.id}。GUI 群聊会默认优先选中 build；若走 CLI，请继续使用 \`task send <agent>\` 指定目标。\n`,
+      `已完成 Task 初始化：${snapshot.task.id}。GUI 群聊会默认优先选中 Build；若走 CLI，请继续使用 \`task send <agent>\` 指定目标。\n`,
     );
 
     if (!hasFlag(parsed, "plain") && process.stdout.isTTY && process.stdin.isTTY) {
@@ -696,7 +696,7 @@ async function handleAgents(context: CliContext, parsed: ParsedArgv) {
     printKeyValue("Mode", agent.mode);
     printKeyValue("Permission", agent.tools.map((tool) => `${tool.name}:${tool.mode}`).join(", "));
     printSection("Prompt");
-    process.stdout.write(`${agent.prompt || "OpenCode 内置 build agent\n"}\n`);
+    process.stdout.write(`${agent.prompt || "OpenCode 内置 Build agent\n"}\n`);
     return;
   }
 

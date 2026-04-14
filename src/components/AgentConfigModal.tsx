@@ -113,7 +113,7 @@ export function AgentConfigModal({
                 ))}
                 {viewableAgents.length === 0 && (
                   <div className="rounded-[8px] border border-dashed border-border bg-white/50 px-3 py-4 text-sm text-muted-foreground">
-                    当前没有可查看的本地 Agent 文件。OpenCode 内置 build agent 不在这里展示原始 Markdown。
+                    当前没有可查看的本地 Agent 文件。OpenCode 内置 Build agent 不在这里展示原始 Markdown。
                   </div>
                 )}
               </div>

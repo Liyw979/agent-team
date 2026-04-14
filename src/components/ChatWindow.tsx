@@ -27,9 +27,6 @@ const MENTION_MENU_GAP = 12;
 const MENTION_MENU_VIEWPORT_MARGIN = 12;
 
 function getAgentDisplayName(name: string) {
-  if (name === "build") {
-    return "Build";
-  }
   return name;
 }
 
@@ -119,8 +116,8 @@ function extractFirstMention(content: string): string | undefined {
 }
 
 function getDefaultAgentName(agents: string[]): string | undefined {
-  if (agents.includes("build")) {
-    return "build";
+  if (agents.includes("Build")) {
+    return "Build";
   }
   return agents[0];
 }
@@ -279,10 +276,10 @@ export function ChatWindow({
     const query = mentionContext.query.toLowerCase();
     const filtered = availableAgents.filter((name) => name.toLowerCase().includes(query));
     return [...filtered].sort((left, right) => {
-      if (left === "build") {
+      if (left === "Build") {
         return -1;
       }
-      if (right === "build") {
+      if (right === "Build") {
         return 1;
       }
       return left.localeCompare(right);
