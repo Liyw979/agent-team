@@ -33,21 +33,6 @@ function moveItemBefore(items: string[], sourceId: string, targetId: string) {
   return next;
 }
 
-function getAgentStatusClassName(status: string) {
-  switch (status) {
-    case "running":
-      return "bg-secondary text-secondary-foreground";
-    case "success":
-      return "bg-accent text-foreground";
-    case "needs_revision":
-      return "bg-[#f2d19b] text-[#6a4318]";
-    case "failed":
-      return "bg-primary text-primary-foreground";
-    default:
-      return "bg-muted text-foreground/80";
-  }
-}
-
 function getAgentMetricLabel(messageCount: number) {
   return `消息 · ${messageCount}`;
 }
@@ -573,7 +558,7 @@ function App() {
 
                                 <div className="flex shrink-0 flex-col items-end gap-2">
                                   <span
-                                    className={`rounded-[6px] px-2.5 py-1 text-[11px] ${getAgentStatusClassName(agent.status)}`}
+                                    className="rounded-[6px] border border-border/70 bg-card/90 px-2.5 py-1 text-[11px] text-foreground/75 shadow-sm"
                                   >
                                     {getAgentMetricLabel(agent.messageCount)}
                                   </span>
