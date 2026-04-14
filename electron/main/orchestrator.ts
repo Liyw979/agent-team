@@ -480,7 +480,7 @@ export class Orchestrator {
 
     await this.ensureTaskInitialized(project, task, agentFiles);
 
-    const message = this.createUserMessage(project.id, task.id, task.title, content);
+    const message = this.createUserMessage(project.id, task.id, task.title, content, targetAgent.name);
     this.store.insertMessage(message);
     this.emit({
       type: "message-created",
@@ -508,6 +508,7 @@ export class Orchestrator {
     taskId: string,
     taskTitle: string,
     content: string,
+    targetAgentId: string,
   ): MessageRecord {
     return {
       id: randomUUID(),
@@ -519,6 +520,7 @@ export class Orchestrator {
       meta: {
         scope: "task",
         taskTitle,
+        targetAgentId,
       },
     };
   }

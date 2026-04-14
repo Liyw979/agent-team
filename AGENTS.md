@@ -27,6 +27,7 @@
 - Task 不再快照 Agent 的 prompt / permission 定义；运行时始终读取当前 Project 下 `.opencode/agents/**/*.md` 的最新内容，`.agentflow/state.json` 里的 `taskAgents` 只保留运行态字段
 - Project 只保留全局注册信息；拓扑、Task、消息、panel 绑定等运行数据保存在各自 Project 目录下的 `.agentflow/`
 - GUI 主布局为：左侧 `Project + Task` 列表，右侧上方大拓扑图，右侧下方左聊天、右 Agent 列表
+- 右下角团队成员面板顶部展示 build Agent 最近一次接收到的任务摘要，以及当前 Task 的 panel 绑定摘要
 - 当一个 Agent 同时触发多个下游 Agent 时，聊天区会合并展示为一条批量 `Agent -> Agent` 派发消息，而不是拆成多条重复消息
 - 拓扑边支持三种触发语义：`success` 表示当前 Agent 完成后 100% 自动触发下游，`failed` 表示只有当前 Agent 决策为“需要修改”时才触发下游返工，`manual` 表示只有当前 Agent 显式指定 `NEXT_AGENTS` 时才触发
 - 每个 Agent 都会按名称自动分配一套稳定配色；聊天记录里会使用对应的浅色底、描边与标签色来区分不同 Agent

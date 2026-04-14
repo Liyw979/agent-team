@@ -54,6 +54,64 @@ function getAgentMetricLabel(messageCount: number) {
   return `消息 · ${messageCount}`;
 }
 
+function extractFirstMention(content: string): string | undefined {
+  const match = content.match(/@([^\s]+)/);
+  return match?.[1];
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeInlineText(content: string) {
+  return content.replace(/\s+/g, " ").trim();
+}
+
+function stripLeadingAgentMention(content: string, agentName: string) {
+  const trimmed = content.trim();
+  const withoutMention = trimmed.replace(new RegExp(`^@${escapeRegExp(agentName)}\\s*`, "i"), "").trim();
+  return withoutMention || trimmed;
+}
+
+function getLatestAgentReceivedTask(messages: MessageRecord[], agentName: string) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    const targetAgentId = message.meta?.targetAgentId;
+    const targetAgentIds = (message.meta?.targetAgentIds ?? "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    if (message.sender === "user") {
+      const mentionedAgent = targetAgentId || extractFirstMention(message.content);
+      if (mentionedAgent === agentName) {
+        return normalizeInlineText(stripLeadingAgentMention(message.content, agentName));
+      }
+      continue;
+    }
+
+    if (targetAgentId !== agentName && !targetAgentIds.includes(agentName)) {
+      continue;
+    }
+
+    if (message.meta?.kind === "high-level-trigger") {
+      const sourceAgentId = message.meta?.sourceAgentId;
+      if (sourceAgentId) {
+        for (let sourceIndex = index - 1; sourceIndex >= 0; sourceIndex -= 1) {
+          const sourceMessage = messages[sourceIndex];
+          if (sourceMessage.sender === sourceAgentId && sourceMessage.meta?.kind === "agent-final") {
+            return normalizeInlineText(sourceMessage.content);
+          }
+        }
+      }
+    }
+
+    return normalizeInlineText(stripLeadingAgentMention(message.content, agentName));
+  }
+
+  return null;
+}
+
 function App() {
   const {
     projects,
@@ -193,6 +251,10 @@ function App() {
   }, [activeProject?.project.id, activeTaskView?.task.id]);
 
   const panelMappings = activeTaskView?.panels ?? [];
+  const latestBuildTask = useMemo(
+    () => (activeTaskView ? getLatestAgentReceivedTask(activeTaskView.messages, "build") : null),
+    [activeTaskView],
+  );
   const runtimePollKey = useMemo(
     () =>
       activeTaskView?.agents
@@ -399,6 +461,7 @@ function App() {
                               timestamp: new Date().toISOString(),
                               meta: {
                                 optimistic: "true",
+                                targetAgentId: resolvedMentionAgent,
                               },
                             },
                           },
@@ -436,114 +499,120 @@ function App() {
                     </div>
                   </div>
 
-                <div className="px-4 pb-4 pt-3">
-                  <div className="mb-3 flex flex-wrap gap-2">
-                    <span className="rounded-[6px] bg-card px-3 py-1 text-[11px] text-foreground/80">
-                      {activeTaskView ? `当前 Task · ${activeTaskView.task.title}` : "当前还没有选中 Task"}
-                    </span>
-                    <span className="rounded-[6px] bg-card px-3 py-1 text-[11px] text-foreground/80">
-                      {panelMappings.length > 0
-                        ? `${panelMappings.length} 个 panel 已绑定`
-                        : "当前还没有 panel 绑定记录"}
-                    </span>
-                  </div>
-
-                <div className="min-h-0 overflow-y-auto rounded-[8px] border border-border/60 bg-card/80 p-2">
-                  {agentCards.map((agent) => {
-                    const mappedPanel = panelMappings.find((panel) => panel.agentName === agent.name);
-                    const agentColor = getAgentColorToken(agent.name);
-                    const isDragging = draggingAgentId === agent.name;
-                    const isDragOver = dragOverAgentId === agent.name && draggingAgentId !== agent.name;
-                    return (
-                    <button
-                      key={agent.id}
-                      type="button"
-                      draggable
-                      onDragStart={(event) => {
-                        setDraggingAgentId(agent.name);
-                        setDragOverAgentId(agent.name);
-                        event.dataTransfer.effectAllowed = "move";
-                        event.dataTransfer.setData("text/plain", agent.name);
-                      }}
-                      onDragOver={(event) => {
-                        event.preventDefault();
-                        event.dataTransfer.dropEffect = "move";
-                        if (dragOverAgentId !== agent.name) {
-                          setDragOverAgentId(agent.name);
-                        }
-                      }}
-                      onDrop={async (event) => {
-                        event.preventDefault();
-                        await handleAgentCardDrop(agent.name);
-                      }}
-                      onDragEnd={() => {
-                        setDraggingAgentId(null);
-                        setDragOverAgentId(null);
-                      }}
-                      onClick={() => {
-                        if (suppressNextAgentCardClickRef.current) {
-                          return;
-                        }
-                        if (!agent.relativePath.startsWith("builtin://")) {
-                          setAgentConfigPath(agent.relativePath);
-                          setAgentConfigOpen(true);
-                        }
-                      }}
-                      className={`mb-2 flex w-full cursor-grab items-center gap-3 rounded-[8px] border px-3 py-3 text-left transition active:cursor-grabbing last:mb-0 ${
-                        agent.relativePath.startsWith("builtin://") ? "" : "hover:brightness-[0.99]"
-                      }`}
-                      style={{
-                        background: agentColor.soft,
-                        borderColor: isDragOver ? agentColor.solid : agentColor.border,
-                        boxShadow: isDragOver
-                          ? `0 0 0 2px ${agentColor.solid}55 inset`
-                          : isDragging
-                            ? `0 14px 26px ${agentColor.solid}22`
-                            : undefined,
-                        opacity: isDragging ? 0.72 : 1,
-                      }}
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex min-w-0 items-center justify-between gap-3">
-                          <div className="min-w-0 flex-1 py-1">
-                            <div className="flex min-w-0 flex-wrap items-center gap-2">
-                              <p
-                                className="min-w-0 break-all text-[15px] font-semibold leading-5"
-                                style={{ color: agentColor.text }}
-                              >
-                                {agent.displayName}
-                              </p>
-                            </div>
-                            {mappedPanel && (
-                              <div
-                                className="mt-1 break-all text-[11px]"
-                                style={{ color: agentColor.mutedText }}
-                              >
-                                {mappedPanel.paneId}
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="flex shrink-0 flex-col items-end gap-2">
-                            <span
-                              className={`rounded-[6px] px-2.5 py-1 text-[11px] ${getAgentStatusClassName(agent.status)}`}
-                            >
-                              {getAgentMetricLabel(agent.messageCount)}
-                            </span>
-                          </div>
-                        </div>
+                  <div className="px-4 pb-4 pt-3">
+                    <div className="mb-3 space-y-2">
+                      <div className="rounded-[8px] border border-border/60 bg-card/80 px-3 py-2.5 text-sm leading-6 text-foreground/85">
+                        {activeTaskView
+                          ? latestBuildTask
+                            ? `Build 最新任务：${latestBuildTask}`
+                            : "Build 暂时还没有接收到任务"
+                          : "当前还没有选中 Task"}
                       </div>
-                    </button>
-                    );
-                  })}
-
-                  {!activeProject && (
-                    <div className="rounded-[8px] border border-dashed border-border bg-card/50 px-4 py-5 text-sm text-muted-foreground">
-                      先创建或选择一个 Project。
+                      <div className="flex flex-wrap gap-2">
+                        <span className="rounded-[6px] bg-card px-3 py-1 text-[11px] text-foreground/80">
+                          {panelMappings.length > 0
+                            ? `${panelMappings.length} 个 panel 已绑定`
+                            : "当前还没有 panel 绑定记录"}
+                        </span>
+                      </div>
                     </div>
-                  )}
-                </div>
-                </div>
+
+                    <div className="min-h-0 overflow-y-auto rounded-[8px] border border-border/60 bg-card/80 p-2">
+                      {agentCards.map((agent) => {
+                        const mappedPanel = panelMappings.find((panel) => panel.agentName === agent.name);
+                        const agentColor = getAgentColorToken(agent.name);
+                        const isDragging = draggingAgentId === agent.name;
+                        const isDragOver = dragOverAgentId === agent.name && draggingAgentId !== agent.name;
+                        return (
+                          <button
+                            key={agent.id}
+                            type="button"
+                            draggable
+                            onDragStart={(event) => {
+                              setDraggingAgentId(agent.name);
+                              setDragOverAgentId(agent.name);
+                              event.dataTransfer.effectAllowed = "move";
+                              event.dataTransfer.setData("text/plain", agent.name);
+                            }}
+                            onDragOver={(event) => {
+                              event.preventDefault();
+                              event.dataTransfer.dropEffect = "move";
+                              if (dragOverAgentId !== agent.name) {
+                                setDragOverAgentId(agent.name);
+                              }
+                            }}
+                            onDrop={async (event) => {
+                              event.preventDefault();
+                              await handleAgentCardDrop(agent.name);
+                            }}
+                            onDragEnd={() => {
+                              setDraggingAgentId(null);
+                              setDragOverAgentId(null);
+                            }}
+                            onClick={() => {
+                              if (suppressNextAgentCardClickRef.current) {
+                                return;
+                              }
+                              if (!agent.relativePath.startsWith("builtin://")) {
+                                setAgentConfigPath(agent.relativePath);
+                                setAgentConfigOpen(true);
+                              }
+                            }}
+                            className={`mb-2 flex w-full cursor-grab items-center gap-3 rounded-[8px] border px-3 py-3 text-left transition active:cursor-grabbing last:mb-0 ${
+                              agent.relativePath.startsWith("builtin://") ? "" : "hover:brightness-[0.99]"
+                            }`}
+                            style={{
+                              background: agentColor.soft,
+                              borderColor: isDragOver ? agentColor.solid : agentColor.border,
+                              boxShadow: isDragOver
+                                ? `0 0 0 2px ${agentColor.solid}55 inset`
+                                : isDragging
+                                  ? `0 14px 26px ${agentColor.solid}22`
+                                  : undefined,
+                              opacity: isDragging ? 0.72 : 1,
+                            }}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex min-w-0 items-center justify-between gap-3">
+                                <div className="min-w-0 flex-1 py-1">
+                                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                    <p
+                                      className="min-w-0 break-all text-[15px] font-semibold leading-5"
+                                      style={{ color: agentColor.text }}
+                                    >
+                                      {agent.displayName}
+                                    </p>
+                                  </div>
+                                  {mappedPanel && (
+                                    <div
+                                      className="mt-1 break-all text-[11px]"
+                                      style={{ color: agentColor.mutedText }}
+                                    >
+                                      {mappedPanel.paneId}
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div className="flex shrink-0 flex-col items-end gap-2">
+                                  <span
+                                    className={`rounded-[6px] px-2.5 py-1 text-[11px] ${getAgentStatusClassName(agent.status)}`}
+                                  >
+                                    {getAgentMetricLabel(agent.messageCount)}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+
+                      {!activeProject && (
+                        <div className="rounded-[8px] border border-dashed border-border bg-card/50 px-4 py-5 text-sm text-muted-foreground">
+                          先创建或选择一个 Project。
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </aside>
               </div>
             </div>

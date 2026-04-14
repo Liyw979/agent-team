@@ -20,7 +20,6 @@ export function AgentConfigModal({
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [reloadToken, setReloadToken] = useState(0);
   const viewableAgents = useMemo(
     () => project?.agentFiles.filter((agent) => !agent.relativePath.startsWith("builtin://")) ?? [],
     [project],
@@ -77,7 +76,7 @@ export function AgentConfigModal({
     return () => {
       cancelled = true;
     };
-  }, [open, project?.project.id, reloadToken, selectedFile?.relativePath]);
+  }, [open, project?.project.id, selectedFile?.relativePath]);
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -142,14 +141,6 @@ export function AgentConfigModal({
           </div>
 
           <div className="mt-4 flex items-center justify-end gap-3 border-t border-border/60 pt-4">
-            <button
-              type="button"
-              className="rounded-[8px] border border-border px-4 py-2 text-sm"
-              disabled={!selectedFile || loading}
-              onClick={() => setReloadToken((current) => current + 1)}
-            >
-              重新载入磁盘内容
-            </button>
             <Dialog.Close asChild>
               <button
                 type="button"

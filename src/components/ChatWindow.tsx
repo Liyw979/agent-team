@@ -546,14 +546,13 @@ export function ChatWindow({
               }}
               placeholder={
                 task
-                  ? "输入消息；点击后会先推荐 Agent，默认选中 build"
-                  : "点击输入框后会弹出 Agent 候选，默认选中 build"
+                  ? "默认向Build Agent发送消息，使用@指定Agent"
+                  : "默认向Build Agent发送消息，使用@指定Agent"
               }
               className="no-drag block min-h-[68px] w-full resize-none rounded-[8px] border border-border bg-card px-4 py-2.5 text-sm leading-6 outline-none transition focus:border-primary"
             />
 
-            <div className="mt-2 flex items-center justify-between gap-3 px-1 text-xs">
-              <span className="text-muted-foreground">点击输入框会先弹出候选框；若未显式选择，默认发送给 build。</span>
+            <div className="mt-2 flex items-center justify-end gap-3 px-1 text-xs">
               {submitError ? <span className="text-primary">{submitError}</span> : null}
             </div>
 
