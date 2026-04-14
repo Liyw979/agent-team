@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { type AgentFileRecord, isReviewAgentName } from "@shared/types";
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { type AgentFileRecord, type TopologyRecord, isReviewAgentInTopology } from "@shared/types";
 import { buildMockAgentReply } from "./mock-agent-reply";
 import { buildSubmitMessageBody } from "./opencode-request-body";
 import { toOpenCodeAgentName } from "./opencode-agent-name";
@@ -113,8 +113,8 @@ export class OpenCodeClient {
         return `session-${randomUUID()}`;
       }
 
-      const data = (await response.json()) as { id?: string };
-      return data.id ?? `session-${randomUUID()}`;
+      const data = (await this.readJsonResponse(response)) as { id?: string } | null;
+      return data?.id ?? `session-${randomUUID()}`;
     } catch {
       server.mock = true;
       return `session-${randomUUID()}`;
@@ -124,6 +124,7 @@ export class OpenCodeClient {
   async reloadConfig(
     projectPath: string,
     agentFiles: Array<Pick<AgentFileRecord, "name">> = [],
+    topology?: Pick<TopologyRecord, "edges">,
   ): Promise<void> {
     const server = await this.ensureServer();
     if (server.mock) {
@@ -170,7 +171,7 @@ export class OpenCodeClient {
       throw new Error("OpenCode 配置重载失败");
     }
 
-    await this.enforceReviewAgentPermissions(projectPath, agentFiles);
+    await this.enforceReviewAgentPermissions(projectPath, agentFiles, topology);
   }
 
   async connectEvents(onEvent: (event: OpenCodeEvent) => void): Promise<void> {
@@ -216,8 +217,11 @@ export class OpenCodeClient {
       throw new Error(`OpenCode 请求失败: ${response.status}`);
     }
 
-    const raw = await response.text();
-    return this.normalizeMessageEnvelope(JSON.parse(raw) as Record<string, unknown>, opencodeAgent);
+    const raw = await this.readJsonResponse(response);
+    if (!raw || typeof raw !== "object") {
+      return this.createPendingMessage(opencodeAgent);
+    }
+    return this.normalizeMessageEnvelope(raw as Record<string, unknown>, opencodeAgent);
   }
 
   async resolveExecutionResult(
@@ -313,12 +317,18 @@ export class OpenCodeClient {
   }
 
   private async startServer(): Promise<ServeHandle> {
-    const serverEnv = {
-      ...process.env,
-      OPENCODE_CONFIG_DIR: this.runtimeDir,
-      OPENCODE_DB: path.join(this.runtimeDir, "opencode-server.db"),
-      OPENCODE_CLIENT: "agentflow-orchestrator",
-    };
+    this.terminateStaleServeOnPort(this.port);
+
+    const serverEnv = { ...process.env };
+    // Isolate the embedded runtime from parent OpenCode config injection.
+    delete serverEnv.OPENCODE_CONFIG;
+    delete serverEnv.OPENCODE_CONFIG_CONTENT;
+    delete serverEnv.OPENCODE_CONFIG_DIR;
+    delete serverEnv.OPENCODE_DB;
+    delete serverEnv.OPENCODE_CLIENT;
+    serverEnv.OPENCODE_CONFIG_DIR = this.runtimeDir;
+    serverEnv.OPENCODE_DB = path.join(this.runtimeDir, "opencode-server.db");
+    serverEnv.OPENCODE_CLIENT = "agentflow-orchestrator";
     const childProcess = spawn(
       "opencode",
       ["serve", "--port", String(this.port), "--hostname", "127.0.0.1"],
@@ -347,6 +357,92 @@ export class OpenCodeClient {
       port: this.port,
       mock,
     };
+  }
+
+  private terminateStaleServeOnPort(port: number) {
+    const pids = this.findListeningPids(port);
+    for (const pid of pids) {
+      if (!this.isOpenCodeServeProcess(pid)) {
+        continue;
+      }
+      this.killProcess(pid);
+    }
+  }
+
+  private findListeningPids(port: number): number[] {
+    try {
+      if (process.platform === "win32") {
+        const output = execFileSync("netstat", ["-ano", "-p", "tcp"], {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        });
+        return output
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter((line) => line.includes("LISTENING"))
+          .filter((line) => line.includes(`:${port}`))
+          .map((line) => {
+            const parts = line.split(/\s+/);
+            return Number(parts.at(-1));
+          })
+          .filter((pid) => Number.isInteger(pid) && pid > 0);
+      }
+
+      const output = execFileSync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-Fp"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      return output
+        .split(/\n/)
+        .filter((line) => line.startsWith("p"))
+        .map((line) => Number(line.slice(1)))
+        .filter((pid) => Number.isInteger(pid) && pid > 0);
+    } catch {
+      return [];
+    }
+  }
+
+  private isOpenCodeServeProcess(pid: number): boolean {
+    try {
+      if (process.platform === "win32") {
+        const output = execFileSync("tasklist", ["/FI", `PID eq ${pid}`], {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        });
+        return output.toLowerCase().includes("opencode");
+      }
+
+      const command = execFileSync("ps", ["-o", "command=", "-p", String(pid)], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+      return command.includes("opencode") && command.includes("serve");
+    } catch {
+      return false;
+    }
+  }
+
+  private killProcess(pid: number) {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      return;
+    }
+
+    const deadline = Date.now() + 1500;
+    while (Date.now() < deadline) {
+      try {
+        process.kill(pid, 0);
+      } catch {
+        return;
+      }
+    }
+
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // ignore
+    }
   }
 
   private async startEventPump(
@@ -462,8 +558,11 @@ export class OpenCodeClient {
   private async enforceReviewAgentPermissions(
     projectPath: string,
     agentFiles: Array<Pick<AgentFileRecord, "name">>,
+    topology?: Pick<TopologyRecord, "edges">,
   ): Promise<void> {
-    const reviewAgentNames = [...new Set(agentFiles.map((agent) => agent.name).filter(isReviewAgentName))];
+    const reviewAgentNames = topology
+      ? [...new Set(agentFiles.map((agent) => agent.name).filter((name) => isReviewAgentInTopology(topology, name)))]
+      : [];
     if (reviewAgentNames.length === 0) {
       return;
     }
@@ -659,7 +758,11 @@ export class OpenCodeClient {
     if (!response.ok) {
       return null;
     }
-    return this.normalizeMessageEnvelope((await response.json()) as Record<string, unknown>, "assistant");
+    const raw = await this.readJsonResponse(response);
+    if (!raw || typeof raw !== "object") {
+      return null;
+    }
+    return this.normalizeMessageEnvelope(raw as Record<string, unknown>, "assistant");
   }
 
   private async listSessionMessages(
@@ -678,7 +781,7 @@ export class OpenCodeClient {
       return [];
     }
 
-    const raw = (await response.json()) as unknown;
+    const raw = await this.readJsonResponse(response);
     return Array.isArray(raw) ? raw : [];
   }
 
@@ -699,6 +802,32 @@ export class OpenCodeClient {
         projectPath,
       },
     };
+  }
+
+  private createPendingMessage(sender: string): OpenCodeNormalizedMessage {
+    return {
+      id: randomUUID(),
+      content: "",
+      sender,
+      timestamp: new Date().toISOString(),
+      completedAt: null,
+      error: null,
+      raw: null,
+    };
+  }
+
+  private async readJsonResponse(response: Response): Promise<unknown | null> {
+    const raw = await response.text();
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(trimmed) as unknown;
+    } catch {
+      return null;
+    }
   }
 
   private normalizeMessageEnvelope(

@@ -80,3 +80,36 @@ test("合并整改消息时保留高层结果并追加一份反馈", () => {
     "需求已完成初步润色。\n\n具体修改意见：\n请补充实现并完成验证。\n\n@Build",
   );
 });
+
+test("合并 agent-final 与 high-level-trigger 时保留 BA 正文并追加派发目标", () => {
+  const summary = `这是分析过程。
+
+## 正式结果
+给定 a = 1、b = 2 时，返回 c = 3`;
+
+  const merged = mergeTaskChatMessages([
+    createMessage({
+      id: "agent-final",
+      content: summary,
+      meta: {
+        kind: "agent-final",
+        finalMessage: summary,
+      },
+    }),
+    createMessage({
+      id: "high-level-trigger",
+      content: "@Build",
+      meta: {
+        kind: "high-level-trigger",
+        sourceAgentId: "BA",
+        targetAgentIds: "Build",
+      },
+    }),
+  ]);
+
+  assert.equal(merged.length, 1);
+  assert.equal(
+    merged[0]?.content,
+    "## 正式结果\n给定 a = 1、b = 2 时，返回 c = 3\n\n@Build",
+  );
+});

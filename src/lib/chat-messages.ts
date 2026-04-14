@@ -1,5 +1,6 @@
 import type { MessageRecord } from "@shared/types";
 import {
+  buildMentionSuffix,
   formatHighLevelTriggerContent,
   formatRevisionRequestContent,
   parseTargetAgentIds,
@@ -130,7 +131,7 @@ function buildMergedAgentFinalTriggerContent(previous: ChatMessageItem, current:
     return [base, current.content.trim()].filter(Boolean).join("\n\n");
   }
 
-  return formatHighLevelTriggerContent(base, targets);
+  return [base, buildMentionSuffix(targets)].filter(Boolean).join("\n\n");
 }
 
 function shouldMergeHighLevelTrigger(previous: ChatMessageItem, current: MessageRecord) {
