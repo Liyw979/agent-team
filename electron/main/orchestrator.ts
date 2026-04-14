@@ -66,11 +66,17 @@ interface TaskRuntimeState {
   deliveredMessageIdsByAgent: Map<string, Set<string>>;
 }
 
-interface AgentExecutionPrompt {
-  from: string;
-  message: string;
-  requirement?: string;
-}
+type AgentExecutionPrompt =
+  | {
+      mode: "raw";
+      content: string;
+    }
+  | {
+      mode: "structured";
+      from: string;
+      message: string;
+      requirement?: string;
+    };
 
 const SELF_REVIEW_PROMPT = `在你完成本轮所有工作后，必须用中文严格按照以下格式给出最终决策，不要有任何其他解释或额外文字：
 - 如果你认为自己负责的任务已完全完成（或你负责审核的部分已严格通过），请直接输出：【DECISION】检查通过
@@ -478,9 +484,8 @@ export class Orchestrator {
     });
 
     const runPromise = this.runAgent(project, this.store.getTask(task.id), targetAgent.name, {
-      from: "User",
-      message: content,
-      requirement: "请基于 [Message] 中的用户请求，继续完成你当前负责的工作。",
+      mode: "raw",
+      content,
     });
     this.markMessagesDelivered(task.id, targetAgent.name, [message.id]);
     void runPromise.catch((error) => {
@@ -823,14 +828,18 @@ export class Orchestrator {
           incrementalContext.content.trim().length > 0
             ? `${incrementalContext.content}\n\n请基于以上新增历史继续处理当前任务。`
             : `上游 Agent ${sourceAgentId} 已完成，请继续处理以下上下文：\n\n${content}`;
-        const forwardedRequirement = this.buildAgentHandoffRequirement(
-          "请结合 [Message] 中的上下文继续推进当前任务，并只关注你当前负责的部分。",
-          gitDiffSummary,
-        );
+        const forwardedRequirement =
+          signal.targets.length > 0
+            ? this.buildAgentHandoffRequirement(
+                "请结合 [Message] 中的上下文继续推进当前任务，并只关注你当前负责的部分。",
+                gitDiffSummary,
+              )
+            : undefined;
         const signature = this.buildTriggerSignature(topology, completed, targetName);
         runtime.lastSignatureByAgent.set(targetName, signature);
         this.markMessagesDelivered(taskId, targetName, incrementalContext.messageIds);
         await this.runAgent(project, this.store.getTask(taskId), targetName, {
+          mode: "structured",
           from: sourceAgentId,
           message: forwardedMessage,
           requirement: forwardedRequirement,
@@ -1054,18 +1063,17 @@ export class Orchestrator {
   }
 
   private buildAgentExecutionPrompt(prompt: AgentExecutionPrompt): string {
+    if (prompt.mode === "raw") {
+      return prompt.content.trim();
+    }
+
     const from = prompt.from.trim() || "System";
     const message = prompt.message.trim() || "（无）";
-    const requirement = this.buildAgentExecutionRequirement(prompt.requirement);
-    return [`[From] ${from}`, `[Message]\n${message}`, `[Requeirement]\n${requirement}`]
-      .join("\n\n")
-      .trim();
-  }
-
-  private buildAgentExecutionRequirement(requirement?: string): string {
-    return [requirement ?? "", SELF_REVIEW_PROMPT]
-      .map((item) => item.trim())
-      .filter(Boolean)
+    const sections = [`[From] ${from}`, `[Message]\n${message}`];
+    if (prompt.requirement?.trim()) {
+      sections.push(`[Requeirement]\n${prompt.requirement.trim()}`);
+    }
+    return sections
       .join("\n\n")
       .trim();
   }
@@ -1342,6 +1350,7 @@ export class Orchestrator {
             : `返工来源 Agent：${sourceAgentId}\n\n${contextSummary}具体修改意见：\n${feedback}`;
         this.markMessagesDelivered(taskId, targetName, incrementalContext.messageIds);
         await this.runAgent(project, this.store.getTask(taskId), targetName, {
+          mode: "structured",
           from: sourceAgentId,
           message: forwardedMessage,
           requirement: "请根据 [Message] 中的返工背景与修改意见继续处理，并优先修复阻塞当前链路的问题。",
@@ -1416,7 +1425,8 @@ export class Orchestrator {
 
   private createSystemPrompt(_agent: AgentFileRecord): string {
     const orchestrationRules =
-      "请只关注你当前负责的工作本身，不要假设还有其他 Agent，也不要描述任何调度链路。先输出对用户有意义的高层结果；用户消息末尾会自动附带自检要求，请严格按该要求输出最终的【DECISION】结论。";
+      "请只关注你当前负责的工作本身，不要假设还有其他 Agent，也不要描述任何调度链路。先输出对用户有意义的高层结果。无论收到的正文是否带额外格式或补充要求，你在完成本轮工作后都必须用中文输出最终的【DECISION】结论，格式如下：\n"
+      + SELF_REVIEW_PROMPT;
     return orchestrationRules;
   }
 

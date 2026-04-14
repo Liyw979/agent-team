@@ -26,8 +26,9 @@
 - Task 群聊支持 `@AgentName` 提交任务，输入 `@` 会弹出候选 Agent 列表，支持方向键、鼠标和 `Tab` 自动补全
 - 群聊中同时展示 `user -> agent`、`agent -> agent` 高层协作消息，以及 Agent 最终回复
 - 当一个 Agent 同时触发多个下游 Agent 时，群聊会合并展示为一条批量 `agent -> agent` 派发消息，而不是拆成多条重复消息
-- 无论是用户 `@Agent` 还是 Agent 派发下游，底层发送给目标 Agent 的 Prompt 都会统一封装为 `[From]`、`[Message]`、`[Requeirement]` 三段结构
-- 当一个 Agent 正常派发下游 Agent 时，系统会自动把当前 Project Git Diff 的精简摘要附加到转发 Prompt 的 `[Requeirement]` 段；返工链路不附带该摘要
+- 用户在 Task 群聊里直接 `@Agent` 时，底层会把原始消息原样发送给目标 Agent，不额外拼接结构化前缀
+- Agent 派发下游时，只有显式指定下游或返工链路才会封装 `[From]`、`[Message]`、`[Requeirement]`；对于 `success` 的 100% 自动触发，只会保留 `[From]`、`[Message]`，不会额外拼接 `[Requeirement]`
+- 当 Agent 显式派发下游 Agent 时，系统会把当前 Project Git Diff 的精简摘要附加到转发 Prompt 的 `[Requeirement]` 段；返工链路不附带该摘要
 - 每个 Agent 都会按名称自动分配一套稳定配色；聊天记录里会使用对应的浅色底、描边与标签色来区分不同 Agent
 - 右下角团队成员列表支持直接调整 Agent 顺序；该顺序会持久化到拓扑配置，并直接决定右上角拓扑图从左到右的节点排列
 - 右上角为 Project 级真实拓扑图，点击节点即可编辑“这个 Agent 会去跟哪些 Agent”，也支持整块面板放大查看；放大视图会直接把当前拓扑图放大，Agent 卡片会随视口横向和纵向一起拉伸铺满面板，连线固定走在 Agent 顶部的上方通道内，不会越出拓扑 panel；节点顺序稳定，未显式保存顺序时默认优先取 `BA` 作为最左侧起点

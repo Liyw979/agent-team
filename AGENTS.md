@@ -43,8 +43,9 @@
 - 全新 Task 首次初始化、且当前还没有托管 pane 时，Zellij 会优先按最多三列的 tiled grid 创建初始 pane 布局，内部 pane 顺序直接使用当前保存的 Agent 排序
 - 运行中的 Agent 会通过 OpenCode HTTP session 消息接口轮询实时工具调用与摘要，并显示在拓扑图节点内
 - GUI 中点击 Agent 只支持查看对应原始配置文件，不支持在应用内直接编辑 `.opencode/agents/**/*.md`
-- 无论是用户 `@Agent` 还是 Agent `@` 下游 Agent，底层发送给目标 Agent 的 Prompt 都会统一封装为 `[From]`、`[Message]`、`[Requeirement]` 三段结构
-- Agent 间正常派发下游任务时，会自动在转发 Prompt 的 `[Requeirement]` 段附带当前 Project Git Diff 的精简摘要，帮助下游 Agent 快速感知最新改动；返工链路不附带该摘要
+- 用户在 Task 群聊里直接 `@Agent` 时，底层会把原始消息原样发送给目标 Agent，不额外拼接结构化前缀
+- Agent `@` 下游 Agent 时，只有显式指定下游或返工链路才会封装 `[From]`、`[Message]`、`[Requeirement]`；对于 `success` 的 100% 自动触发，只会保留 `[From]`、`[Message]`，不会额外拼接 `[Requeirement]`
+- Agent 间显式派发下游任务时，会自动在转发 Prompt 的 `[Requeirement]` 段附带当前 Project Git Diff 的精简摘要，帮助下游 Agent 快速感知最新改动；返工链路不附带该摘要
 - CLI 默认使用当前目录作为 project cwd
 - CLI 只支持当前 Agent 名称
 - CLI 支持单独的 `task init` 初始化步骤：先创建 Task，并把全部 Agent 的 OpenCode session / Zellij pane 启动完成，再通过 `task send --task <taskId>` 向入口 Agent 发送第一条消息
