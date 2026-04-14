@@ -166,7 +166,7 @@ CLI 能力分组：
 - 每次创建 Task 或 Agent 间消息转发前，都会先尝试触发配置 Reload，并通过 HTTP `global/config` 强制把所有审查类 Agent 的 `write / edit / bash` 权限置为 `deny`
 - `task init` 会先创建 Task，并完成该 Task 下全部 Agent 的 OpenCode session 与 Zellij pane 初始化；GUI 群聊会优先推荐并默认选中 `Build`，若用户直接发送且未显式指定目标，也会默认投递给 `Build`，并在群聊历史里自动补上 `@Build`；这类默认首跳转发给 Agent 时，底层格式仍是单行 `[发送者] <正文>`
 - GUI 聊天区里的 `Task Started` 系统消息会附带当前 Task 的 `Zellij Session` 名称与可直接执行的 attach 调试命令，方便排查会话问题
-- 点击 GUI 聊天区标题栏里的打开按钮时，macOS 会固定新开独立 Terminal 窗口、避免复用已有窗口后再尝试把前台 Terminal 切到全屏；Windows 会优先使用 Windows Terminal 全屏打开，回退到 `cmd.exe` 时也会尽量自动触发 `F11`
+- 点击 GUI 聊天区标题栏里的打开按钮时，macOS 会固定新开独立 Terminal 窗口，并优先把窗口切到普通窗口模式下的最大化（Zoom）而不是系统全屏；Windows 会优先使用 Windows Terminal 全屏打开，回退到 `cmd.exe` 时也会尽量自动触发 `F11`
 - Zellij pane 内部启动命令会按平台生成：macOS / Linux 使用 `/bin/sh`，Windows 使用 `cmd.exe`，不再把 `mkdir -p`、`export` 这类 POSIX 语法直接塞进 Windows pane
 - 如果当前电脑未安装 `zellij`，GUI 和 CLI 都会给出显式提醒；Task 群聊里也会追加一条系统消息说明当前不会创建真实 Zellij pane；安装提示里会区分 macOS 的 `brew install zellij` 与 Windows 的 `winget install --id Zellij.Zellij`
 - 对于首次初始化、尚无托管 pane 的 Task，Zellij 会优先生成最多三列的 tiled grid 初始布局，并直接使用当前保存的 Agent 排序来决定 pane 顺序

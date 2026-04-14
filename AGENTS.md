@@ -52,7 +52,7 @@
 - 拓扑图中的 Agent 节点颜色用于表达当前运行状态，不再用颜色区分 built-in / custom；内置与本地类型信息仅在编辑面板等辅助信息中展示
 - 拓扑图在面板尺寸变化时会保持“Agent 在上、历史区在下、首尾节点贴近左右边界但保留少量留白、顶部预留连线通道”的布局约束，而不是把整张图简单等比缩放后居中
 - 拓扑图历史区会优先展示 Agent 最近的运行活动，并明确区分思考、普通消息、步骤与 Tool Call 参数摘要，而不只是单行运行状态
-- GUI 聊天区标题栏支持直接打开当前 Task 对应的 Zellij session；打开前会先补齐当前 Task 的全部 Agent pane；macOS 下会固定新开独立 Terminal 窗口后再 attach，Windows 下会尽量把新拉起的终端窗口自动切到全屏
+- GUI 聊天区标题栏支持直接打开当前 Task 对应的 Zellij session；打开前会先补齐当前 Task 的全部 Agent pane；macOS 下会固定新开独立 Terminal 窗口后再 attach，并优先把窗口切到普通窗口模式下的最大化（Zoom）而不是系统全屏，Windows 下会尽量把新拉起的终端窗口自动切到全屏
 - 右下角团队成员面板中，每个 Agent 名称旁都会提供一个“打开 Pane”按钮；点击后会优先补齐当前 Task 的 pane 绑定，并直接打开该 Agent 自己的 OpenCode attach 独立终端窗口，而不是带出整个 Zellij session 网格
 - Zellij pane 内部启动命令会按平台生成：macOS / Linux 使用 `/bin/sh`，Windows 使用 `cmd.exe`，不再把 POSIX shell 语法直接下发到 Windows pane
 - 若当前电脑未安装 `zellij`，Task 创建后会追加系统提醒；GUI 点击“打开 Zellij”和 CLI 进入 session 时会直接提示先安装 `zellij`；安装提示会区分 macOS 的 `brew install zellij` 与 Windows 的 `winget install --id Zellij.Zellij`
