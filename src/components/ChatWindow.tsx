@@ -252,6 +252,7 @@ export function ChatWindow({
   const [menuPosition, setMenuPosition] = useState({ left: 24, top: 12 });
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const composerRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
@@ -290,6 +291,26 @@ export function ChatWindow({
     const defaultIndex = defaultAgentName ? mentionOptions.indexOf(defaultAgentName) : -1;
     setActiveIndex(defaultIndex >= 0 ? defaultIndex : 0);
   }, [defaultAgentName, mentionContext?.query, mentionOptions]);
+
+  useEffect(() => {
+    if (!mentionContext) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const composer = composerRef.current;
+      const target = event.target;
+      if (!composer || !(target instanceof Node) || composer.contains(target)) {
+        return;
+      }
+      setMentionContext(null);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [mentionContext]);
 
   function updateMenuPosition(textarea: HTMLTextAreaElement, caret: number, optionCount: number) {
     const caretCoordinates = getCaretCoordinates(textarea, caret);
@@ -421,7 +442,7 @@ export function ChatWindow({
         }}
       >
         <div className="w-full">
-          <div className="relative">
+          <div ref={composerRef} className="relative">
             <textarea
               ref={textareaRef}
               value={draft}
@@ -451,6 +472,16 @@ export function ChatWindow({
                   return;
                 }
                 openAgentMenuAtCursor(textarea);
+              }}
+              onBlur={() => {
+                requestAnimationFrame(() => {
+                  const composer = composerRef.current;
+                  const activeElement = document.activeElement;
+                  if (!composer || (activeElement instanceof Node && composer.contains(activeElement))) {
+                    return;
+                  }
+                  setMentionContext(null);
+                });
               }}
               onKeyUp={(event) => {
                 updateMentionState(event.currentTarget.value, event.currentTarget.selectionStart ?? 0);
