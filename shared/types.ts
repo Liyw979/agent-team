@@ -1,6 +1,6 @@
 export type AgentStatus = "idle" | "running" | "success" | "failed" | "needs_revision";
 
-export type TaskStatus = "pending" | "running" | "success" | "failed" | "needs_revision";
+export type TaskStatus = "pending" | "running" | "waiting" | "success" | "failed" | "needs_revision";
 
 export type PermissionMode = "allow" | "ask" | "deny";
 
@@ -102,7 +102,7 @@ export interface TopologyEdge {
   id: string;
   source: string;
   target: string;
-  triggerOn: "success" | "failed" | "manual";
+  triggerOn: "success";
 }
 
 export interface TopologyRecord {
@@ -228,6 +228,8 @@ export const DEFAULT_TOOL_PERMISSIONS: ToolPermission[] = [
   { name: "skill", mode: "allow" },
 ];
 
+export const BUILD_AGENT_NAME = "Build";
+
 function createNode(name: string): TopologyNode {
   return {
     id: name,
@@ -238,6 +240,14 @@ function createNode(name: string): TopologyNode {
 
 export function isBuiltinAgentPath(relativePath: string): boolean {
   return relativePath.startsWith("builtin://");
+}
+
+export function isBuildAgentName(agentName: string): boolean {
+  return agentName === BUILD_AGENT_NAME;
+}
+
+export function isReviewAgentName(agentName: string): boolean {
+  return !isBuildAgentName(agentName);
 }
 
 function findAgentByRole(agents: TopologyAgentSeed[], role: AgentRole): TopologyAgentSeed | null {

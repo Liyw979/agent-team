@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { type AgentFileRecord, isReviewAgentName } from "@shared/types";
 import { toOpenCodeAgentName } from "./opencode-agent-name";
 
 interface ServeHandle {
@@ -118,7 +119,10 @@ export class OpenCodeClient {
     }
   }
 
-  async reloadConfig(projectPath: string): Promise<void> {
+  async reloadConfig(
+    projectPath: string,
+    agentFiles: Array<Pick<AgentFileRecord, "name">> = [],
+  ): Promise<void> {
     const server = await this.ensureServer();
     if (server.mock) {
       return;
@@ -147,16 +151,24 @@ export class OpenCodeClient {
       },
     ];
 
+    let reloaded = false;
     for (const attempt of attempts) {
       try {
         const response = await attempt();
         if (response.ok) {
-          return;
+          reloaded = true;
+          break;
         }
       } catch {
         continue;
       }
     }
+
+    if (!reloaded) {
+      throw new Error("OpenCode 配置重载失败");
+    }
+
+    await this.enforceReviewAgentPermissions(projectPath, agentFiles);
   }
 
   async connectEvents(onEvent: (event: OpenCodeEvent) => void): Promise<void> {
@@ -448,6 +460,60 @@ export class OpenCodeClient {
       headers,
       body: options.body,
     });
+  }
+
+  private async enforceReviewAgentPermissions(
+    projectPath: string,
+    agentFiles: Array<Pick<AgentFileRecord, "name">>,
+  ): Promise<void> {
+    const reviewAgentNames = [...new Set(agentFiles.map((agent) => agent.name).filter(isReviewAgentName))];
+    if (reviewAgentNames.length === 0) {
+      return;
+    }
+
+    const current = await this.request("/global/config", {
+      method: "GET",
+      projectPath,
+    });
+    if (!current.ok) {
+      throw new Error(`读取 global/config 失败: ${current.status}`);
+    }
+
+    const rawConfig = await current.text();
+    const parsed = rawConfig.trim() ? (JSON.parse(rawConfig) as Record<string, unknown>) : {};
+    const agentConfig =
+      parsed.agent && typeof parsed.agent === "object"
+        ? { ...(parsed.agent as Record<string, unknown>) }
+        : {};
+
+    for (const agentName of reviewAgentNames) {
+      const existing =
+        agentConfig[agentName] && typeof agentConfig[agentName] === "object"
+          ? { ...(agentConfig[agentName] as Record<string, unknown>) }
+          : {};
+      const permission =
+        existing.permission && typeof existing.permission === "object"
+          ? { ...(existing.permission as Record<string, unknown>) }
+          : {};
+      permission.write = "deny";
+      permission.edit = "deny";
+      permission.bash = "deny";
+      agentConfig[agentName] = {
+        ...existing,
+        permission,
+      };
+    }
+
+    parsed.agent = agentConfig;
+
+    const patched = await this.request("/global/config", {
+      method: "PATCH",
+      projectPath,
+      body: JSON.stringify(parsed),
+    });
+    if (!patched.ok) {
+      throw new Error(`写入 global/config 失败: ${patched.status}`);
+    }
   }
 
   private async waitForSessionSettled(sessionId: string, after: number, timeoutMs: number): Promise<void> {
@@ -1049,9 +1115,9 @@ export class OpenCodeClient {
     switch (agent) {
       case "BA":
         if (/验收|review|审查|复核/i.test(cleaned)) {
-          return withDecision("我已经完成业务验收与体验复核，当前交付满足主流程要求。", completed);
+          return withDecision("我已经完成业务验收与体验复核，当前交付满足主流程要求。", reviewPassed);
         }
-        return withDecision("我已整理当前 Task 的目标、范围与交付标准，并给出可执行的实现方案。", completed);
+        return withDecision("我已整理当前 Task 的目标、范围与交付标准，并给出审查结论。", reviewPassed);
       case "Code":
       case "build":
       case "Build":
@@ -1068,7 +1134,7 @@ export class OpenCodeClient {
       case "DocsReview":
         return withDecision("文档审查完成，README.md 与 AGENTS.md 的同步情况已经核对。", reviewPassed);
       default:
-        return withDecision("当前阶段处理完成。");
+        return withDecision("当前阶段审查完成，未发现阻塞问题。", reviewPassed);
     }
   }
 

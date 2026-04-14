@@ -8,6 +8,7 @@ import { IPC_CHANNELS } from "@shared/ipc";
 import {
   type AgentFlowEvent,
   type AgentRuntimeSnapshot,
+  BUILD_AGENT_NAME,
   createDefaultTopology,
   type AgentFileRecord,
   type CreateProjectPayload,
@@ -30,6 +31,7 @@ import {
   type TaskSnapshot,
   type TopologyRecord,
   type UpdateTopologyPayload,
+  isReviewAgentName,
 } from "@shared/types";
 import { buildZellijMissingReminder } from "@shared/zellij";
 import { AgentFileService } from "./agent-files";
@@ -48,7 +50,6 @@ interface OrchestratorOptions {
 
 interface ParsedSignal {
   done: boolean;
-  targets: string[];
 }
 
 type ReviewDecision = "pass" | "needs_revision" | "unknown";
@@ -79,6 +80,12 @@ type AgentExecutionPrompt =
       message: string;
       requirement?: string;
     };
+
+interface AgentRunBehaviorOptions {
+  followTopology?: boolean;
+  updateTaskStatusOnStart?: boolean;
+  completeTaskOnFinish?: boolean;
+}
 
 export class Orchestrator {
   private readonly store: StoreService;
@@ -247,7 +254,7 @@ export class Orchestrator {
     const mentionName =
       payload.mentionAgent ||
       this.extractMention(payload.content) ||
-      this.findAgentFile(agentFiles, "Build")?.name;
+      this.findAgentFile(agentFiles, BUILD_AGENT_NAME)?.name;
     if (!mentionName) {
       throw new Error("当前没有可用的目标 Agent。");
     }
@@ -514,6 +521,7 @@ export class Orchestrator {
     agentName: string,
     prompt: AgentExecutionPrompt,
     deliveredMessageIds: string[] = [],
+    behavior: AgentRunBehaviorOptions = {},
   ) {
     const runtime = this.getRuntime(taskId);
     if (runtime.runningAgents.has(agentName)) {
@@ -525,7 +533,7 @@ export class Orchestrator {
       this.markMessagesDelivered(taskId, agentName, deliveredMessageIds);
     }
 
-    await this.runAgent(project, this.store.getTask(taskId), agentName, prompt);
+    await this.runAgent(project, this.store.getTask(taskId), agentName, prompt, behavior);
   }
 
   private buildQueuedAgentPrompt(
@@ -619,12 +627,15 @@ export class Orchestrator {
     task: TaskRecord,
     agentName: string,
     prompt: AgentExecutionPrompt,
+    behavior: AgentRunBehaviorOptions = {},
   ) {
     const runtime = this.getRuntime(task.id);
     runtime.runningAgents.add(agentName);
 
     this.store.updateTaskAgentRun(task.id, agentName, "running");
-    this.store.updateTaskStatus(task.id, "running", null);
+    if (behavior.updateTaskStatusOnStart ?? true) {
+      this.store.updateTaskStatus(task.id, "running", null);
+    }
     const currentAgent = this.store.listTaskAgents(task.id).find((item) => item.name === agentName);
     if (!currentAgent) {
       throw new Error(`Task ${task.id} 缺少 Agent ${agentName}`);
@@ -659,7 +670,10 @@ export class Orchestrator {
       });
 
       const dispatchedContent = this.buildAgentExecutionPrompt(prompt);
-      await this.opencodeClient.reloadConfig(project.path);
+      await this.opencodeClient.reloadConfig(
+        project.path,
+        this.agentFiles.listAgentFiles(project.id, project.path),
+      );
       const response = await this.opencodeRunner.run({
         projectPath: project.path,
         sessionId: agentSessionId,
@@ -699,9 +713,11 @@ export class Orchestrator {
       };
       this.store.insertMessage(taskMessage);
 
-      const agentStatus = parsedReview.decision === "needs_revision" ? "needs_revision" : "success";
+      const agentStatus = parsedReview.decision === "needs_revision" ? "failed" : "success";
       this.store.updateTaskAgentStatus(task.id, agentName, agentStatus);
-      this.store.updateTaskStatus(task.id, agentStatus === "needs_revision" ? "needs_revision" : "running", null);
+      if (behavior.updateTaskStatusOnStart ?? true) {
+        this.store.updateTaskStatus(task.id, agentStatus === "failed" ? "failed" : "running", null);
+      }
 
       this.emit({
         type: "message-created",
@@ -732,7 +748,17 @@ export class Orchestrator {
 
       const signal = this.parseSignal(response.finalMessage);
       if (parsedReview.decision === "needs_revision") {
-        await this.handleRevision(project, task.id, agentName, parsedReview, signal, taskMessage.content);
+        if (this.isReviewAgent(latestAgentFile)) {
+          await this.handleReviewFailure(
+            project,
+            task.id,
+            latestAgentFile,
+            parsedReview,
+            taskMessage.content,
+          );
+        } else if (behavior.completeTaskOnFinish ?? true) {
+          await this.completeTask(task.id, "failed");
+        }
         this.emit({
           type: "task-updated",
           projectId: project.id,
@@ -741,30 +767,32 @@ export class Orchestrator {
         return;
       }
 
-      const triggered = await this.triggerDownstream(
-        project,
-        task.id,
-        agentName,
-        agentContextContent,
-        signal,
-      );
+      const triggered =
+        behavior.followTopology ?? true
+          ? await this.triggerDownstream(project, task.id, agentName, agentContextContent, signal)
+          : 0;
       const topology = this.store.getTopology(project.id);
       const hasOtherRunningAgents = [...runtime.runningAgents].some((runningAgent) => runningAgent !== agentName);
       const hasQueuedAgents = runtime.queuedAgents.size > 0;
 
       if (
-        (!hasOtherRunningAgents && !hasQueuedAgents && signal.done) ||
-        (!hasOtherRunningAgents &&
-          !hasQueuedAgents &&
-          triggered === 0 &&
-          this.hasCompletedIncomingSuccess(topology, runtime.completedEdges, agentName) &&
-          this.hasCompletedOutgoingSuccess(topology, runtime.completedEdges, agentName))
+        (behavior.completeTaskOnFinish ?? true) &&
+        (
+          (!hasOtherRunningAgents && !hasQueuedAgents && signal.done) ||
+          (!hasOtherRunningAgents &&
+            !hasQueuedAgents &&
+            triggered === 0 &&
+            this.hasCompletedIncomingSuccess(topology, runtime.completedEdges, agentName) &&
+            this.hasCompletedOutgoingSuccess(topology, runtime.completedEdges, agentName))
+        )
       ) {
         await this.completeTask(task.id, "success");
       }
     } catch (error) {
       this.store.updateTaskAgentStatus(task.id, agentName, "failed");
-      await this.completeTask(task.id, "failed");
+      if (behavior.completeTaskOnFinish ?? true) {
+        await this.completeTask(task.id, "failed");
+      }
 
       const failedMessage: MessageRecord = {
         id: randomUUID(),
@@ -834,39 +862,22 @@ export class Orchestrator {
     taskId: string,
     sourceAgentId: string,
     sourceContent: string,
-    signal: ParsedSignal,
+    _signal: ParsedSignal,
   ): Promise<number> {
     const runtime = this.getRuntime(taskId);
     const topology = this.store.getTopology(project.id);
     const agents = this.store.listTaskAgents(taskId);
-    const outgoing = topology.edges.filter((edge) => edge.source === sourceAgentId);
+    const outgoing = topology.edges.filter((edge) => edge.source === sourceAgentId && edge.triggerOn === "success");
     const completed = new Set(runtime.completedEdges);
 
-    for (const edge of outgoing.filter((item) => item.triggerOn === "success")) {
+    for (const edge of outgoing) {
       completed.add(edge.id);
       runtime.completedEdges.add(edge.id);
     }
 
     const targetNames = new Set<string>();
-    if (signal.targets.length > 0) {
-      for (const target of signal.targets) {
-        const edge = outgoing.find(
-          (item) =>
-            item.target === target &&
-            (item.triggerOn === "success" || item.triggerOn === "manual"),
-        );
-        if (!edge) {
-          this.emitTopologyBlockedMessage(project.id, taskId, sourceAgentId, target);
-          continue;
-        }
-        completed.add(edge.id);
-        runtime.completedEdges.add(edge.id);
-        targetNames.add(target);
-      }
-    } else {
-      for (const edge of outgoing.filter((item) => item.triggerOn === "success")) {
-        targetNames.add(edge.target);
-      }
+    for (const edge of outgoing) {
+      targetNames.add(edge.target);
     }
 
     const readyTargets: string[] = [];
@@ -883,8 +894,8 @@ export class Orchestrator {
     }
 
     if (readyTargets.length === 0 && queuedTargets.size === 0) {
-      const hasAutomaticOutgoing = outgoing.some((edge) => edge.triggerOn === "success");
-      if (outgoing.length > 0 && !hasAutomaticOutgoing && signal.targets.length === 0 && !signal.done) {
+      if (outgoing.length === 0) {
+        this.store.updateTaskStatus(taskId, "waiting", null);
         const waitingMessage = {
           id: randomUUID(),
           projectId: project.id,
@@ -903,6 +914,11 @@ export class Orchestrator {
           projectId: project.id,
           payload: waitingMessage,
         });
+        this.emit({
+          type: "task-updated",
+          projectId: project.id,
+          payload: this.hydrateTask(taskId),
+        });
       }
       return 0;
     }
@@ -916,7 +932,7 @@ export class Orchestrator {
         taskId,
         sender: sourceAgentId,
         timestamp: new Date().toISOString(),
-        content: this.buildHighLevelTriggerMessageContent(triggerTargets, content),
+        content: this.buildHighLevelTriggerMessageContent(triggerTargets, sourceContent),
         meta: {
           kind: "high-level-trigger",
           sourceAgentId,
@@ -947,13 +963,10 @@ export class Orchestrator {
           sourceContent,
           incrementalContext.content,
         );
-        const forwardedRequirement =
-          signal.targets.length > 0
-            ? this.buildAgentHandoffRequirement(
-                "请结合 [Message] 中的上下文继续推进当前任务，并只关注你当前负责的部分。",
-                gitDiffSummary,
-              )
-            : undefined;
+        const forwardedRequirement = this.buildAgentHandoffRequirement(
+          "请结合 [Message] 中的上下文继续推进当前任务，并只关注你当前负责的部分。",
+          gitDiffSummary,
+        );
         const signature = this.buildTriggerSignature(topology, completed, targetName);
         runtime.lastSignatureByAgent.set(targetName, signature);
         await this.dispatchAgentRun(project, taskId, targetName, {
@@ -1039,33 +1052,6 @@ export class Orchestrator {
     return true;
   }
 
-  private emitTopologyBlockedMessage(
-    projectId: string,
-    taskId: string,
-    sourceAgentId: string,
-    targetAgentId: string,
-  ) {
-    const blockedMessage: MessageRecord = {
-      id: randomUUID(),
-      projectId,
-      taskId,
-      content: `系统提示：当前 Project 拓扑未允许 @${sourceAgentId} 触发 @${targetAgentId}，因此未执行该下游派发。`,
-      sender: "system",
-      timestamp: new Date().toISOString(),
-      meta: {
-        kind: "topology-blocked",
-        sourceAgentId,
-        targetAgentId,
-      },
-    };
-    this.store.insertMessage(blockedMessage);
-    this.emit({
-      type: "message-created",
-      projectId,
-      payload: blockedMessage,
-    });
-  }
-
   private buildTriggerSignature(
     topology: TopologyRecord,
     completedEdges: Set<string>,
@@ -1105,17 +1091,8 @@ export class Orchestrator {
   }
 
   private parseSignal(content: string): ParsedSignal {
-    const nextMatch = content.match(/NEXT_AGENTS:\s*(.+)$/im);
-    const targets = nextMatch
-      ? nextMatch[1]
-          .split(",")
-          .map((item) => item.trim())
-          .filter(Boolean)
-      : [];
-
     return {
       done: /\bTASK_DONE\b/i.test(content),
-      targets,
     };
   }
 
@@ -1350,10 +1327,12 @@ export class Orchestrator {
       return this.extractDisplaySummary(fallbackMessage) ?? fallbackMessage.trim();
     }
     if (parsedReview.decision === "needs_revision") {
-      return "（该 Agent 已给出“需要修改”的决策，详细修改意见由 Orchestrator 以返工消息形式展示。）";
+      return this.isReviewAgent(agent)
+        ? "（该 Agent 已给出“审查不通过”的结论，Orchestrator 已触发 Build 并将当前 Task 收口为“不通过”。）"
+        : "（该 Agent 已给出“需要修改”的决策，当前 Task 已结束。）";
     }
     if (parsedReview.decision === "pass") {
-      return this.usesReviewPassDecision(agent)
+      return this.isReviewAgent(agent)
         ? "（该 Agent 已完成本轮审查并给出通过结论，未额外返回高层说明。）"
         : "（该 Agent 已完成本轮工作，未额外返回高层说明。）";
     }
@@ -1519,153 +1498,84 @@ export class Orchestrator {
     }
   }
 
-  private async handleRevision(
+  private async handleReviewFailure(
     project: ProjectRecord,
     taskId: string,
-    sourceAgentId: string,
+    sourceAgent: Pick<AgentFileRecord, "name">,
     parsedReview: ParsedReview,
-    signal: ParsedSignal,
     visibleContent: string,
   ) {
-    const topology = this.store.getTopology(project.id);
-    const downstreamAgents = this.collectReachableTargets(topology, sourceAgentId);
-    for (const agentName of downstreamAgents) {
-      this.store.updateTaskAgentStatus(taskId, agentName, "needs_revision");
-    }
-    this.store.updateTaskStatus(taskId, "needs_revision", null);
-
-    const revisionTargets = this.resolveRevisionTargets(topology, sourceAgentId, signal);
-    const feedback = parsedReview.feedback ?? "请根据当前审查意见补充必要修改。";
+    const feedback = parsedReview.feedback?.trim() || "请根据当前审查意见修复问题，并重新提交本轮结果。";
     const contextSummary = visibleContent.trim()
       ? `当前阶段高层结果：\n${visibleContent.trim()}\n\n`
       : "";
+    const remediationMessage: MessageRecord = {
+      id: randomUUID(),
+      projectId: project.id,
+      taskId,
+      sender: sourceAgent.name,
+      timestamp: new Date().toISOString(),
+      content: `@${BUILD_AGENT_NAME} 审查不通过，请根据以下意见继续处理。\n\n${contextSummary}具体修改意见：\n${feedback}`,
+      meta: {
+        kind: "revision-request",
+        sourceAgentId: sourceAgent.name,
+        targetAgentId: BUILD_AGENT_NAME,
+      },
+    };
+    this.store.insertMessage(remediationMessage);
+    this.emit({
+      type: "message-created",
+      projectId: project.id,
+      payload: remediationMessage,
+    });
 
-    if (revisionTargets.length === 0) {
-      const noTargetMessage: MessageRecord = {
-        id: randomUUID(),
-        projectId: project.id,
-        taskId,
-        sender: "system",
-        timestamp: new Date().toISOString(),
-        content: `@${sourceAgentId} 返回“需要修改”，但当前未能从拓扑中解析出明确返工目标。请手动在 Task 群聊中 @ 对应 Agent 继续处理。\n\n具体修改意见：\n${feedback}`,
-        meta: {
-          kind: "revision-request",
-          sourceAgentId,
-        },
-      };
-      this.store.insertMessage(noTargetMessage);
-      this.emit({
-        type: "message-created",
-        projectId: project.id,
-        payload: noTargetMessage,
-      });
+    await this.completeTask(taskId, "failed");
+
+    const buildAgent = this.findAgentFile(
+      this.agentFiles.listAgentFiles(project.id, project.path),
+      BUILD_AGENT_NAME,
+    );
+    if (!buildAgent || sourceAgent.name === BUILD_AGENT_NAME) {
       return;
     }
 
-    await Promise.all(
-      revisionTargets.map(async (targetName) => {
-        const revisionMessage: MessageRecord = {
-          id: randomUUID(),
-          projectId: project.id,
-          taskId,
-          sender: sourceAgentId,
-          timestamp: new Date().toISOString(),
-          content: `@${targetName} 需要返工，请根据以下修改意见继续处理。\n\n${contextSummary}具体修改意见：\n${feedback}`,
-          meta: {
-            kind: "revision-request",
-            sourceAgentId,
-            targetAgentId: targetName,
-          },
-        };
-        this.store.insertMessage(revisionMessage);
-        this.emit({
-          type: "message-created",
-          projectId: project.id,
-          payload: revisionMessage,
-        });
+    const incrementalContext = this.buildIncrementalAgentContext(taskId, BUILD_AGENT_NAME);
+    const forwardedMessage =
+      incrementalContext.content.trim().length > 0
+        ? `${incrementalContext.content}\n\n请根据以上新增历史继续处理，并优先修复以下审查问题：\n${feedback}`
+        : `审查来源 Agent：${this.getAgentDisplayName(sourceAgent.name)}\n\n${contextSummary}具体修改意见：\n${feedback}`;
 
-        const incrementalContext = this.buildIncrementalAgentContext(taskId, targetName);
-        const forwardedMessage =
-          incrementalContext.content.trim().length > 0
-            ? `${incrementalContext.content}\n\n请根据以上新增历史继续返工，并重点处理以下修改意见：\n${feedback}`
-            : `返工来源 Agent：${this.getAgentDisplayName(sourceAgentId)}\n\n${contextSummary}具体修改意见：\n${feedback}`;
-        await this.dispatchAgentRun(project, taskId, targetName, {
-          mode: "structured",
-          from: sourceAgentId,
-          message: forwardedMessage,
-          requirement: "请根据 [Message] 中的返工背景与修改意见继续处理，并优先修复阻塞当前链路的问题。",
-        }, incrementalContext.messageIds);
-      }),
-    );
+    void this.dispatchAgentRun(
+      project,
+      taskId,
+      BUILD_AGENT_NAME,
+      {
+        mode: "structured",
+        from: sourceAgent.name,
+        message: forwardedMessage,
+        requirement: "请根据 [Message] 中的审查意见完成修复，仅处理阻塞当前交付的问题。",
+      },
+      incrementalContext.messageIds,
+      {
+        followTopology: false,
+        updateTaskStatusOnStart: false,
+        completeTaskOnFinish: false,
+      },
+    ).catch((error) => {
+      console.error("[orchestrator] 审查不通过后触发 Build 失败", {
+        taskId,
+        sourceAgentId: sourceAgent.name,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
-  private resolveRevisionTargets(
-    topology: TopologyRecord,
-    sourceAgentId: string,
-    signal: ParsedSignal,
-  ): string[] {
-    const fromSignal = signal.targets.filter((target) =>
-      topology.edges.some(
-        (edge) =>
-          edge.source === sourceAgentId &&
-          edge.target === target &&
-          (edge.triggerOn === "failed" || edge.triggerOn === "manual"),
-      ),
-    );
-    if (fromSignal.length > 0) {
-      return [...new Set(fromSignal)];
-    }
-
-    const outgoingFailedTargets = topology.edges
-      .filter((edge) => edge.source === sourceAgentId && edge.triggerOn === "failed")
-      .map((edge) => edge.target);
-
-    if (outgoingFailedTargets.length > 0) {
-      return [...new Set(outgoingFailedTargets)];
-    }
-
-    const outgoingSuccessTargets = topology.edges
-      .filter((edge) => edge.source === sourceAgentId && edge.triggerOn === "success")
-      .map((edge) => edge.target);
-
-    const incomingSources = topology.edges
-      .filter((edge) => edge.target === sourceAgentId && edge.triggerOn === "success")
-      .map((edge) => edge.source);
-
-    if (incomingSources.length > 0) {
-      return [...new Set(incomingSources)];
-    }
-
-    return [...new Set(outgoingSuccessTargets)];
-  }
-
-  private collectReachableTargets(topology: TopologyRecord, sourceAgentId: string): string[] {
-    const visited = new Set<string>([sourceAgentId]);
-    const queue = [sourceAgentId];
-    while (queue.length > 0) {
-      const current = queue.shift();
-      if (!current) {
-        continue;
-      }
-      for (const edge of topology.edges.filter((item) => item.source === current)) {
-        if (!visited.has(edge.target)) {
-          visited.add(edge.target);
-          queue.push(edge.target);
-        }
-      }
-    }
-    visited.delete(sourceAgentId);
-    return [...visited];
-  }
-
-  private usesReviewPassDecision(agent: Pick<AgentFileRecord, "name" | "role">): boolean {
-    return new Set(["code_review", "docs_review", "unit_test", "integration_test"]).has(
-      agent.role ?? "",
-    );
+  private isReviewAgent(agent: Pick<AgentFileRecord, "name">): boolean {
+    return isReviewAgentName(agent.name);
   }
 
   private buildDecisionPrompt(agent: Pick<AgentFileRecord, "name" | "role">): string {
-    if (this.usesReviewPassDecision(agent)) {
+    if (this.isReviewAgent(agent)) {
       return `在你完成本轮所有工作后，必须用中文严格按照以下格式给出最终决策，不要有任何其他解释或额外文字：
 - 如果你确认自己负责的审查已经严格通过，请直接输出：【DECISION】检查通过
 - 如果存在问题需要修改，请直接输出：【DECISION】需要修改
@@ -1788,6 +1698,7 @@ export class Orchestrator {
     const validNames = new Set(agentFiles.map((item) => item.name));
     const seenEdges = new Set<string>();
     const edges = topology.edges
+      .filter((edge) => edge.triggerOn === "success")
       .filter((edge) => validNames.has(edge.source) && validNames.has(edge.target))
       .filter((edge) => {
         const key = `${edge.source}__${edge.target}__${edge.triggerOn}`;
@@ -1876,7 +1787,7 @@ export class Orchestrator {
       content:
         status === "success"
           ? `Task「${snapshot.task.title}」已完成，群聊中保留的是高层阶段消息与最终回复。`
-          : `Task「${snapshot.task.title}」执行失败，请根据当前群聊消息和对应 Agent 状态继续排查。`,
+          : `Task「${snapshot.task.title}」已收口为“不通过”或执行失败，请根据当前群聊消息和对应 Agent 状态继续排查。`,
       meta: {
         kind: "task-completed",
         status,

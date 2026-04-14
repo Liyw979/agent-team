@@ -26,13 +26,16 @@ async function main() {
 
   try {
     const buildAgent = createAgent("Build", "implementation");
+    const baAgent = createAgent("BA", "business_analyst");
     const unitTestAgent = createAgent("UnitTest", "unit_test");
 
     const buildPrompt = (orchestrator as any).createSystemPrompt(buildAgent) as string;
+    const baPrompt = (orchestrator as any).createSystemPrompt(baAgent) as string;
     const unitTestPrompt = (orchestrator as any).createSystemPrompt(unitTestAgent) as string;
 
     assert.match(buildPrompt, /【DECISION】已完成/u, "Build 应使用“已完成”决策文案");
     assert.doesNotMatch(buildPrompt, /【DECISION】检查通过/u, "Build 不应使用“检查通过”决策文案");
+    assert.match(baPrompt, /【DECISION】检查通过/u, "所有非 Build Agent 都应使用“检查通过”");
     assert.match(unitTestPrompt, /【DECISION】检查通过/u, "审查类 Agent 应继续使用“检查通过”");
 
     const buildParsed = (orchestrator as any).parseReview("实现已整理完毕。\n\n【DECISION】已完成") as {
@@ -65,6 +68,7 @@ async function main() {
       JSON.stringify(
         {
           buildPrompt,
+          baPrompt,
           unitTestPrompt,
           buildDisplay,
           reviewDisplay,

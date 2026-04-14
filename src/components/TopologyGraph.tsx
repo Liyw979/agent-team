@@ -14,7 +14,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { getAgentColorToken } from "@/lib/agent-colors";
-import { isBuiltinAgentPath, resolveTopologyAgentOrder } from "@shared/types";
+import { isBuiltinAgentPath, isReviewAgentName, resolveTopologyAgentOrder } from "@shared/types";
 import type {
   AgentRole,
   AgentRuntimeSnapshot,
@@ -111,7 +111,7 @@ function getAgentDisplayName(name: string) {
 }
 
 function getAgentBlockHeight(agentState: string) {
-  return agentState === "running" ? RUNNING_AGENT_BLOCK_HEIGHT : IDLE_AGENT_BLOCK_HEIGHT;
+  return agentState === "running" ? 44 : 44;
 }
 
 function getAgentCardAppearance(
@@ -189,53 +189,59 @@ function createEdgeId(source: string, target: string, triggerOn: TopologyEdge["t
 }
 
 function getEdgeTriggerLabel(triggerOn: TopologyEdge["triggerOn"]) {
-  switch (triggerOn) {
-    case "failed":
-      return "需要修改时触发";
-    case "manual":
-      return "仅显式指派时触发";
-    default:
-      return "完成后自动触发";
-  }
+  return triggerOn === "success" ? "通过后自动触发" : "通过后自动触发";
 }
 
 function getEdgeTriggerDescription(triggerOn: TopologyEdge["triggerOn"]) {
-  switch (triggerOn) {
-    case "failed":
-      return "只有当前 Agent 判定“需要修改”时，才会把任务回流给这个下游 Agent。";
-    case "manual":
-      return "只有当前 Agent 在结果里显式指定 NEXT_AGENTS 时，才会触发这个下游 Agent。";
-    default:
-      return "当前 Agent 正常完成后就会自动派发到这个下游 Agent。";
-  }
+  return triggerOn === "success"
+    ? "当前 Agent 审查通过或执行完成后，会自动派发到这个下游 Agent。"
+    : "当前 Agent 审查通过或执行完成后，会自动派发到这个下游 Agent。";
 }
 
 function getEdgeTriggerAppearance(triggerOn: TopologyEdge["triggerOn"]) {
-  switch (triggerOn) {
-    case "failed":
-      return {
-        color: "#A95C42",
-        strokeWidth: 2.1,
-        strokeDasharray: "10 6",
-        zIndex: 2,
+  return triggerOn === "success"
+    ? {
+        color: "#2C4A3F",
+        strokeWidth: 2,
+        strokeDasharray: undefined,
+        zIndex: 1,
         animated: false,
-      };
-    case "manual":
-      return {
-        color: "#C96F3B",
-        strokeWidth: 2.1,
-        strokeDasharray: "7 6",
-        zIndex: 2,
-        animated: true,
-      };
-    default:
-      return {
+      }
+    : {
         color: "#2C4A3F",
         strokeWidth: 2,
         strokeDasharray: undefined,
         zIndex: 1,
         animated: false,
       };
+}
+
+function getAgentStatusBadge(agentName: string, agentState: string) {
+  const reviewAgent = isReviewAgentName(agentName);
+
+  switch (agentState) {
+    case "running":
+      return {
+        label: "运行中",
+        className: "border border-[#d8c27a]/70 bg-[#fff7dc] text-[#7b6110]",
+      };
+    case "success":
+      return {
+        label: reviewAgent ? "审查通过" : "已完成",
+        className: "border border-[#2c4a3f]/18 bg-[#edf5f0] text-[#2c4a3f]",
+      };
+    case "failed":
+      return {
+        label: reviewAgent ? "审查不通过" : "执行失败",
+        className: "border border-[#a95c42]/20 bg-[#fff0ea] text-[#8f4a34]",
+      };
+    case "needs_revision":
+      return {
+        label: "审查不通过",
+        className: "border border-[#a95c42]/20 bg-[#fff0ea] text-[#8f4a34]",
+      };
+    default:
+      return null;
   }
 }
 
@@ -559,17 +565,17 @@ function getHistoryAppearance(status: string) {
       };
     case "needs_revision":
       return {
-        label: "消息",
+        label: "不通过",
         className: "border-[#e2b26f] bg-[#fff1da] text-[#8a5a19]",
       };
     case "failed":
       return {
-        label: "消息",
+        label: "不通过",
         className: "border-primary/35 bg-primary/10 text-primary",
       };
     default:
       return {
-        label: "消息",
+        label: "通过",
         className: "border-accent/55 bg-accent/18 text-foreground",
       };
   }
@@ -1090,6 +1096,7 @@ export function TopologyGraph({
       const runtime = agentState === "running" ? runtimeSnapshots[node.id] : undefined;
       const runtimeTooltip = buildRuntimeTooltip(runtime);
       const agentBlockHeight = getAgentBlockHeight(agentState);
+      const statusBadge = getAgentStatusBadge(node.id, agentState);
       const historyItems = agentHistories.get(node.id) ?? [];
       const appearance = getAgentCardAppearance(agentState, agentColor);
       const visibleHistory =
@@ -1183,6 +1190,13 @@ export function TopologyGraph({
                   maxHeight: agentBlockHeight,
                 }}
               >
+                {statusBadge ? (
+                  <span
+                    className={`absolute right-3 top-1/2 inline-flex min-h-7 -translate-y-1/2 items-center rounded-full px-3 py-1 text-[12px] font-semibold leading-none tracking-[0.01em] shadow-[0_1px_0_rgba(255,255,255,0.45)] ${statusBadge.className}`}
+                  >
+                    {statusBadge.label}
+                  </span>
+                ) : null}
                 <p
                   className="mx-auto max-w-full break-all text-balance font-semibold"
                   style={getAgentNameStyle(getAgentDisplayName(node.label), nodeCardWidth)}
@@ -1636,8 +1650,8 @@ export function TopologyGraph({
 
             <div className="mt-5 rounded-[8px] border border-border/70 bg-[#f8f4ea] px-4 py-3 text-xs text-muted-foreground">
               <p className="font-semibold text-primary">触发方式</p>
-              <p className="mt-1">完成后自动触发：上游 Agent 正常完成后，100% 自动派发。</p>
-              <p className="mt-1">需要修改时触发：只有上游 Agent 决策为“需要修改”时，才会派发。</p>
+              <p className="mt-1">通过后自动触发：上游 Agent 审查通过或执行完成后，自动派发到下游。</p>
+              <p className="mt-1">审查不通过时会固定触发 Build，并把当前 Task 直接收口为“不通过”，这里不再单独配置失败链路。</p>
             </div>
 
             <div className="mt-5 space-y-2">
@@ -1681,9 +1695,7 @@ export function TopologyGraph({
                         className="min-w-[178px] rounded-[8px] border border-border/70 bg-white/90 px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
                       >
                         <option value="none">不触发</option>
-                        <option value="success">完成后自动触发</option>
-                        <option value="failed">需要修改时触发</option>
-                        <option value="manual">仅显式指派时触发</option>
+                        <option value="success">通过后自动触发</option>
                       </select>
                     </div>
                   );

@@ -30,14 +30,15 @@
 - 当一个 Agent 同时触发多个下游 Agent 时，群聊会合并展示为一条批量 `agent -> agent` 派发消息，而不是拆成多条重复消息
 - 这类批量 `agent -> agent` 派发消息仅用于群聊展示给人看，不会作为“尚未收到的群聊历史”再次转发给下游 Agent
 - 用户在 Task 群聊里直接 `@Agent` 时，群聊展示仍保留原始 `@Agent` 文本，但底层发送给目标 Agent 的正文会自动去掉开头用于寻址的 `@Agent`，也不额外拼接结构化前缀
-- Agent 派发下游时，只有显式指定下游或返工链路才会封装 `[From]`、`[Message]`、`[Requeirement]`；对于 `success` 的 100% 自动触发，只会保留 `[From]`、`[Message]`，不会额外拼接 `[Requeirement]`
-- 当 Agent 显式派发下游 Agent 时，系统会把当前 Project Git Diff 的精简摘要附加到转发 Prompt 的 `[Requeirement]` 段；返工链路不附带该摘要
+- Agent 自动派发下游时会封装 `[From]`、`[Message]`；系统会把当前 Project Git Diff 的精简摘要附加到转发 Prompt 的 `[Requeirement]` 段
 - 每个 Agent 都会按名称自动分配一套稳定配色；聊天记录里会使用对应的浅色底、描边与标签色来区分不同 Agent
 - 右下角团队成员列表支持直接调整 Agent 顺序；该顺序会持久化到拓扑配置，并直接决定右上角拓扑图从左到右的节点排列
 - 团队成员面板顶部展示当前 Task 最后一条群聊消息，以及当前 Task 的 panel 绑定摘要
 - 右上角为 Project 级真实拓扑图，点击节点即可编辑“这个 Agent 会去跟哪些 Agent”，也支持整块面板放大查看；放大视图会直接把当前拓扑图放大，Agent 卡片会随视口横向和纵向一起拉伸铺满面板，连线固定走在 Agent 顶部的上方通道内，不会越出拓扑 panel；节点顺序稳定，未显式保存顺序时默认优先取 `BA` 作为最左侧起点
-- 拓扑边支持三种触发语义：`success` 表示当前 Agent 完成后 100% 自动触发下游，`failed` 表示只有当前 Agent 决策为“需要修改”时才触发下游返工，`manual` 表示只有当前 Agent 显式指定 `NEXT_AGENTS` 时才触发
+- 拓扑边只保留 `success` 一种触发语义，表示当前 Agent 审查通过或执行完成后自动触发下游
 - 拓扑图里的 Agent 节点颜色用于表达当前运行状态，不再用颜色区分 built-in / custom；内置与本地类型信息仅在编辑面板等辅助信息里展示
+- 审查类 Agent 的“审查通过 / 审查不通过”状态会直接展示在拓扑节点顶部；审查不通过时系统会固定触发 `Build`，并把当前 Task 直接收口为“不通过”
+- 当某个 Task 已运行到当前节点、但拓扑里不存在可自动继续推进的下游节点时，Task 状态会切换为 `waiting`，与群聊中的“保持等待状态”系统消息保持一致
 - 拓扑图在面板尺寸变化时会保持“Agent 在上、历史区在下、首尾节点贴近左右边界但保留少量留白、顶部预留连线通道”的布局约束，而不是把整张图简单等比缩放后居中
 - 拓扑图历史区会优先展示 Agent 最近的运行活动，包括普通消息与 Tool Call 参数摘要，而不只是单行运行状态
 - 右下角展示 Project 全量 Agent，以及它们在当前 Task 语境下的状态；点击 Agent 会直接打开原始配置文件查看器
@@ -45,6 +46,8 @@
 - Agent frontmatter 采用最新的 `permission:` 配置字段，值使用 `allow / ask / deny`
 - 当前默认 Agent 集合为 `BA / Build / CodeReview / DocsReview / IntegrationTest / UnitTest`
 - `Build` 是项目内部名称，底层使用 OpenCode 内置 `build` agent，不需要项目自己在 `.opencode/agents` 里额外定义 Markdown 文件
+- 除 `Build` 外，其余 Agent 一律按审查类 Agent 处理；只有 `Build` 是实际执行实现的 Agent
+- 审查类 Agent 通过 OpenCode HTTP 配置接口会被默认强制注入 `write / edit / bash: deny`
 - 当前处于项目开发初期，不要求兼容历史数据；如果现有 Project 状态、拓扑或运行数据与当前实现不一致，优先直接修正当前数据与实现，不额外为旧数据添加兼容分支
 - 默认工作流是 `BA -> Build -> (DocsReview / UnitTest / IntegrationTest)`，随后 `IntegrationTest -> BA`
 - `CodeReview` 默认保留为可选 Agent，不会自动接入默认链路，只有用户手动修改拓扑时才会加入
@@ -123,8 +126,8 @@ npm run cli -- task panels <taskId>
 # 5. 查看和修改拓扑
 npm run cli -- topology show
 npm run cli -- topology set-downstream Build DocsReview UnitTest IntegrationTest
-npm run cli -- topology allow BA Build --trigger success
-npm run cli -- topology allow CodeReview Build --trigger failed
+npm run cli -- topology allow BA Build
+npm run cli -- topology allow CodeReview BA
 
 # 6. 查看 Agent 原始配置文件
 npm run cli -- agent show BA
@@ -151,7 +154,7 @@ CLI 能力分组：
 - Project 级 Agent 配置按 OpenCode 原生格式读取 `.opencode/agents/**/*.md`，同时允许直接使用项目内部名称为 `Build` 的内置 Agent；其底层仍调用 OpenCode 内置 `build` agent
 - 若当前 Project 为空目录，应用会补齐默认 Agent 模板：`BA / CodeReview / DocsReview / IntegrationTest / UnitTest`，并自动附带内置 `Build`
 - 默认拓扑只在首次初始化且当前还没有拓扑数据时按 Agent `role / mode / 是否内置` 自动推断；后续运行时不依赖固定名字
-- 每次创建 Task 或 Agent 间消息转发前，都会先尝试触发配置 Reload
+- 每次创建 Task 或 Agent 间消息转发前，都会先尝试触发配置 Reload，并通过 HTTP `global/config` 强制把所有审查类 Agent 的 `write / edit / bash` 权限置为 `deny`
 - `task init` 会先创建 Task，并完成该 Task 下全部 Agent 的 OpenCode session 与 Zellij pane 初始化；GUI 群聊会优先推荐并默认选中 `Build`，若用户直接发送且未显式指定目标，也会默认投递给 `Build`
 - GUI 聊天区里的 `Task Started` 系统消息会附带当前 Task 的 `Zellij Session` 名称与可直接执行的 attach 调试命令，方便排查会话问题
 - 点击 GUI 聊天区标题栏里的打开按钮时，macOS 会额外尝试把 Terminal 前台窗口切到全屏；Windows 会优先使用 Windows Terminal 全屏打开，回退到 `cmd.exe` 时也会尽量自动触发 `F11`

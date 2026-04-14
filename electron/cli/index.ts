@@ -491,8 +491,8 @@ function buildHelp() {
 
   topology show [--cwd <path>]
   topology set-downstream <sourceAgent> [targetAgent... ] [--cwd <path>]
-  topology allow <sourceAgent> <targetAgent> [--cwd <path>] [--trigger success|failed|manual]
-  topology deny <sourceAgent> <targetAgent> [--cwd <path>] [--trigger success|failed|manual]
+  topology allow <sourceAgent> <targetAgent> [--cwd <path>]
+  topology deny <sourceAgent> <targetAgent> [--cwd <path>]
 
   panel focus <taskId> <agentName> [--cwd <path>]
 
@@ -502,9 +502,11 @@ function buildHelp() {
   --json          输出 JSON
 
 触发语义：
-  success         当前 Agent 完成后自动触发下游
-  failed          当前 Agent 决策为“需要修改”时触发下游
-  manual          当前 Agent 显式指定 NEXT_AGENTS 时触发下游
+  success         当前 Agent 审查通过或执行完成后自动触发下游
+
+固定规则：
+  - 所有非 Build Agent 都视为审查 Agent。
+  - 审查 Agent 不通过时会固定触发 Build，并把当前 Task 直接收口为“不通过”。
 
 说明：
   - CLI 会直接复用 Orchestrator、文件存储、OpenCode client、Zellij manager 这套主逻辑。
@@ -812,7 +814,7 @@ async function handleTopology(context: CliContext, parsed: ParsedArgv) {
       printJson(updated.topology);
       return;
     }
-    process.stdout.write(`已更新 ${sourceAgent} 的 success 下游集合。\n`);
+    process.stdout.write(`已更新 ${sourceAgent} 的通过后下游集合。\n`);
     return;
   }
 
@@ -820,17 +822,12 @@ async function handleTopology(context: CliContext, parsed: ParsedArgv) {
     assertPositionals(
       parsed,
       4,
-      `topology ${action} <sourceAgent> <targetAgent> [--cwd <path>] [--trigger success|failed|manual]`,
+      `topology ${action} <sourceAgent> <targetAgent> [--cwd <path>]`,
     );
     const sourceAgent = parsed.positionals[2] ?? "";
     const targetAgent = parsed.positionals[3] ?? "";
     ensureAgentNames(project, [sourceAgent, targetAgent]);
-
-    const triggerRaw = getOptionString(parsed, "trigger") ?? "success";
-    if (!["success", "failed", "manual"].includes(triggerRaw)) {
-      fail(`非法 trigger：${triggerRaw}`);
-    }
-    const trigger = triggerRaw as TopologyEdge["triggerOn"];
+    const trigger = "success" as TopologyEdge["triggerOn"];
 
     const edgeId = createTopologyEdgeId(sourceAgent, targetAgent, trigger);
     const exists = project.topology.edges.some((edge) => edge.id === edgeId);

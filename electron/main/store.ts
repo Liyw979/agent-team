@@ -466,6 +466,7 @@ export class StoreService {
               title: typeof task.title === "string" ? task.title : "未命名任务",
               status:
                 task.status === "running" ||
+                task.status === "waiting" ||
                 task.status === "success" ||
                 task.status === "failed" ||
                 task.status === "needs_revision"

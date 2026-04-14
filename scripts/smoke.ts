@@ -42,16 +42,10 @@ async function main() {
       throw new Error("bootstrap 后未发现默认项目");
     }
 
-    const rootAgent =
-      project.agentFiles.find((agent) => agent.mode === "primary" && !agent.relativePath.startsWith("builtin://")) ??
-      project.agentFiles[0];
-    if (!rootAgent) {
-      throw new Error("未找到可作为首个节点的 Agent");
-    }
     const buildAgent = project.agentFiles.find((agent) => agent.name === "Build");
     const codeReviewAgent = project.agentFiles.find((agent) => agent.role === "code_review");
     if (!buildAgent || !codeReviewAgent) {
-      throw new Error("未找到 Build 或 CodeReview Agent，无法执行条件触发冒烟");
+      throw new Error("未找到 Build 或 CodeReview Agent，无法执行审查拓扑冒烟");
     }
 
     console.log("smoke: saveTopology");
@@ -59,13 +53,8 @@ async function main() {
       projectId: project.project.id,
       topology: {
         ...project.topology,
+        startAgentId: buildAgent.name,
         edges: [
-          {
-            id: `${rootAgent.name}__${buildAgent.name}__success`,
-            source: rootAgent.name,
-            target: buildAgent.name,
-            triggerOn: "success",
-          },
           {
             id: `${buildAgent.name}__${codeReviewAgent.name}__success`,
             source: buildAgent.name,
@@ -73,26 +62,27 @@ async function main() {
             triggerOn: "success",
           },
           {
-            id: `${codeReviewAgent.name}__${buildAgent.name}__failed`,
+            id: `${codeReviewAgent.name}__${buildAgent.name}__success`,
             source: codeReviewAgent.name,
             target: buildAgent.name,
-            triggerOn: "failed",
-          },
-          {
-            id: `${codeReviewAgent.name}__${rootAgent.name}__success`,
-            source: codeReviewAgent.name,
-            target: rootAgent.name,
             triggerOn: "success",
           },
         ],
       },
     });
 
+    console.log("smoke: initTask");
+    const task = await orchestrator.initializeTask({
+      projectId: project.project.id,
+      title: "审查链路冒烟",
+    });
+
     console.log("smoke: submitTask");
     const created = await orchestrator.submitTask({
       projectId: project.project.id,
-      content: `@${rootAgent.name} 请围绕当前仓库做一次完整实现并推进到最终交付。`,
-      mentionAgent: rootAgent.name,
+      taskId: task.task.id,
+      content: `@${buildAgent.name} 请围绕当前仓库做一次完整实现并推进到最终交付。`,
+      mentionAgent: buildAgent.name,
     });
 
     let settled = created;
@@ -130,13 +120,8 @@ async function main() {
     }
 
     const buildRun = settled.agents.find((agent) => agent.name === buildAgent.name)?.runCount ?? 0;
-    if (buildRun !== 1) {
-      throw new Error(`CodeReview 已通过时不应回流到 ${buildAgent.name}，但其运行次数为 ${buildRun}`);
-    }
-
-    const rootRun = settled.agents.find((agent) => agent.name === rootAgent.name)?.runCount ?? 0;
-    if (rootRun < 2) {
-      throw new Error("未形成“审查通过后回流首个节点 Agent 完成收口”的链路");
+    if (buildRun < 2) {
+      throw new Error(`审查通过后应回流到 ${buildAgent.name} 完成收口，但其运行次数为 ${buildRun}`);
     }
 
     const nonIdleAgents = settled.agents.filter((agent) => agent.runCount > 0);

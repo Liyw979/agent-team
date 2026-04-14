@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  BUILD_AGENT_NAME,
   DEFAULT_TOOL_PERMISSIONS,
   type AgentFileRecord,
   type AgentMode,
@@ -84,7 +85,7 @@ permission:
 `,
 };
 
-const BUILTIN_BUILD_AGENT_PATH = "builtin://Build";
+const BUILTIN_BUILD_AGENT_PATH = `builtin://${BUILD_AGENT_NAME}`;
 
 const TOOL_PERMISSION_MODE_SET = new Set<PermissionMode>(["allow", "ask", "deny"]);
 const DEFAULT_TOOL_MODE_MAP = new Map(DEFAULT_TOOL_PERMISSIONS.map((tool) => [tool.name, tool.mode]));
@@ -270,9 +271,9 @@ function buildBuiltinBuildAgentRecord(projectId: string): AgentFileRecord {
 `;
 
   return {
-    id: `${projectId}:Build`,
+    id: `${projectId}:${BUILD_AGENT_NAME}`,
     projectId,
-    name: "Build",
+    name: BUILD_AGENT_NAME,
     relativePath: BUILTIN_BUILD_AGENT_PATH,
     absolutePath: BUILTIN_BUILD_AGENT_PATH,
     mode: "primary",

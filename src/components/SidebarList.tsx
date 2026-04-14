@@ -30,9 +30,19 @@ const TASK_CONTEXT_MENU_MARGIN = 12;
 const taskStatusStyles: Record<string, string> = {
   pending: "bg-muted text-foreground/80",
   running: "bg-secondary text-secondary-foreground",
+  waiting: "bg-[#efe4bf] text-[#6b5620]",
   success: "bg-accent text-foreground",
   needs_revision: "bg-secondary text-secondary-foreground",
   failed: "bg-primary text-primary-foreground",
+};
+
+const taskStatusLabels: Record<string, string> = {
+  pending: "pending",
+  running: "running",
+  waiting: "waiting",
+  success: "success",
+  needs_revision: "needs_revision",
+  failed: "failed",
 };
 
 export function SidebarList({
@@ -201,7 +211,7 @@ export function SidebarList({
                                 : taskStatusStyles[task.task.status] ?? taskStatusStyles.pending,
                             )}
                           >
-                            {task.task.status}
+                            {taskStatusLabels[task.task.status] ?? task.task.status}
                           </span>
                         </div>
                       </div>
