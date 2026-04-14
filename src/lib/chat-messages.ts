@@ -63,12 +63,19 @@ function hasMeaningfulText(value: string): boolean {
   return /[\p{L}\p{N}]/u.test(value);
 }
 
+const FINAL_DELIVERY_HEADING_PATTERN =
+  /^(正式结果|正式回复|最终结果|最终回复|最终交付|交付结果|交付内容|结论|答案|输出)$/u;
+
 function extractTrailingTopLevelSection(content: string): string {
   const headingPattern = /(^|\n)(#{1,2}\s+[^\n]+)\n/g;
   let lastHeadingIndex = -1;
   let match: RegExpExecArray | null = headingPattern.exec(content);
   while (match) {
-    lastHeadingIndex = match.index + match[1].length;
+    const headingLine = match[2]?.trim() ?? "";
+    const headingTitle = headingLine.replace(/^#{1,2}\s+/u, "").trim();
+    if (FINAL_DELIVERY_HEADING_PATTERN.test(headingTitle)) {
+      lastHeadingIndex = match.index + match[1].length;
+    }
     match = headingPattern.exec(content);
   }
 
