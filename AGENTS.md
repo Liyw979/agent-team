@@ -59,7 +59,7 @@
 - macOS / Linux 仍要求本机可执行 `zellij`；Windows 会直接使用项目内置的 `download/zellij.exe`，打包后对应应用内的 `resources/bin/zellij.exe`；只有这两个位置都缺失时才会追加系统提醒
 - GUI 聊天区里的 `Task Started` 系统消息会附带当前 Task 的 `Zellij Session` 名称与可直接执行的 attach 调试命令，方便 debug 当前会话
 - Zellij pane 顺序只跟随前端拓扑/团队成员区里用户拖拽后保存的 Agent 排序，不再根据运行态动态重排
-- 全新 Task 首次初始化、且当前还没有托管 pane 时，Zellij 会优先按最多三列的 tiled grid 创建初始 pane 布局，内部 pane 顺序直接使用当前保存的 Agent 排序
+- 全新 Task 首次初始化、且当前还没有托管 pane 时，Zellij 会优先按最多三列的 tiled grid 创建初始 pane 布局；`Build` 默认固定独占一整列，其余 pane 再按当前保存的 Agent 排序分配到剩余列
 - 运行中的 Agent 会通过 OpenCode HTTP session 消息接口轮询实时工具调用与摘要，并显示在拓扑图节点内
 - GUI 中点击 Agent 卡片只支持查看对应原始配置文件，不支持在应用内直接编辑 `.opencode/agents/**/*.md`；名称旁“打开 Pane”按钮用于打开该 Agent 对应的 OpenCode attach 独立终端窗口
 - 用户在 Task 群聊里直接 `@Agent` 时，群聊展示仍保留原始 `@Agent` 文本；底层以 `raw` 方式转发给目标 Agent 的消息会统一封装成单行 `[发送者] <正文>`，并自动去掉仅用于寻址的开头或结尾 `@Agent`

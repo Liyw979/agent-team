@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { ZellijManager } from "./zellij-manager";
+import { BUILD_AGENT_NAME } from "@shared/types";
 
 class StubZellijManager extends ZellijManager {
   public available = true;
@@ -90,6 +91,30 @@ class StubZellijManager extends ZellijManager {
     this.calls.push({ method: "runAgentPane", args: [sessionName, cwd, agentName] });
     return `terminal_${agentName}`;
   }
+
+  public inspectPartitionAgentsForGrid(agents: Array<{ name: string; opencodeSessionId?: string | null }>) {
+    return this.partitionAgentsForGrid(
+      agents.map((agent) => ({
+        name: agent.name,
+        opencodeSessionId: agent.opencodeSessionId ?? null,
+      })),
+    );
+  }
+
+  public inspectBuildAgentGridLayout(
+    sessionName: string,
+    cwd: string,
+    agents: Array<{ name: string; opencodeSessionId?: string | null }>,
+  ) {
+    return this.buildAgentGridLayout(
+      sessionName,
+      cwd,
+      agents.map((agent) => ({
+        name: agent.name,
+        opencodeSessionId: agent.opencodeSessionId ?? null,
+      })),
+    );
+  }
 }
 
 test("createTaskSession 在不可用时只返回 session 名", async () => {
@@ -138,6 +163,38 @@ test("materializePanelBindings 首次创建时返回面板绑定", async () => {
 
   assert.equal(bindings.length, 1);
   assert.equal(bindings[0]?.agentName, "Build");
+});
+
+test("partitionAgentsForGrid 会让 Build 独占第一列", () => {
+  const manager = new StubZellijManager();
+
+  const columns = manager.inspectPartitionAgentsForGrid([
+    { name: "BA" },
+    { name: BUILD_AGENT_NAME },
+    { name: "UnitTest" },
+    { name: "IntegrationTest" },
+    { name: "TaskReview" },
+  ]);
+
+  assert.deepEqual(
+    columns.map((column) => column.map((agent) => agent.name)),
+    [[BUILD_AGENT_NAME], ["BA", "UnitTest"], ["IntegrationTest", "TaskReview"]],
+  );
+});
+
+test("buildAgentGridLayout 生成的布局会让 Build 单独占一列", () => {
+  const manager = new StubZellijManager();
+
+  const layout = manager.inspectBuildAgentGridLayout("session-1", "/tmp/demo", [
+    { name: "BA" },
+    { name: BUILD_AGENT_NAME },
+    { name: "UnitTest" },
+    { name: "IntegrationTest" },
+  ]);
+
+  assert.ok(layout);
+  assert.match(layout ?? "", /pane size="34%" split_direction="horizontal" \{\n      pane command=.* name="Build"/);
+  assert.doesNotMatch(layout ?? "", /name="Build" size="\d+%"/);
 });
 
 test("deleteTaskSession 在 kill 失败时会回退到 delete-session", async () => {

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile, spawn, type SpawnOptions } from "node:child_process";
 import { promisify } from "node:util";
-import type { TaskPanelRecord } from "@shared/types";
+import { BUILD_AGENT_NAME, type TaskPanelRecord } from "@shared/types";
 import { buildZellijMissingMessage } from "@shared/zellij";
 import {
   buildInlineCommand,
@@ -804,14 +804,29 @@ export class ZellijManager {
       return [agents.slice()];
     }
 
-    const columnCount = Math.min(3, Math.ceil(Math.sqrt(agents.length)));
-    const columns = Array.from({ length: columnCount }, () => [] as AgentPaneSpec[]);
+    const buildAgent = agents.find((agent) => agent.name === BUILD_AGENT_NAME) ?? null;
+    const remainingAgents = agents.filter((agent) => agent.name !== BUILD_AGENT_NAME);
+    const remainingColumnCount =
+      remainingAgents.length === 0 ? 0 : Math.min(2, Math.ceil(Math.sqrt(remainingAgents.length)));
+    const columns: AgentPaneSpec[][] = [];
 
-    for (const [index, agent] of agents.entries()) {
-      columns[index % columnCount]?.push(agent);
+    if (buildAgent) {
+      columns.push([buildAgent]);
     }
 
-    return columns.filter((column) => column.length > 0);
+    if (remainingColumnCount <= 0) {
+      return columns;
+    }
+
+    const remainingColumns = Array.from({ length: remainingColumnCount }, () => [] as AgentPaneSpec[]);
+    const chunkSize = Math.ceil(remainingAgents.length / remainingColumnCount);
+    for (let index = 0; index < remainingColumnCount; index += 1) {
+      const start = index * chunkSize;
+      const end = start + chunkSize;
+      remainingColumns[index] = remainingAgents.slice(start, end);
+    }
+
+    return columns.concat(remainingColumns.filter((column) => column.length > 0));
   }
 
   protected toKdlString(value: string): string {

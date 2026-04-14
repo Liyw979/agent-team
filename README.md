@@ -21,7 +21,7 @@
 - 后台 Task 整体完成后，左侧 Task 列表会为未查看的已完成项显示提醒，并在对应 Project 卡片上汇总提醒数量；点开该 Task 后提醒会自动消除
 - 每个 Task 对应独立 Zellij session，并为当前 Project 的全部 Agent 建立 `panel <-> agent` 运行时映射
 - 支持先单独执行 Task 初始化：先把当前 Project 的全部 Agent 会话与 Zellij pane 启动完成；GUI 输入框会立刻弹出候选 Agent，并默认选中 `Build`
-- 全新 Task 初始化 Zellij pane 时，会优先按最多三列的 tiled grid 摆放，避免默认布局过宽过扁；pane 顺序直接使用当前前端拖拽后保存的 Agent 排序
+- 全新 Task 初始化 Zellij pane 时，会优先按最多三列的 tiled grid 摆放，避免默认布局过宽过扁；其中 `Build` 会固定独占一整列，其余 Agent 再按当前前端拖拽后保存的顺序分配到剩余列
 - Zellij pane 不再按运行态动态重排，后续顺序只跟随前端拓扑/团队成员区里用户保存的 Agent 排序
 - GUI 聊天区标题栏支持直接打开当前 Task 对应的 Zellij session；打开前会先补齐当前 Task 的全部 Agent pane；macOS 下会固定新开独立 Terminal 窗口后再 attach，Windows 下会尽量把新拉起的终端窗口自动切到全屏，并统一使用项目内置的 `zellij.exe`
 - 右下角团队成员面板里，每个 Agent 名称旁都会提供“打开 Pane”按钮；点击后会优先补齐当前 Task 的 pane 绑定，并直接打开该 Agent 自己的 OpenCode attach 独立终端窗口，不会带出完整 Zellij session 网格
@@ -172,7 +172,7 @@ CLI 能力分组：
 - 点击 GUI 聊天区标题栏里的打开按钮时，macOS 会固定新开独立 Terminal 窗口，并优先把窗口切到普通窗口模式下的最大化（Zoom）而不是系统全屏；Windows 会优先使用 Windows Terminal 全屏打开，回退到 `cmd.exe` 时也会尽量自动触发 `F11`，并统一调用项目内置的 `zellij.exe`
 - Zellij pane 内部启动命令会按平台生成：macOS / Linux 使用 `/bin/sh`，Windows 使用 `cmd.exe`，不再把 `mkdir -p`、`export` 这类 POSIX 语法直接塞进 Windows pane
 - 如果当前电脑未安装 `zellij`，macOS / Linux 下 GUI 和 CLI 都会给出显式提醒；Task 群聊里也会追加一条系统消息说明当前不会创建真实 Zellij pane。Windows 下则会校验项目内置的 `download/zellij.exe`，打包产物会从 `resources/bin/zellij.exe` 启动该二进制，缺失时会直接提示安装包内容不完整
-- 对于首次初始化、尚无托管 pane 的 Task，Zellij 会优先生成最多三列的 tiled grid 初始布局，并直接使用当前保存的 Agent 排序来决定 pane 顺序
+- 对于首次初始化、尚无托管 pane 的 Task，Zellij 会优先生成最多三列的 tiled grid 初始布局；`Build` 会固定独占一列，其余 pane 再按当前保存的 Agent 排序分配到剩余列
 - Session 创建对齐官方 `POST /session`
 - 消息发送对齐官方 `POST /session/:id/message`，body 使用 `parts` 数组
 - 前端不嵌入终端，不复刻 Zellij PANEL，只展示 Task 级 high level 聊天流、拓扑和 Agent 状态
