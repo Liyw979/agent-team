@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 
 import type {
+  AgentFileRecord,
   AgentRuntimeSnapshot,
   AgentFlowEvent,
   CreateProjectPayload,
@@ -8,7 +9,7 @@ import type {
   GetTaskRuntimePayload,
   OpenTaskSessionPayload,
   ProjectSnapshot,
-  SaveAgentFilePayload,
+  ReadAgentFilePayload,
   SubmitTaskPayload,
   TaskSnapshot,
   UpdateTopologyPayload,
@@ -23,7 +24,7 @@ declare global {
       submitTask: (payload: SubmitTaskPayload) => Promise<TaskSnapshot>;
       deleteTask: (payload: DeleteTaskPayload) => Promise<ProjectSnapshot>;
       openTaskSession: (payload: OpenTaskSessionPayload) => Promise<void>;
-      saveAgentFile: (payload: SaveAgentFilePayload) => Promise<ProjectSnapshot>;
+      readAgentFile: (payload: ReadAgentFilePayload) => Promise<AgentFileRecord>;
       saveTopology: (payload: UpdateTopologyPayload) => Promise<ProjectSnapshot>;
       getTaskRuntime: (payload: GetTaskRuntimePayload) => Promise<AgentRuntimeSnapshot[]>;
       onAgentFlowEvent: (listener: (event: AgentFlowEvent) => void) => () => void;

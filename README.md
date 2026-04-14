@@ -20,12 +20,13 @@
 - 左侧 Task 列表会定期与 Zellij session 状态同步；如果对应 session 已被外部删除，或只剩 `EXITED - attach to resurrect` 这类非活跃残留，关联 Task 会自动从列表中移除
 - 每个 Task 对应独立 Zellij session，并为当前 Project 的全部 Agent 建立 `panel <-> agent` 运行时映射
 - 支持先单独执行 Task 初始化：先把当前 Project 的全部 Agent 会话与 Zellij pane 启动完成，再向入口 Agent 发送第一条消息
-- 全新 Task 初始化 Zellij pane 时，会优先按最多三列的 tiled grid 摆放，避免默认布局过宽过扁
-- 运行中的 Agent pane 会按运行态重排：单个运行中 Agent 优先占左侧半屏，多个运行中 Agent 会优先排到左上区域
-- GUI 聊天区标题栏支持直接打开当前 Task 对应的 Zellij session；打开前会先补齐当前 Task 的全部 6 个 Agent pane，并通过 `spawn` 直接拉起平台终端，而不是依赖 `bash/zsh` 包装
+- 全新 Task 初始化 Zellij pane 时，会优先按最多三列的 tiled grid 摆放，避免默认布局过宽过扁；pane 顺序直接使用当前前端拖拽后保存的 Agent 排序
+- Zellij pane 不再按运行态动态重排，后续顺序只跟随前端拓扑/团队成员区里用户保存的 Agent 排序
+- GUI 聊天区标题栏支持直接打开当前 Task 对应的 Zellij session；打开前会先补齐当前 Task 的全部 Agent pane
 - Task 群聊支持 `@AgentName` 提交任务，输入 `@` 会弹出候选 Agent 列表，支持方向键、鼠标和 `Tab` 自动补全
 - 群聊中同时展示 `user -> agent`、`agent -> agent` 高层协作消息，以及 Agent 最终回复
 - 当一个 Agent 同时触发多个下游 Agent 时，群聊会合并展示为一条批量 `agent -> agent` 派发消息，而不是拆成多条重复消息
+- 当一个 Agent 正常派发下游 Agent 时，系统会自动在转发 Prompt 中附带当前 Project Git Diff 的精简摘要；返工链路不附带该摘要
 - 每个 Agent 都会按名称自动分配一套稳定配色；聊天记录里会使用对应的浅色底、描边与标签色来区分不同 Agent
 - 右下角团队成员列表支持直接调整 Agent 顺序；该顺序会持久化到拓扑配置，并直接决定右上角拓扑图从左到右的节点排列
 - 右上角为 Project 级真实拓扑图，点击节点即可编辑“这个 Agent 会去跟哪些 Agent”，也支持整块面板放大查看；放大视图会直接把当前拓扑图放大，Agent 卡片会随视口横向和纵向一起拉伸铺满面板，连线固定走在 Agent 顶部的上方通道内，不会越出拓扑 panel；节点顺序稳定，可指定一个“最左起点” Agent，默认优先取 `BA`
@@ -33,15 +34,17 @@
 - 拓扑图里的 Agent 节点颜色用于表达当前运行状态，不再用颜色区分 built-in / custom；内置与本地类型信息仅在编辑面板等辅助信息里展示
 - 拓扑图在面板尺寸变化时会保持“Agent 在上、历史区在下、首尾节点贴近左右边界但保留少量留白、顶部预留连线通道”的布局约束，而不是把整张图简单等比缩放后居中
 - 拓扑图历史区会优先展示 Agent 最近的运行活动，包括普通消息与 Tool Call 参数摘要，而不只是单行运行状态
-- 右下角展示 Project 全量 Agent，以及它们在当前 Task 语境下的状态；点击 Agent 会直接打开原始配置文件编辑器
-- `.opencode/agents/**/*.md` 动态加载，并在前端直接编辑 OpenCode 原始 Agent 文件
+- 右下角展示 Project 全量 Agent，以及它们在当前 Task 语境下的状态；点击 Agent 会直接打开原始配置文件查看器
+- `.opencode/agents/**/*.md` 动态加载，前端只读查看 OpenCode 原始 Agent 文件，不支持直接编辑
 - Agent frontmatter 采用最新的 `permission:` 配置字段，值使用 `allow / ask / deny`
 - 当前默认 Agent 集合为 `BA / build / CodeReview / DocsReview / IntegrationTest / UnitTest`
 - `build` 使用 OpenCode 内置 Agent，不需要项目自己在 `.opencode/agents` 里额外定义 Markdown 文件
+- 当前处于项目开发初期，不要求兼容历史数据；如果现有 Project 状态、拓扑或运行数据与当前实现不一致，优先直接修正当前数据与实现，不额外为旧数据添加兼容分支
 - 默认工作流是 `BA -> build -> (DocsReview / UnitTest / IntegrationTest)`，随后 `IntegrationTest -> BA`
 - `CodeReview` 默认保留为可选 Agent，不会自动接入默认链路，只有用户手动修改拓扑时才会加入
 - Project 是全局注册信息；拓扑、Task、消息、panel 绑定等运行数据都保存在各自 Project 目录下的 `.agentflow/`
 - Project 拓扑是唯一真源；Task 后续执行始终读取当前 Project 生效中的拓扑，而不是依赖固定 Agent 名称
+- Task 不再快照 Agent 的 prompt / permission 定义；运行时始终读取当前 Project 下 `.opencode/agents/**/*.md` 的最新内容，`.agentflow/state.json` 里的 `taskAgents` 只保留运行态字段
 - 若本机未安装或无法连接 `opencode serve`，会退化为模拟响应
 
 ## 目录结构
@@ -104,7 +107,6 @@ npm run cli -- task init --title "初始化手动测试" --agent BA
 # 3. 给特定 Agent 发送消息；如果当前目录还没有 Project，会自动创建并注册
 npm run cli -- task send BA "@BA 请先分析需求并推进实现。"
 npm run cli -- task send BA "请先分析需求并推进实现。" --task <taskId>
-npm run cli -- task send BA-Agent "请先分析需求并推进实现。"
 
 # 4. 查看当前目录下的 Task、消息和 panel 绑定
 npm run cli -- task list
@@ -117,10 +119,9 @@ npm run cli -- topology set-downstream build DocsReview UnitTest IntegrationTest
 npm run cli -- topology allow BA build --trigger success
 npm run cli -- topology allow CodeReview build --trigger failed
 
-# 6. 查看和编辑 Agent 原始配置文件
+# 6. 查看 Agent 原始配置文件
 npm run cli -- agent show BA
 npm run cli -- agent cat BA
-npm run cli -- agent save BA --file ./tmp/BA.md
 ```
 
 CLI 能力分组：
@@ -130,7 +131,7 @@ CLI 能力分组：
 - `task`
   对应 Task 列表、Task 初始化、Task 群聊查看、向特定 Agent 发消息、查看当前 Task 的 panel 绑定
 - `agent`
-  对应 Project 级 Agent 列表、查看 Agent 元信息、读取/保存 OpenCode 原始配置文件
+  对应 Project 级 Agent 列表、查看 Agent 元信息、读取 OpenCode 原始配置文件
 - `topology`
   对应查看当前 Project 拓扑、修改某个 Agent 的下游关系、增删特定触发边
 - `panel`
@@ -145,12 +146,12 @@ CLI 能力分组：
 - 默认拓扑只在首次初始化且当前还没有拓扑数据时按 Agent `role / mode / 是否内置` 自动推断；后续运行时不依赖固定名字
 - 每次创建 Task 或 Agent 间消息转发前，都会先尝试触发配置 Reload
 - `task init` 会先创建 Task，并完成该 Task 下全部 Agent 的 OpenCode session 与 Zellij pane 初始化；随后再通过 `task send --task <taskId>` 向入口 Agent 发送第一条消息
-- 对于首次初始化、尚无托管 pane 的 Task，Zellij 会优先生成最多三列的 tiled grid 初始布局；后续运行态仍会按左侧/左上优先规则重排
+- 对于首次初始化、尚无托管 pane 的 Task，Zellij 会优先生成最多三列的 tiled grid 初始布局，并直接使用当前保存的 Agent 排序来决定 pane 顺序
 - Session 创建对齐官方 `POST /session`
 - 消息发送对齐官方 `POST /session/:id/message`，body 使用 `parts` 数组
 - 前端不嵌入终端，不复刻 Zellij PANEL，只展示 Task 级 high level 聊天流、拓扑和 Agent 状态
-- Zellij pane 不再通过 floating 聚光灯放大运行中 Agent，而是通过 tiled pane 重排把运行中的 Agent 提到左侧/左上
-- CLI 支持短名和 `-Agent` 两种 Agent 指定方式，例如 `BA` 与 `BA-Agent`
+- Zellij pane 不再根据运行中的 Agent 动态调整位置；如需调整顺序，直接在前端拖拽 Agent 顺序并保存即可
+- CLI 只支持当前 Agent 名称，例如 `BA`
 - `task show <taskId>` 与 `task init` 在交互式终端里默认直接进入对应 zellij session，`task send` 成功后会输出可复制的 zellij 打开命令
 
 ## 后续建议

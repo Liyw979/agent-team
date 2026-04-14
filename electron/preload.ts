@@ -7,7 +7,7 @@ import type {
   GetTaskRuntimePayload,
   OpenTaskSessionPayload,
   ProjectSnapshot,
-  SaveAgentFilePayload,
+  ReadAgentFilePayload,
   SubmitTaskPayload,
   TaskSnapshot,
   UpdateTopologyPayload,
@@ -25,8 +25,8 @@ const api = {
     ipcRenderer.invoke(IPC_CHANNELS.deleteTask, payload),
   openTaskSession: (payload: OpenTaskSessionPayload): Promise<void> =>
     ipcRenderer.invoke(IPC_CHANNELS.openTaskSession, payload),
-  saveAgentFile: (payload: SaveAgentFilePayload): Promise<ProjectSnapshot> =>
-    ipcRenderer.invoke(IPC_CHANNELS.saveAgentFile, payload),
+  readAgentFile: (payload: ReadAgentFilePayload) =>
+    ipcRenderer.invoke(IPC_CHANNELS.readAgentFile, payload),
   saveTopology: (payload: UpdateTopologyPayload): Promise<ProjectSnapshot> =>
     ipcRenderer.invoke(IPC_CHANNELS.saveTopology, payload),
   getTaskRuntime: (payload: GetTaskRuntimePayload): Promise<AgentRuntimeSnapshot[]> =>

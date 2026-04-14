@@ -84,14 +84,6 @@ permission:
 `,
 };
 
-const LEGACY_AGENT_FILE_MAP: Record<string, string> = {
-  "BA-Agent.md": "BA.md",
-  "CodeReview-Agent.md": "CodeReview.md",
-  "DocsReview-Agent.md": "DocsReview.md",
-  "IntegrationTest-Agent.md": "IntegrationTest.md",
-  "UnitTest-Agent.md": "UnitTest.md",
-};
-
 const BUILTIN_BUILD_AGENT_PATH = "builtin://build";
 
 const TOOL_PERMISSION_MODE_SET = new Set<PermissionMode>(["allow", "ask", "deny"]);
@@ -291,33 +283,26 @@ function buildBuiltinBuildAgentRecord(projectId: string): AgentFileRecord {
   };
 }
 
+function resolveAgentAbsolutePath(projectPath: string, relativePath: string): string {
+  if (relativePath === BUILTIN_BUILD_AGENT_PATH) {
+    throw new Error("OpenCode 内置 build agent 不对应本地 Markdown 文件");
+  }
+
+  const agentsDir = path.join(projectPath, ".opencode", "agents");
+  const normalizedRelativePath = relativePath.replace(/^\/+/, "");
+  const absolutePath = path.join(agentsDir, normalizedRelativePath);
+
+  if (!absolutePath.startsWith(agentsDir)) {
+    throw new Error("非法的 Agent 文件路径");
+  }
+
+  return absolutePath;
+}
+
 export class AgentFileService {
   ensureProjectAgents(projectPath: string) {
     const agentsDir = path.join(projectPath, ".opencode", "agents");
     fs.mkdirSync(agentsDir, { recursive: true });
-
-    for (const [legacyName, nextName] of Object.entries(LEGACY_AGENT_FILE_MAP)) {
-      const legacyPath = path.join(agentsDir, legacyName);
-      const nextPath = path.join(agentsDir, nextName);
-      if (fs.existsSync(legacyPath) && !fs.existsSync(nextPath)) {
-        fs.renameSync(legacyPath, nextPath);
-      }
-    }
-
-    const deprecatedPaths = ["Code.md", "Code-Agent.md", "Delivery.md", "Delivery-Agent.md"].map((name) =>
-      path.join(agentsDir, name),
-    );
-    const docsReviewPath = path.join(agentsDir, "DocsReview.md");
-    if (deprecatedPaths.some((deprecatedPath) => fs.existsSync(deprecatedPath)) && !fs.existsSync(docsReviewPath)) {
-      fs.writeFileSync(docsReviewPath, DEFAULT_AGENT_TEMPLATES["DocsReview.md"], "utf8");
-    }
-
-    for (const deprecatedName of ["Code.md", "Code-Agent.md", "Delivery.md", "Delivery-Agent.md"]) {
-      const deprecatedPath = path.join(agentsDir, deprecatedName);
-      if (fs.existsSync(deprecatedPath)) {
-        fs.rmSync(deprecatedPath, { force: true });
-      }
-    }
 
     const markdownFiles = collectMarkdownFiles(agentsDir);
     if (markdownFiles.length > 0) {
@@ -338,20 +323,13 @@ export class AgentFileService {
     return [...fileAgents, buildBuiltinBuildAgentRecord(projectId)];
   }
 
-  saveAgentFile(projectId: string, projectPath: string, relativePath: string, content: string) {
-    if (relativePath === BUILTIN_BUILD_AGENT_PATH) {
-      throw new Error("OpenCode 内置 build agent 不支持保存为本地 Markdown 文件");
+  readAgentFile(projectId: string, projectPath: string, relativePath: string): AgentFileRecord {
+    this.ensureProjectAgents(projectPath);
+    const absolutePath = resolveAgentAbsolutePath(projectPath, relativePath);
+    if (!fs.existsSync(absolutePath)) {
+      throw new Error(`Agent 文件不存在：${relativePath}`);
     }
-    const agentsDir = path.join(projectPath, ".opencode", "agents");
-    const normalizedRelativePath = relativePath.replace(/^\/+/, "");
-    const absolutePath = path.join(agentsDir, normalizedRelativePath);
-
-    if (!absolutePath.startsWith(agentsDir)) {
-      throw new Error("非法的 Agent 文件路径");
-    }
-
-    fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
-    fs.writeFileSync(absolutePath, content, "utf8");
     return buildAgentRecord(projectId, projectPath, absolutePath);
   }
+
 }

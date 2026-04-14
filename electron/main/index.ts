@@ -7,7 +7,7 @@ import type {
   DeleteTaskPayload,
   GetTaskRuntimePayload,
   OpenTaskSessionPayload,
-  SaveAgentFilePayload,
+  ReadAgentFilePayload,
   SubmitTaskPayload,
   UpdateTopologyPayload,
 } from "@shared/types";
@@ -169,8 +169,8 @@ app.whenReady().then(async () => {
     (_event, payload: OpenTaskSessionPayload) => orchestrator.openTaskSession(payload),
   );
   ipcMain.handle(
-    IPC_CHANNELS.saveAgentFile,
-    (_event, payload: SaveAgentFilePayload) => orchestrator.saveAgentFile(payload),
+    IPC_CHANNELS.readAgentFile,
+    (_event, payload: ReadAgentFilePayload) => orchestrator.readAgentFile(payload),
   );
   ipcMain.handle(
     IPC_CHANNELS.saveTopology,

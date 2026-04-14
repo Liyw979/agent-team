@@ -1,7 +1,9 @@
 import { BrowserWindow } from "electron";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { execFile } from "node:child_process";
 import path from "node:path";
+import { promisify } from "node:util";
 import { IPC_CHANNELS } from "@shared/ipc";
 import {
   type AgentFlowEvent,
@@ -18,9 +20,9 @@ import {
   type OpenTaskSessionPayload,
   type ProjectRecord,
   type ProjectSnapshot,
+  type ReadAgentFilePayload,
   resolveTopologyAgentOrder,
   resolveTopologyRootAgent,
-  type SaveAgentFilePayload,
   type SubmitTaskPayload,
   type TaskAgentRecord,
   type TaskPanelRecord,
@@ -34,6 +36,8 @@ import { OpenCodeClient } from "./opencode-client";
 import { OpenCodeRunner } from "./opencode-runner";
 import { StoreService } from "./store";
 import { ZellijManager } from "./zellij-manager";
+
+const execFileAsync = promisify(execFile);
 
 interface OrchestratorOptions {
   userDataPath: string;
@@ -59,22 +63,13 @@ interface TaskRuntimeState {
   completedEdges: Set<string>;
   lastSignatureByAgent: Map<string, string>;
   runningAgents: Set<string>;
+  deliveredMessageIdsByAgent: Map<string, Set<string>>;
 }
 
 const SELF_REVIEW_PROMPT = `在你完成本轮所有工作后，必须用中文严格按照以下格式给出最终决策，不要有任何其他解释或额外文字：
 - 如果你认为自己负责的任务已完全完成（或你负责审核的部分已严格通过），请直接输出：【DECISION】检查通过
 - 如果存在问题需要修改，请直接输出：【DECISION】需要修改
 具体修改意见：（此处详细列出需要修改的点，越具体越好）`;
-
-const LEGACY_AGENT_NAME_MAP: Record<string, string> = {
-  "BA-Agent": "BA",
-  "Code-Agent": "build",
-  Code: "build",
-  "CodeReview-Agent": "CodeReview",
-  "DocsReview-Agent": "DocsReview",
-  "IntegrationTest-Agent": "IntegrationTest",
-  "UnitTest-Agent": "UnitTest",
-};
 
 export class Orchestrator {
   private readonly store: StoreService;
@@ -197,16 +192,9 @@ export class Orchestrator {
     };
   }
 
-  async saveAgentFile(payload: SaveAgentFilePayload): Promise<ProjectSnapshot> {
+  async readAgentFile(payload: ReadAgentFilePayload): Promise<AgentFileRecord> {
     const project = this.store.getProject(payload.projectId);
-    this.agentFiles.saveAgentFile(project.id, project.path, payload.relativePath, payload.content);
-    const updated = this.hydrateProject(project.id, true);
-    this.emit({
-      type: "project-updated",
-      projectId: project.id,
-      payload: updated,
-    });
-    return updated;
+    return this.agentFiles.readAgentFile(project.id, project.path, payload.relativePath);
   }
 
   async saveTopology(payload: UpdateTopologyPayload): Promise<ProjectSnapshot> {
@@ -214,6 +202,8 @@ export class Orchestrator {
     const agentFiles = this.agentFiles.listAgentFiles(project.id, project.path);
     const normalized = this.normalizeTopology(project.id, agentFiles, payload.topology);
     this.store.upsertTopology(normalized);
+    this.syncProjectTaskPanelOrders(project.id, agentFiles, normalized);
+    await this.rebuildProjectTaskPanels(project, agentFiles, normalized);
     const updated = this.hydrateProject(project.id);
     this.emit({
       type: "project-updated",
@@ -395,7 +385,7 @@ export class Orchestrator {
       initializedAt: null,
     };
 
-    this.store.insertTask(task, this.store.getTopology(project.id));
+    this.store.insertTask(task);
     for (const agentFile of agentFiles) {
       this.store.insertTaskAgent({
         id: randomUUID(),
@@ -403,9 +393,6 @@ export class Orchestrator {
         projectId: project.id,
         name: agentFile.name,
         opencodeSessionId: null,
-        prompt: agentFile.prompt,
-        tools: agentFile.tools,
-        sourcePath: agentFile.relativePath,
         status: "idle",
         runCount: 0,
       });
@@ -433,6 +420,7 @@ export class Orchestrator {
       completedEdges: new Set(),
       lastSignatureByAgent: new Map(),
       runningAgents: new Set(),
+      deliveredMessageIdsByAgent: new Map(),
     });
 
     const snapshot = this.hydrateTask(taskId);
@@ -484,6 +472,7 @@ export class Orchestrator {
     });
 
     const runPromise = this.runAgent(project, this.store.getTask(task.id), targetAgent.name, content);
+    this.markMessagesDelivered(task.id, targetAgent.name, [message.id]);
     void runPromise.catch((error) => {
       console.error("[orchestrator] 后台发送任务失败", {
         taskId: task.id,
@@ -515,8 +504,9 @@ export class Orchestrator {
   }
 
   private syncTaskAgents(task: TaskRecord, agentFiles: AgentFileRecord[]) {
+    const orderedAgentFiles = this.orderAgentFiles(task.projectId, agentFiles);
     const existingByName = new Set(this.store.listTaskAgents(task.id).map((item) => item.name));
-    for (const agentFile of agentFiles) {
+    for (const agentFile of orderedAgentFiles) {
       if (existingByName.has(agentFile.name)) {
         continue;
       }
@@ -526,9 +516,6 @@ export class Orchestrator {
         projectId: task.projectId,
         name: agentFile.name,
         opencodeSessionId: null,
-        prompt: agentFile.prompt,
-        tools: agentFile.tools,
-        sourcePath: agentFile.relativePath,
         status: "idle",
         runCount: 0,
       });
@@ -540,7 +527,7 @@ export class Orchestrator {
       taskId: task.id,
       sessionName: task.zellijSessionId ?? `oap-${task.projectId.slice(0, 6)}-${task.id.slice(0, 6)}`,
       cwd: task.cwd,
-      agents: agentFiles.map((item) => ({
+      agents: orderedAgentFiles.map((item) => ({
         name: item.name,
         opencodeSessionId: null,
         status: "idle",
@@ -571,8 +558,11 @@ export class Orchestrator {
       const currentTask = this.store.getTask(task.id);
       await this.ensureTaskPanels(currentTask);
       const agentSessionId = await this.ensureAgentSession(project, currentTask, currentAgent);
-      const latestAgent =
-        this.store.listTaskAgents(task.id).find((item) => item.name === agentName) ?? currentAgent;
+      const latestAgentFile =
+        this.findAgentFile(this.agentFiles.listAgentFiles(project.id, project.path), agentName);
+      if (!latestAgentFile) {
+        throw new Error(`当前 Project 缺少 Agent 文件 ${agentName}`);
+      }
       panels = this.store.listTaskPanels(task.id);
 
       this.emit({
@@ -593,18 +583,12 @@ export class Orchestrator {
 
       const dispatchedContent = this.appendSelfReviewRequirement(content);
       await this.opencodeClient.reloadConfig(project.path);
-      if (panels.length > 0) {
-        await this.zellijManager
-          .syncRunningAgentLayout(panels, [...runtime.runningAgents])
-          .catch(() => undefined);
-      }
       const response = await this.opencodeRunner.run({
         projectPath: project.path,
         sessionId: agentSessionId,
         content: dispatchedContent,
         agent: agentName,
-        system: this.createSystemPrompt(latestAgent),
-        tools: latestAgent.tools.filter((tool) => tool.mode !== "deny").map((tool) => tool.name),
+        system: this.createSystemPrompt(latestAgentFile),
       });
 
       if (response.status === "error") {
@@ -718,12 +702,6 @@ export class Orchestrator {
         projectId: project.id,
         payload: this.hydrateTask(task.id),
       });
-    } finally {
-      if (panels.length > 0) {
-        await this.zellijManager
-          .syncRunningAgentLayout(panels, [...runtime.runningAgents])
-          .catch(() => undefined);
-      }
     }
   }
 
@@ -816,6 +794,8 @@ export class Orchestrator {
       payload: triggerMessage,
     });
 
+    const gitDiffSummary = await this.buildProjectGitDiffSummary(task.cwd);
+
     await Promise.all(
       readyTargets.map(async (targetName) => {
         const targetAgent = agents.find((item) => item.name === targetName);
@@ -823,9 +803,15 @@ export class Orchestrator {
           return;
         }
 
-        const forwarded = `上游 Agent ${sourceAgentId} 已完成，请继续处理以下上下文：\n\n${content}`;
+        const incrementalContext = this.buildIncrementalAgentContext(taskId, targetName);
+        const forwardedBase =
+          incrementalContext.content.trim().length > 0
+            ? `${incrementalContext.content}\n\n请基于以上新增历史继续处理当前任务。`
+            : `上游 Agent ${sourceAgentId} 已完成，请继续处理以下上下文：\n\n${content}`;
+        const forwarded = this.buildAgentHandoffPrompt(forwardedBase, gitDiffSummary);
         const signature = this.buildTriggerSignature(topology, completed, targetName);
         runtime.lastSignatureByAgent.set(targetName, signature);
+        this.markMessagesDelivered(taskId, targetName, incrementalContext.messageIds);
         await this.runAgent(project, this.store.getTask(taskId), targetName, forwarded);
       }),
     );
@@ -979,12 +965,108 @@ export class Orchestrator {
     return `${content.trim()}\n\n${SELF_REVIEW_PROMPT}`.trim();
   }
 
+  private async buildProjectGitDiffSummary(cwd: string): Promise<string> {
+    try {
+      const [statusResult, stagedStatResult, unstagedStatResult] = await Promise.all([
+        execFileAsync("git", ["-C", cwd, "status", "--short", "--untracked-files=all"], {
+          timeout: 2500,
+        }).catch(() => ({ stdout: "" })),
+        execFileAsync("git", ["-C", cwd, "diff", "--cached", "--stat", "--compact-summary"], {
+          timeout: 2500,
+        }).catch(() => ({ stdout: "" })),
+        execFileAsync("git", ["-C", cwd, "diff", "--stat", "--compact-summary"], {
+          timeout: 2500,
+        }).catch(() => ({ stdout: "" })),
+      ]);
+
+      const sections: string[] = [];
+      const statusLines = this.limitGitSummaryLines(
+        statusResult.stdout
+          .split("\n")
+          .map((line) => line.trimEnd())
+          .filter(Boolean),
+        10,
+      );
+      if (statusLines.length > 0) {
+        sections.push(`工作区状态：\n${statusLines.join("\n")}`);
+      }
+
+      const stagedLines = this.limitGitSummaryLines(
+        stagedStatResult.stdout
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean),
+        8,
+      );
+      if (stagedLines.length > 0) {
+        sections.push(`已暂存变更统计：\n${stagedLines.join("\n")}`);
+      }
+
+      const unstagedLines = this.limitGitSummaryLines(
+        unstagedStatResult.stdout
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean),
+        8,
+      );
+      if (unstagedLines.length > 0) {
+        sections.push(`未暂存变更统计：\n${unstagedLines.join("\n")}`);
+      }
+
+      if (sections.length === 0) {
+        return "当前项目 Git 工作区干净，没有未提交变更。";
+      }
+
+      return `当前项目 Git Diff 精简摘要：\n${sections.join("\n\n")}`.trim();
+    } catch {
+      return "";
+    }
+  }
+
+  private limitGitSummaryLines(lines: string[], maxLines: number): string[] {
+    if (lines.length <= maxLines) {
+      return lines;
+    }
+    return [...lines.slice(0, maxLines), `... 共 ${lines.length} 行，仅展示前 ${maxLines} 行`];
+  }
+
+  private buildAgentHandoffPrompt(baseContent: string, gitDiffSummary: string): string {
+    if (!gitDiffSummary.trim()) {
+      return baseContent.trim();
+    }
+    return `${baseContent.trim()}\n\n${gitDiffSummary}`.trim();
+  }
+
+  private extractDisplaySummary(content: string): string | null {
+    const normalized = content
+      .replace(/\r/g, "")
+      .split(/\n+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (normalized.length === 0) {
+      return null;
+    }
+
+    const lastBlock = normalized.at(-1) ?? "";
+    const sentences =
+      lastBlock
+        .match(/[^。！？!?]+[。！？!?]?/g)
+        ?.map((item) => item.trim())
+        .filter(Boolean) ?? [];
+    const lastSentence = (sentences.at(-1) ?? lastBlock)
+      .replace(/^[-*]\s+/u, "")
+      .replace(/^\d+[.)、]\s*/u, "")
+      .trim();
+
+    return lastSentence || lastBlock || null;
+  }
+
   private createDisplayContent(parsedReview: ParsedReview, fallbackMessage?: string | null): string {
     if (parsedReview.cleanContent.trim()) {
-      return parsedReview.cleanContent.trim();
+      return this.extractDisplaySummary(parsedReview.cleanContent) ?? parsedReview.cleanContent.trim();
     }
     if (fallbackMessage?.trim()) {
-      return fallbackMessage.trim();
+      return this.extractDisplaySummary(fallbackMessage) ?? fallbackMessage.trim();
     }
     if (parsedReview.decision === "needs_revision") {
       return "（该 Agent 已给出“需要修改”的决策，详细修改意见由 Orchestrator 以返工消息形式展示。）";
@@ -1034,7 +1116,7 @@ export class Orchestrator {
   ): Promise<TaskSnapshot> {
     this.syncTaskAgents(task, agentFiles);
     const currentTask = this.store.getTask(task.id);
-    const agents = this.store.listTaskAgents(task.id);
+    const agents = this.orderTaskAgents(task.id, this.store.listTaskAgents(task.id));
     const agentSessions = await this.ensureTaskAgentSessions(project, currentTask);
     const panels = await this.zellijManager.materializePanelBindings({
       projectId: currentTask.projectId,
@@ -1058,6 +1140,100 @@ export class Orchestrator {
     }
 
     return this.hydrateTask(task.id);
+  }
+
+  private getOrderedAgentNames(
+    projectId: string,
+    agentFiles: Array<Pick<AgentFileRecord, "name" | "mode" | "role" | "relativePath">>,
+    topologyOverride?: TopologyRecord,
+  ): string[] {
+    const topology = topologyOverride ?? this.store.getTopology(projectId);
+    return resolveTopologyAgentOrder(agentFiles, topology.agentOrderIds, topology.rootAgentId);
+  }
+
+  private orderAgentFiles(
+    projectId: string,
+    agentFiles: AgentFileRecord[],
+    topologyOverride?: TopologyRecord,
+  ): AgentFileRecord[] {
+    const orderedNames = this.getOrderedAgentNames(projectId, agentFiles, topologyOverride);
+    const fileByName = new Map(agentFiles.map((agent) => [agent.name, agent]));
+    return orderedNames.map((name) => fileByName.get(name)).filter((agent): agent is AgentFileRecord => Boolean(agent));
+  }
+
+  private orderTaskAgents(
+    taskId: string,
+    agents: TaskAgentRecord[],
+    topologyOverride?: TopologyRecord,
+  ): TaskAgentRecord[] {
+    const task = this.store.getTask(taskId);
+    const project = this.store.getProject(task.projectId);
+    const orderedNames = this.getOrderedAgentNames(
+      task.projectId,
+      this.agentFiles.listAgentFiles(project.id, project.path),
+      topologyOverride,
+    );
+    const agentByName = new Map(agents.map((agent) => [agent.name, agent]));
+    return orderedNames.map((name) => agentByName.get(name)).filter((agent): agent is TaskAgentRecord => Boolean(agent));
+  }
+
+  private syncProjectTaskPanelOrders(
+    projectId: string,
+    agentFiles: AgentFileRecord[],
+    topology: TopologyRecord,
+  ) {
+    const orderedNames = this.getOrderedAgentNames(projectId, agentFiles, topology);
+    const orderIndex = new Map(orderedNames.map((name, index) => [name, index]));
+    for (const task of this.store.listTasks(projectId)) {
+      const taskPanels = this.store.listTaskPanels(task.id);
+      for (const [fallbackIndex, panel] of taskPanels.entries()) {
+        this.store.upsertTaskPanel({
+          ...panel,
+          order: orderIndex.get(panel.agentName) ?? orderedNames.length + fallbackIndex,
+        });
+      }
+    }
+  }
+
+  private async rebuildProjectTaskPanels(
+    project: ProjectRecord,
+    agentFiles: AgentFileRecord[],
+    topology: TopologyRecord,
+  ) {
+    for (const task of this.store.listTasks(project.id)) {
+      if (!task.initializedAt || !task.zellijSessionId) {
+        continue;
+      }
+
+      try {
+        const orderedAgents = this.orderTaskAgents(
+          task.id,
+          this.store.listTaskAgents(task.id),
+          topology,
+        );
+        const agentSessions = await this.ensureTaskAgentSessions(project, task);
+        const panels = await this.zellijManager.materializePanelBindings({
+          projectId: task.projectId,
+          taskId: task.id,
+          sessionName: task.zellijSessionId,
+          cwd: task.cwd,
+          agents: orderedAgents.map((agent) => ({
+            name: agent.name,
+            opencodeSessionId: agentSessions.get(agent.name) ?? null,
+            status: agent.status,
+          })),
+          forceRebuild: true,
+        });
+        for (const panel of panels) {
+          this.store.upsertTaskPanel(panel);
+        }
+      } catch (error) {
+        console.error("[orchestrator] 重建 Task pane 顺序失败", {
+          taskId: task.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   }
 
   private async handleRevision(
@@ -1126,7 +1302,12 @@ export class Orchestrator {
           payload: revisionMessage,
         });
 
-        const forwarded = `返工来源 Agent：${sourceAgentId}\n\n${contextSummary}具体修改意见：\n${feedback}`;
+        const incrementalContext = this.buildIncrementalAgentContext(taskId, targetName);
+        const forwarded =
+          incrementalContext.content.trim().length > 0
+            ? `${incrementalContext.content}\n\n请根据以上新增历史继续返工，并重点处理以下修改意见：\n${feedback}`
+            : `返工来源 Agent：${sourceAgentId}\n\n${contextSummary}具体修改意见：\n${feedback}`;
+        this.markMessagesDelivered(taskId, targetName, incrementalContext.messageIds);
         await this.runAgent(project, this.store.getTask(taskId), targetName, forwarded);
       }),
     );
@@ -1196,13 +1377,10 @@ export class Orchestrator {
     return [...visited];
   }
 
-  private createSystemPrompt(agent: TaskAgentRecord): string {
+  private createSystemPrompt(_agent: AgentFileRecord): string {
     const orchestrationRules =
       "请只关注你当前负责的工作本身，不要假设还有其他 Agent，也不要描述任何调度链路。先输出对用户有意义的高层结果；用户消息末尾会自动附带自检要求，请严格按该要求输出最终的【DECISION】结论。";
-    if (isBuiltinAgentPath(agent.sourcePath)) {
-      return orchestrationRules;
-    }
-    return `${agent.prompt}\n\n${orchestrationRules}`;
+    return orchestrationRules;
   }
 
   private createTaskTitle(content: string): string {
@@ -1247,8 +1425,7 @@ export class Orchestrator {
     if (!name) {
       return undefined;
     }
-    const normalized = this.normalizeAgentName(name);
-    return agentFiles.find((agent) => this.normalizeAgentName(agent.name) === normalized);
+    return agentFiles.find((agent) => agent.name === name);
   }
 
   private hydrateProject(projectId: string, forceSyncTopology = false): ProjectSnapshot {
@@ -1312,20 +1489,8 @@ export class Orchestrator {
     topology: TopologyRecord,
   ): TopologyRecord {
     const validNames = new Set(agentFiles.map((item) => item.name));
-    const remapAgentName = (name: string) => {
-      const mapped = LEGACY_AGENT_NAME_MAP[name];
-      if (mapped && validNames.has(mapped)) {
-        return mapped;
-      }
-      return name;
-    };
     const seenEdges = new Set<string>();
     const edges = topology.edges
-      .map((edge) => ({
-        ...edge,
-        source: remapAgentName(edge.source),
-        target: remapAgentName(edge.target),
-      }))
       .filter((edge) => validNames.has(edge.source) && validNames.has(edge.target))
       .filter((edge) => {
         const key = `${edge.source}__${edge.target}__${edge.triggerOn}`;
@@ -1345,7 +1510,9 @@ export class Orchestrator {
       kind: "agent" as const,
     }));
     const normalizedRootAgentId =
-      typeof topology.rootAgentId === "string" ? remapAgentName(topology.rootAgentId) : null;
+      typeof topology.rootAgentId === "string" && validNames.has(topology.rootAgentId)
+        ? topology.rootAgentId
+        : null;
     const agentOrderIds = resolveTopologyAgentOrder(
       agentFiles.map((file) => ({
         name: file.name,
@@ -1355,8 +1522,7 @@ export class Orchestrator {
       })),
       Array.isArray(topology.agentOrderIds)
         ? topology.agentOrderIds
-            .filter((item): item is string => typeof item === "string")
-            .map((item) => remapAgentName(item))
+            .filter((item): item is string => typeof item === "string" && validNames.has(item))
         : null,
       normalizedRootAgentId,
     );
@@ -1445,20 +1611,98 @@ export class Orchestrator {
         completedEdges: new Set(),
         lastSignatureByAgent: new Map(),
         runningAgents: new Set(),
+        deliveredMessageIdsByAgent: new Map(),
       };
       this.taskRuntime.set(taskId, runtime);
     }
     return runtime;
   }
 
+  private buildIncrementalAgentContext(
+    taskId: string,
+    targetAgentName: string,
+  ): { content: string; messageIds: string[] } {
+    const task = this.store.getTask(taskId);
+    const runtime = this.getRuntime(taskId);
+    const delivered = runtime.deliveredMessageIdsByAgent.get(targetAgentName) ?? new Set<string>();
+    const allMessages = this.store.listMessages(task.projectId, taskId);
+    const contextMessages = allMessages.filter((message) => {
+      if (delivered.has(message.id)) {
+        return false;
+      }
+      if (message.meta?.optimistic === "true") {
+        return false;
+      }
+      if (message.meta?.kind === "task-created" || message.meta?.kind === "task-completed") {
+        return false;
+      }
+      return true;
+    });
+
+    if (contextMessages.length === 0) {
+      return {
+        content: "",
+        messageIds: [],
+      };
+    }
+
+    const rendered = contextMessages
+      .map((message) => this.renderContextMessage(message))
+      .filter(Boolean)
+      .join("\n\n");
+
+    return {
+      content: `以下是你尚未收到的群聊历史，请按时间顺序阅读：\n\n${rendered}`.trim(),
+      messageIds: contextMessages.map((message) => message.id),
+    };
+  }
+
+  private renderContextMessage(message: MessageRecord): string {
+    const time = this.toShortTime(message.timestamp);
+    const sender = this.getMessageSenderLabel(message);
+    const content = message.content.trim();
+    if (!content) {
+      return "";
+    }
+    return `[${time}] ${sender}\n${content}`;
+  }
+
+  private markMessagesDelivered(taskId: string, targetAgentName: string, messageIds: string[]) {
+    if (messageIds.length === 0) {
+      return;
+    }
+    const runtime = this.getRuntime(taskId);
+    const delivered = runtime.deliveredMessageIdsByAgent.get(targetAgentName) ?? new Set<string>();
+    for (const messageId of messageIds) {
+      delivered.add(messageId);
+    }
+    runtime.deliveredMessageIdsByAgent.set(targetAgentName, delivered);
+  }
+
+  private getMessageSenderLabel(message: MessageRecord) {
+    if (message.sender === "user") {
+      return "User";
+    }
+    if (message.sender === "system") {
+      return "System";
+    }
+    return message.sender;
+  }
+
+  private toShortTime(timestamp: string) {
+    const value = new Date(timestamp);
+    if (Number.isNaN(value.getTime())) {
+      return timestamp;
+    }
+    return value.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
   private emit(event: AgentFlowEvent) {
     this.events.emit("agentflow-event", event);
   }
-
-  private normalizeAgentName(value: string) {
-    return value.replace(/-Agent$/i, "");
-  }
-
   private async ensureEventStream() {
     if (!this.enableEventStream || this.eventsConnected) {
       return;

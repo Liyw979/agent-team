@@ -46,6 +46,7 @@ export class ZellijManager {
   }
 
   async openTaskSession(sessionName: string, cwd: string): Promise<void> {
+    await this.ensureSessionActive(sessionName);
     await this.openSessionInTerminal(sessionName, cwd);
   }
 
@@ -84,7 +85,7 @@ export class ZellijManager {
     cwd: string;
     agents: AgentPaneSpec[];
   }): TaskPanelRecord[] {
-    return this.sortVisibleAgents(options.agents).map((agent, index) => ({
+    return this.filterVisibleAgents(options.agents).map((agent, index) => ({
       id: `${options.taskId}:${agent.name}`,
       taskId: options.taskId,
       projectId: options.projectId,
@@ -92,6 +93,7 @@ export class ZellijManager {
       paneId: `pane-${index + 1}`,
       agentName: agent.name,
       cwd: options.cwd,
+      order: index,
     }));
   }
 
@@ -101,19 +103,28 @@ export class ZellijManager {
     sessionName: string;
     cwd: string;
     agents: AgentPaneSpec[];
+    forceRebuild?: boolean;
   }): Promise<TaskPanelRecord[]> {
     if (!(await this.hasZellij())) {
       return this.createPanelBindings(options);
     }
 
-    const visibleAgents = this.sortVisibleAgents(options.agents);
-    const panes = await this.listTerminalPanes(options.sessionName);
+    await this.ensureSessionActive(options.sessionName);
+
+    const visibleAgents = this.filterVisibleAgents(options.agents);
     const agentNames = visibleAgents.map((agent) => agent.name);
-    const hadManagedPanes = panes.some((pane) => agentNames.includes(pane.title));
-    const unassigned = panes.filter((pane) => !agentNames.includes(pane.title));
     const records: TaskPanelRecord[] = [];
 
     let refreshedPanes = await this.listTerminalPanes(options.sessionName);
+    if (options.forceRebuild) {
+      for (const pane of refreshedPanes.filter((item) => agentNames.includes(item.title))) {
+        await this.closePane(options.sessionName, pane.id).catch(() => undefined);
+      }
+      refreshedPanes = await this.listTerminalPanes(options.sessionName);
+    }
+
+    const hadManagedPanes =
+      options.forceRebuild !== true && refreshedPanes.some((pane) => agentNames.includes(pane.title));
     if (!hadManagedPanes && visibleAgents.length > 0) {
       const applied = await this.applyAgentGridLayout(
         options.sessionName,
@@ -189,6 +200,7 @@ export class ZellijManager {
         paneId: pane.id,
         agentName: agent.name,
         cwd: options.cwd,
+        order: visibleAgents.findIndex((item) => item.name === agent.name),
       });
     }
 
@@ -231,6 +243,8 @@ export class ZellijManager {
       return;
     }
 
+    await this.ensureSessionActive(panel.sessionName);
+
     await execFileAsync("zellij", [
       "-s",
       panel.sessionName,
@@ -239,78 +253,6 @@ export class ZellijManager {
       panel.paneId,
     ]).catch(() => undefined);
     await this.openSessionInTerminal(panel.sessionName, panel.cwd);
-  }
-
-  async syncRunningAgentLayout(
-    panels: TaskPanelRecord[],
-    runningAgentNames: string[],
-  ): Promise<void> {
-    if (!(await this.hasZellij())) {
-      return;
-    }
-    if (panels.length === 0) {
-      return;
-    }
-
-    const sessionName = panels[0].sessionName;
-    const managedAgentNames = new Set(panels.map((panel) => panel.agentName));
-
-    let paneInfos = await this.listTerminalPanes(sessionName);
-    let resetFloating = false;
-    for (const pane of paneInfos) {
-      if (pane.exited || !pane.isFloating || !managedAgentNames.has(pane.title)) {
-        continue;
-      }
-      await this.toggleFloating(sessionName, pane.id).catch(() => undefined);
-      resetFloating = true;
-    }
-    if (resetFloating) {
-      paneInfos = await this.listTerminalPanes(sessionName);
-    }
-
-    const runningOrder = runningAgentNames.filter((agentName) => managedAgentNames.has(agentName));
-    if (runningOrder.length === 0) {
-      return;
-    }
-
-    const tiledManagedPanes = paneInfos.filter(
-      (pane) => !pane.exited && !pane.isFloating && managedAgentNames.has(pane.title),
-    );
-    if (tiledManagedPanes.length <= 1) {
-      return;
-    }
-
-    const primaryRunningPane = tiledManagedPanes.find((pane) => pane.title === runningOrder[0]);
-    if (primaryRunningPane) {
-      await this.movePane(sessionName, primaryRunningPane.id, "left").catch(() => undefined);
-    }
-
-    if (runningOrder.length <= 1) {
-      return;
-    }
-
-    for (const [offset, agentName] of runningOrder.slice(1).entries()) {
-      let currentPanes = await this.listTerminalPanes(sessionName);
-      let tiledPanes = currentPanes.filter(
-        (pane) => !pane.exited && !pane.isFloating && managedAgentNames.has(pane.title),
-      );
-      const leadingPane = this.getLeadingPane(tiledPanes);
-      const rightStack = this.getRightStackPanes(tiledPanes, leadingPane?.id ?? null);
-      let currentIndex = rightStack.findIndex((pane) => pane.title === agentName);
-      const desiredIndex = offset;
-
-      while (currentIndex > desiredIndex) {
-        const targetPane = rightStack[currentIndex];
-        await this.movePane(sessionName, targetPane.id, "up").catch(() => undefined);
-        currentPanes = await this.listTerminalPanes(sessionName);
-        tiledPanes = currentPanes.filter(
-          (pane) => !pane.exited && !pane.isFloating && managedAgentNames.has(pane.title),
-        );
-        const refreshedLeadingPane = this.getLeadingPane(tiledPanes);
-        const refreshedRightStack = this.getRightStackPanes(tiledPanes, refreshedLeadingPane?.id ?? null);
-        currentIndex = refreshedRightStack.findIndex((pane) => pane.title === agentName);
-      }
-    }
   }
 
   private async hasZellij(): Promise<boolean> {
@@ -357,6 +299,21 @@ export class ZellijManager {
       .filter(Boolean);
   }
 
+  private async ensureSessionActive(sessionName: string): Promise<void> {
+    if (!(await this.hasZellij())) {
+      return;
+    }
+
+    const activeSessions = await this.listSessionNames();
+    if (activeSessions?.has(sessionName)) {
+      return;
+    }
+
+    await execFileAsync("zellij", ["attach", "--create-background", sessionName], {
+      timeout: 4000,
+    });
+  }
+
   private async listTerminalPanes(sessionName: string): Promise<ZellijPaneInfo[]> {
     const { stdout } = await execFileAsync("zellij", [
       "-s",
@@ -385,20 +342,8 @@ export class ZellijManager {
       }));
   }
 
-  private sortVisibleAgents(agents: AgentPaneSpec[]): AgentPaneSpec[] {
-    return agents
-      .filter((agent) => !HIDDEN_PANEL_AGENTS.has(this.normalizeAgentName(agent.name)))
-      .sort((left, right) => this.compareAgentPriority(left, right));
-  }
-
-  private compareAgentPriority(left: AgentPaneSpec, right: AgentPaneSpec): number {
-    const leftRunningBoost = left.status === "running" ? -1 : 0;
-    const rightRunningBoost = right.status === "running" ? -1 : 0;
-    if (leftRunningBoost !== rightRunningBoost) {
-      return leftRunningBoost - rightRunningBoost;
-    }
-
-    return left.name.localeCompare(right.name);
+  private filterVisibleAgents(agents: AgentPaneSpec[]): AgentPaneSpec[] {
+    return agents.filter((agent) => !HIDDEN_PANEL_AGENTS.has(agent.name));
   }
 
   private async closePane(sessionName: string, paneId: string): Promise<void> {
@@ -410,48 +355,6 @@ export class ZellijManager {
       "-p",
       paneId,
     ]);
-  }
-
-  private async toggleFloating(sessionName: string, paneId: string): Promise<void> {
-    await execFileAsync("zellij", [
-      "-s",
-      sessionName,
-      "action",
-      "toggle-pane-embed-or-floating",
-      "-p",
-      paneId,
-    ]);
-  }
-
-  private async movePane(
-    sessionName: string,
-    paneId: string,
-    direction: "left" | "up" | "right" | "down",
-  ): Promise<void> {
-    await execFileAsync("zellij", [
-      "-s",
-      sessionName,
-      "action",
-      "move-pane",
-      direction,
-      "-p",
-      paneId,
-    ]);
-  }
-
-  private getLeadingPane(panes: ZellijPaneInfo[]): ZellijPaneInfo | null {
-    if (panes.length === 0) {
-      return null;
-    }
-    return panes
-      .slice()
-      .sort((left, right) => left.x - right.x || right.rows - left.rows || left.y - right.y)[0];
-  }
-
-  private getRightStackPanes(panes: ZellijPaneInfo[], leadingPaneId: string | null): ZellijPaneInfo[] {
-    return panes
-      .filter((pane) => pane.id !== leadingPaneId)
-      .sort((left, right) => left.y - right.y || left.x - right.x || left.title.localeCompare(right.title));
   }
 
   private async runAgentPane(
@@ -551,7 +454,7 @@ export class ZellijManager {
     const attachArgs = ["attach", sessionName, "--create"];
 
     if (process.platform === "darwin") {
-      await this.openMacTerminalCommand(["zellij", ...attachArgs]);
+      await this.openMacTerminalSession(sessionName, cwd, attachArgs);
       return;
     }
 
@@ -599,15 +502,23 @@ export class ZellijManager {
     }
   }
 
-  private async openMacTerminalCommand(command: string[]) {
-    const terminalCommand = command.map((part) => this.shellQuote(part)).join(" ");
+  private async openMacTerminalSession(_sessionName: string, cwd: string, attachArgs: string[]) {
+    const terminalCommand = ["zellij", ...attachArgs].map((part) => this.shellQuote(part)).join(" ");
     const appleScript = [
+      'set terminalWasRunning to application "Terminal" is running',
       'tell application "Terminal"',
+      'if terminalWasRunning then',
+      "if (count of windows) = 0 then",
+      "reopen",
+      "end if",
+      `do script ${JSON.stringify(`cd ${this.shellQuote(cwd)}; exec ${terminalCommand}`)} in front window`,
+      "else",
+      "reopen",
+      `do script ${JSON.stringify(`cd ${this.shellQuote(cwd)}; exec ${terminalCommand}`)} in window 1`,
+      "end if",
       "activate",
-      `do script ${JSON.stringify(terminalCommand)}`,
       "end tell",
     ];
-
     await this.spawnDetachedProcess("osascript", appleScript.flatMap((line) => ["-e", line]));
   }
 
@@ -643,11 +554,6 @@ export class ZellijManager {
   private shellQuote(value: string): string {
     return `'${value.replace(/'/g, `'\\''`)}'`;
   }
-
-  private normalizeAgentName(value: string): string {
-    return value.replace(/-Agent$/i, "");
-  }
-
   private getLayoutCreationOrder(agents: AgentPaneSpec[]): AgentPaneSpec[] {
     return agents.slice();
   }

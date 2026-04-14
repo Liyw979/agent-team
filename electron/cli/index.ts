@@ -105,11 +105,11 @@ function shellQuote(value: string) {
 }
 
 function buildOpenPanelCommand(panel: TaskPanelRecord) {
-  return `zellij -s ${shellQuote(panel.sessionName)} action focus-pane-id ${shellQuote(panel.paneId)} && zellij attach ${shellQuote(panel.sessionName)}`;
+  return `zellij attach --create-background ${shellQuote(panel.sessionName)} && zellij -s ${shellQuote(panel.sessionName)} action focus-pane-id ${shellQuote(panel.paneId)} && zellij attach ${shellQuote(panel.sessionName)}`;
 }
 
 function buildAttachSessionCommand(sessionName: string) {
-  return `zellij attach ${shellQuote(sessionName)} --create`;
+  return `zellij attach --create-background ${shellQuote(sessionName)} && zellij attach ${shellQuote(sessionName)} --create`;
 }
 
 function printJson(payload: unknown) {
@@ -181,7 +181,7 @@ function printTaskSummary(taskSnapshot: TaskSnapshot) {
 
 function printPanelOpenCommand(taskSnapshot: TaskSnapshot, agentName: string) {
   const panel = taskSnapshot.panels.find(
-    (item) => normalizeAgentName(item.agentName) === normalizeAgentName(agentName),
+    (item) => item.agentName === agentName,
   );
   process.stdout.write("\nOpen Zellij\n");
 
@@ -401,8 +401,7 @@ function findTaskOrThrow(project: ProjectSnapshot, taskId: string): TaskSnapshot
 }
 
 function findAgentOrThrow(project: ProjectSnapshot, agentName: string): AgentFileRecord {
-  const normalized = normalizeAgentName(agentName);
-  const agent = project.agentFiles.find((item) => normalizeAgentName(item.name) === normalized);
+  const agent = project.agentFiles.find((item) => item.name === agentName);
   if (!agent) {
     fail(`未找到 Agent：${agentName}`);
   }
@@ -410,16 +409,12 @@ function findAgentOrThrow(project: ProjectSnapshot, agentName: string): AgentFil
 }
 
 function ensureAgentNames(project: ProjectSnapshot, names: string[]) {
-  const valid = new Set(project.agentFiles.map((agent) => normalizeAgentName(agent.name)));
+  const valid = new Set(project.agentFiles.map((agent) => agent.name));
   for (const name of names) {
-    if (!valid.has(normalizeAgentName(name))) {
+    if (!valid.has(name)) {
       fail(`Project 中不存在 Agent：${name}`);
     }
   }
-}
-
-function normalizeAgentName(value: string) {
-  return value.replace(/-Agent$/i, "");
 }
 
 async function readInputContent(parsed: ParsedArgv): Promise<string> {
@@ -469,7 +464,6 @@ function buildHelp() {
   agent list [--cwd <path>]
   agent show <agentName> [--cwd <path>]
   agent cat <agentName> [--cwd <path>]
-  agent save <agentName> [--cwd <path>] (--content <text> | --file <path> | --stdin)
 
   topology show [--cwd <path>]
   topology set-downstream <sourceAgent> [targetAgent... ] [--cwd <path>]
@@ -721,28 +715,6 @@ async function handleAgents(context: CliContext, parsed: ParsedArgv) {
     return;
   }
 
-  if (action === "save") {
-    assertPositionals(parsed, 3, "agents save <agentName> [--cwd <path>] (--content <text> | --file <path> | --stdin)");
-    const agent = findAgentOrThrow(project, parsed.positionals[2] ?? "");
-    if (isBuiltinAgent(agent)) {
-      fail("OpenCode 内置 build agent 不是本地 Markdown 文件，不能通过 agents save 修改。");
-    }
-    const content = await readInputContent(parsed);
-    const updated = await context.orchestrator.saveAgentFile({
-      projectId: project.project.id,
-      relativePath: agent.relativePath,
-      content,
-    });
-
-    if (json) {
-      printJson(updated);
-      return;
-    }
-
-    process.stdout.write(`已保存 Agent 文件：${agent.relativePath}\n`);
-    return;
-  }
-
   fail(`未知命令：agents ${action}`);
 }
 
@@ -892,7 +864,7 @@ async function handlePanels(context: CliContext, parsed: ParsedArgv) {
     const agentName = parsed.positionals[3] ?? "";
     const task = findTaskOrThrow(project, taskId);
     const panel = task.panels.find(
-      (item) => normalizeAgentName(item.agentName) === normalizeAgentName(agentName),
+      (item) => item.agentName === agentName,
     );
     if (!panel) {
       fail(`Task ${taskId} 中不存在 Agent 面板：${agentName}`);

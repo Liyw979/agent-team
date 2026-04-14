@@ -78,9 +78,6 @@ export interface TaskAgentRecord {
   projectId: string;
   name: string;
   opencodeSessionId: string | null;
-  prompt: string;
-  tools: ToolPermission[];
-  sourcePath: string;
   status: AgentStatus;
   runCount: number;
 }
@@ -93,6 +90,7 @@ export interface TaskPanelRecord {
   paneId: string;
   agentName: string;
   cwd: string;
+  order: number;
 }
 
 export interface TopologyNode {
@@ -180,10 +178,9 @@ export interface CreateProjectPayload {
   path: string;
 }
 
-export interface SaveAgentFilePayload {
+export interface ReadAgentFilePayload {
   projectId: string;
   relativePath: string;
-  content: string;
 }
 
 export interface UpdateTopologyPayload {

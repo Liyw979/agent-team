@@ -28,7 +28,6 @@ interface ProjectStateFile {
   taskAgents: TaskAgentRecord[];
   taskPanels: TaskPanelRecord[];
   messages: MessageRecord[];
-  taskTopologySnapshots: Record<string, TopologyRecord>;
 }
 
 interface TaskProjectLocation {
@@ -70,7 +69,6 @@ function createDefaultProjectState(projectId: string): ProjectStateFile {
     taskAgents: [],
     taskPanels: [],
     messages: [],
-    taskTopologySnapshots: {},
   };
 }
 
@@ -127,30 +125,22 @@ export class StoreService {
     return task;
   }
 
-  insertTask(record: TaskRecord, topologySnapshot: TopologyRecord) {
+  insertTask(record: TaskRecord) {
     this.updateProjectState(record.projectId, (state) => ({
       ...state,
       tasks: uniqueById([...state.tasks, record]),
-      taskTopologySnapshots: {
-        ...state.taskTopologySnapshots,
-        [record.id]: topologySnapshot,
-      },
     }));
   }
 
   deleteTask(taskId: string) {
     const { project } = this.findTaskProject(taskId);
     this.updateProjectState(project.id, (state) => {
-      const nextTaskTopologySnapshots = { ...state.taskTopologySnapshots };
-      delete nextTaskTopologySnapshots[taskId];
-
       return {
         ...state,
         tasks: state.tasks.filter((task) => task.id !== taskId),
         taskAgents: state.taskAgents.filter((agent) => agent.taskId !== taskId),
         taskPanels: state.taskPanels.filter((panel) => panel.taskId !== taskId),
         messages: state.messages.filter((message) => message.taskId !== taskId),
-        taskTopologySnapshots: nextTaskTopologySnapshots,
       };
     });
   }
@@ -198,11 +188,6 @@ export class StoreService {
     }));
   }
 
-  getTaskTopology(taskId: string): TopologyRecord {
-    const { state } = this.findTaskProject(taskId);
-    return state.taskTopologySnapshots[taskId] ?? state.topology;
-  }
-
   listTaskAgents(taskId: string): TaskAgentRecord[] {
     const { state } = this.findTaskProject(taskId);
     return [...state.taskAgents]
@@ -221,7 +206,7 @@ export class StoreService {
     const { state } = this.findTaskProject(taskId);
     return [...state.taskPanels]
       .filter((panel) => panel.taskId === taskId)
-      .sort((left, right) => left.agentName.localeCompare(right.agentName));
+      .sort((left, right) => left.order - right.order || left.agentName.localeCompare(right.agentName));
   }
 
   insertTaskPanel(record: TaskPanelRecord) {
@@ -279,7 +264,7 @@ export class StoreService {
               opencodeSessionId: sessionId,
             }
           : agent,
-      ),
+        ),
     }));
   }
 
@@ -443,42 +428,42 @@ export class StoreService {
             }))
             .filter((task) => task.id)
         : [],
-      taskAgents: Array.isArray(parsed.taskAgents) ? parsed.taskAgents.filter(Boolean) : [],
-      taskPanels: Array.isArray(parsed.taskPanels) ? parsed.taskPanels.filter(Boolean) : [],
+      taskAgents: Array.isArray(parsed.taskAgents)
+        ? parsed.taskAgents
+            .filter((agent): agent is Partial<TaskAgentRecord> => Boolean(agent) && typeof agent === "object")
+            .map((agent) => ({
+              id: typeof agent.id === "string" ? agent.id : "",
+              taskId: typeof agent.taskId === "string" ? agent.taskId : "",
+              projectId,
+              name: typeof agent.name === "string" ? agent.name : "",
+              opencodeSessionId: typeof agent.opencodeSessionId === "string" ? agent.opencodeSessionId : null,
+              status:
+                agent.status === "running" ||
+                agent.status === "success" ||
+                agent.status === "failed" ||
+                agent.status === "needs_revision"
+                  ? agent.status
+                  : "idle",
+              runCount: typeof agent.runCount === "number" && Number.isFinite(agent.runCount) ? agent.runCount : 0,
+            }))
+            .filter((agent) => agent.id && agent.taskId && agent.name)
+        : [],
+      taskPanels: Array.isArray(parsed.taskPanels)
+        ? parsed.taskPanels
+            .filter((panel): panel is Partial<TaskPanelRecord> => Boolean(panel) && typeof panel === "object")
+            .map((panel, index) => ({
+              id: typeof panel.id === "string" ? panel.id : "",
+              taskId: typeof panel.taskId === "string" ? panel.taskId : "",
+              projectId,
+              sessionName: typeof panel.sessionName === "string" ? panel.sessionName : "",
+              paneId: typeof panel.paneId === "string" ? panel.paneId : "",
+              agentName: typeof panel.agentName === "string" ? panel.agentName : "",
+              cwd: typeof panel.cwd === "string" ? panel.cwd : projectPath,
+              order: typeof panel.order === "number" && Number.isFinite(panel.order) ? panel.order : index,
+            }))
+            .filter((panel) => panel.id && panel.taskId && panel.agentName)
+        : [],
       messages: Array.isArray(parsed.messages) ? parsed.messages.filter(Boolean) : [],
-      taskTopologySnapshots:
-        parsed.taskTopologySnapshots && typeof parsed.taskTopologySnapshots === "object"
-          ? Object.fromEntries(
-              Object.entries(parsed.taskTopologySnapshots).map(([taskId, topology]) => [
-                taskId,
-                {
-                  projectId,
-                  rootAgentId:
-                    topology &&
-                    typeof topology === "object" &&
-                    typeof (topology as TopologyRecord).rootAgentId === "string"
-                      ? (topology as TopologyRecord).rootAgentId
-                      : null,
-                  agentOrderIds:
-                    topology &&
-                    typeof topology === "object" &&
-                    Array.isArray((topology as TopologyRecord).agentOrderIds)
-                      ? (topology as TopologyRecord).agentOrderIds.filter(
-                          (item): item is string => typeof item === "string",
-                        )
-                      : [],
-                  nodes:
-                    topology && typeof topology === "object" && Array.isArray((topology as TopologyRecord).nodes)
-                      ? (topology as TopologyRecord).nodes
-                      : [],
-                  edges:
-                    topology && typeof topology === "object" && Array.isArray((topology as TopologyRecord).edges)
-                      ? (topology as TopologyRecord).edges
-                      : [],
-                },
-              ]),
-            )
-          : {},
     };
 
     return state;
