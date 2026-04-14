@@ -13,7 +13,6 @@ import {
   type Edge,
   type Node,
 } from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
 import { getAgentColorToken } from "@/lib/agent-colors";
 import { isBuiltinAgentPath, isReviewAgentName, resolveTopologyAgentOrder } from "@shared/types";
 import type {
@@ -76,39 +75,28 @@ const HISTORY_STACK_GAP = 0;
 const MAX_VISIBLE_HISTORY_ITEMS = 10;
 const AGENT_EDGE_TOP_INSET = 2;
 const AGENT_EDGE_BOTTOM_INSET = 2;
-const TOPOLOGY_EDGE_LANE_HEIGHT = 34;
+const TOPOLOGY_EDGE_LANE_HEIGHT = 30;
 const MAIN_FIT_PADDING = 0.015;
 const PREVIEW_FIT_PADDING = 0.05;
 const EXPANDED_FIT_PADDING = 0;
 const FLOW_MIN_ZOOM = 0.1;
 const FLOW_MAX_ZOOM = 2;
-const MAIN_FLOW_LEFT_INSET = 6;
-const MAIN_FLOW_RIGHT_INSET = 6;
-const EXPANDED_FLOW_LEFT_INSET = 14;
-const EXPANDED_FLOW_RIGHT_INSET = 14;
+const MAIN_FLOW_LEFT_INSET = 3;
+const MAIN_FLOW_RIGHT_INSET = 3;
+const EXPANDED_FLOW_LEFT_INSET = 8;
+const EXPANDED_FLOW_RIGHT_INSET = 8;
 const MAIN_FLOW_TOP_INSET = TOPOLOGY_EDGE_LANE_HEIGHT;
 const EXPANDED_FLOW_TOP_INSET = TOPOLOGY_EDGE_LANE_HEIGHT;
-const MAIN_FLOW_BOTTOM_INSET = 8;
-const EXPANDED_FLOW_BOTTOM_INSET = 10;
+const MAIN_FLOW_BOTTOM_INSET = 4;
+const EXPANDED_FLOW_BOTTOM_INSET = 6;
 const AGENT_HEADER_SIDE_PADDING = 10;
-const AGENT_HEADER_BADGE_GAP = 8;
-const AGENT_HEADER_BADGE_COMPACT_GAP = 2;
-const AGENT_STATUS_BADGE_FONT_SIZE = 12;
-const AGENT_STATUS_BADGE_HEIGHT = 28;
-const AGENT_HEADER_CONTENT_HEIGHT = 28;
-const AGENT_STATUS_BADGE_PADDING_X = 12;
-const AGENT_STATUS_BADGE_COMPACT_PADDING_X = 4;
-const AGENT_STATUS_BADGE_MIN_WIDTH = 0;
-const AGENT_STATUS_BADGE_INDICATOR_SIZE = 10;
-const AGENT_STATUS_BADGE_INDICATOR_GAP = 6;
+const AGENT_STATUS_ICON_BUTTON_SIZE = 20;
+const AGENT_HEADER_ICON_SLOT_WIDTH = 26;
+const AGENT_TITLE_FONT_SIZE = 16;
 const HISTORY_PANEL_PADDING_X = "0.375rem";
 const HISTORY_PANEL_PADDING_Y = "0.25rem";
 const EMPTY_HISTORY_PANEL_PADDING_X = "0.5rem";
 const EMPTY_HISTORY_PANEL_PADDING_Y = "0.375rem";
-const APPROVAL_BADGE_CLASS_NAME = "border border-[#7dae92]/45 bg-[#edf7f1] text-[#24543b]";
-const APPROVAL_HISTORY_CLASS_NAME = "border-[#7dae92]/45 bg-[#edf7f1] text-[#24543b]";
-const APPROVAL_CARD_BORDER = "#7DAE92";
-const APPROVAL_CARD_SHADOW = "0 10px 26px rgba(125,174,146,0.2)";
 const REJECTION_BADGE_CLASS_NAME = "border border-[#d66b63]/45 bg-[#fff1ef] text-[#a33f38]";
 const REJECTION_HISTORY_CLASS_NAME = "border-[#df766e]/45 bg-[#fff1ef] text-[#a33f38]";
 const REJECTION_CARD_BORDER = "#D66B63";
@@ -135,95 +123,7 @@ function getAgentDisplayName(name: string) {
 }
 
 function getAgentBlockHeight(agentState: string) {
-  return agentState === "running" ? 44 : 44;
-}
-
-let textMeasureContext: CanvasRenderingContext2D | null | undefined;
-
-function getTextMeasureContext() {
-  if (textMeasureContext !== undefined) {
-    return textMeasureContext;
-  }
-  if (typeof document === "undefined") {
-    textMeasureContext = null;
-    return textMeasureContext;
-  }
-  const canvas = document.createElement("canvas");
-  textMeasureContext = canvas.getContext("2d");
-  return textMeasureContext;
-}
-
-function estimateAgentNameWidth(displayName: string, fontSize: number) {
-  const context = getTextMeasureContext();
-  if (context) {
-    context.font = `600 ${fontSize}px "IBM Plex Sans", "PingFang SC", sans-serif`;
-    return context.measureText(displayName).width;
-  }
-  return getDisplayWidthUnits(displayName) * 0.9 * fontSize;
-}
-
-function getAgentNameFontSize(
-  displayName: string,
-  availableWidth: number,
-  nodeCardWidth: number,
-) {
-  const maxFontSize = nodeCardWidth >= 270 ? 17 : 15;
-  const measuredWidthAtMax = estimateAgentNameWidth(displayName, maxFontSize);
-  const computedFontSize =
-    measuredWidthAtMax > 0 ? (availableWidth / measuredWidthAtMax) * maxFontSize : maxFontSize;
-  return Math.max(4, Math.min(maxFontSize, computedFontSize));
-}
-
-function estimateStatusBadgeWidth(
-  badge: ReturnType<typeof getAgentStatusBadge>,
-  options?: {
-    compact?: boolean;
-  },
-) {
-  const paddingX = options?.compact
-    ? AGENT_STATUS_BADGE_COMPACT_PADDING_X
-    : AGENT_STATUS_BADGE_PADDING_X;
-  const indicatorWidth = badge.indicatorClassName
-    ? AGENT_STATUS_BADGE_INDICATOR_SIZE + AGENT_STATUS_BADGE_INDICATOR_GAP
-    : 0;
-
-  return Math.max(
-    AGENT_STATUS_BADGE_MIN_WIDTH,
-    estimateAgentNameWidth(badge.label, AGENT_STATUS_BADGE_FONT_SIZE) + indicatorWidth + paddingX * 2 + 8,
-  );
-}
-
-function getAgentHeaderLayout(
-  displayName: string,
-  nodeCardWidth: number,
-  statusBadge: ReturnType<typeof getAgentStatusBadge> | null,
-) {
-  const defaultBadgeWidth = statusBadge ? estimateStatusBadgeWidth(statusBadge) : 0;
-  const compactBadgeWidth = statusBadge ? estimateStatusBadgeWidth(statusBadge, { compact: true }) : 0;
-  const defaultGap = statusBadge ? AGENT_HEADER_BADGE_GAP : 0;
-  const compactGap = statusBadge ? AGENT_HEADER_BADGE_COMPACT_GAP : 0;
-  const headerContentWidth = Math.max(0, nodeCardWidth - AGENT_HEADER_SIDE_PADDING * 2);
-  const defaultReservedWidth = (defaultBadgeWidth + defaultGap) * 2;
-  const defaultTitleMaxWidth = headerContentWidth - defaultReservedWidth;
-  const centeredFontSize = getAgentNameFontSize(displayName, Math.max(0, defaultTitleMaxWidth), nodeCardWidth);
-  const useCompactBadge = Boolean(statusBadge) && centeredFontSize < 12;
-  const badgeWidth = useCompactBadge ? compactBadgeWidth : defaultBadgeWidth;
-  const badgeGap = useCompactBadge ? compactGap : defaultGap;
-  const badgeSlotWidth = badgeWidth + badgeGap;
-  const titleMaxWidth = headerContentWidth - badgeSlotWidth * 2;
-  const titleFontSize = getAgentNameFontSize(displayName, Math.max(0, titleMaxWidth), nodeCardWidth);
-
-  return {
-    blockHeight: 44,
-    badgeSlotWidth,
-    titleMaxWidth: Math.max(0, titleMaxWidth),
-    titleFontSize,
-    badgeGap,
-    badgePaddingX: useCompactBadge
-      ? AGENT_STATUS_BADGE_COMPACT_PADDING_X
-      : AGENT_STATUS_BADGE_PADDING_X,
-    badgeMinWidth: badgeWidth,
-  } as const;
+  return agentState === "running" ? 38 : 38;
 }
 
 function getAgentCardAppearance(
@@ -247,10 +147,10 @@ function getAgentCardAppearance(
       };
     case "success":
       return {
-        borderColor: APPROVAL_CARD_BORDER,
+        borderColor: agentColor.border,
         background: agentColor.soft,
         color: agentColor.text,
-        shadow: APPROVAL_CARD_SHADOW,
+        shadow: `0 10px 26px ${agentColor.solid}22`,
       };
     case "failed":
       return {
@@ -269,24 +169,10 @@ function getAgentCardAppearance(
   }
 }
 
-function getDisplayWidthUnits(value: string) {
-  return [...value].reduce((total, char) => {
-    if (/[\u3400-\u9fff\uf900-\ufaff]/.test(char)) {
-      return total + 1;
-    }
-    if (/[A-Z0-9]/.test(char)) {
-      return total + 0.74;
-    }
-    return total + 0.64;
-  }, 0);
-}
-
-function getAgentNameStyle(
-  fontSize: number,
-) {
+function getAgentNameStyle() {
   return {
-    fontSize: `${fontSize}px`,
-    lineHeight: 1,
+    fontSize: `${AGENT_TITLE_FONT_SIZE}px`,
+    lineHeight: 1.15,
     letterSpacing: "0",
   } as const;
 }
@@ -332,7 +218,7 @@ function getAgentStatusBadge(agentName: string, agentState: string) {
         label: "未启动",
         className: "border border-[#c9d6ce]/85 bg-[#f7fbf8] text-[#5f7267]",
         effectClassName: "",
-        indicatorClassName: "",
+        icon: "idle",
       };
     case "running":
       return {
@@ -340,37 +226,129 @@ function getAgentStatusBadge(agentName: string, agentState: string) {
         className:
           "border border-[#d8b14a]/70 bg-[linear-gradient(180deg,#fff7d8_0%,#ffedb8_100%)] text-[#6b5208]",
         effectClassName: "topology-status-badge-running",
-        indicatorClassName: "",
+        icon: "running",
       };
     case "success":
       return {
         label: reviewAgent ? "审查通过" : "已完成",
-        className: APPROVAL_BADGE_CLASS_NAME,
+        className: "border border-[#2c4a3f]/18 bg-[#edf5f0] text-[#2c4a3f]",
         effectClassName: "",
-        indicatorClassName: "",
+        icon: "success",
       };
     case "failed":
       return {
         label: reviewAgent ? "审查不通过" : "执行失败",
         className: REJECTION_BADGE_CLASS_NAME,
         effectClassName: "",
-        indicatorClassName: "",
+        icon: "failed",
       };
     case "needs_revision":
       return {
         label: "审查不通过",
         className: REJECTION_BADGE_CLASS_NAME,
         effectClassName: "",
-        indicatorClassName: "",
+        icon: "needs_revision",
       };
     default:
       return {
         label: "未启动",
         className: "border border-[#c9d6ce]/85 bg-[#f7fbf8] text-[#5f7267]",
         effectClassName: "",
-        indicatorClassName: "",
+        icon: "idle",
       };
   }
+}
+
+function renderAgentStatusIcon(statusBadge: ReturnType<typeof getAgentStatusBadge>) {
+  const iconClassName =
+    statusBadge.icon === "running" ? "animate-spin motion-reduce:animate-none" : "";
+
+  return (
+    <span
+      title={statusBadge.label}
+      aria-label={statusBadge.label}
+      className={`inline-flex items-center justify-center rounded-full shadow-[0_1px_0_rgba(255,255,255,0.45)] ${statusBadge.className} ${statusBadge.effectClassName}`}
+      style={{
+        width: AGENT_STATUS_ICON_BUTTON_SIZE,
+        height: AGENT_STATUS_ICON_BUTTON_SIZE,
+      }}
+    >
+      {statusBadge.icon === "idle" ? (
+        <svg
+          viewBox="0 0 16 16"
+          className="h-3.5 w-3.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="8" cy="8" r="5.2" />
+          <path d="M8 5.1v3.3l2.1 1.2" />
+        </svg>
+      ) : null}
+      {statusBadge.icon === "running" ? (
+        <svg
+          viewBox="0 0 16 16"
+          className={`h-3.5 w-3.5 ${iconClassName}`}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M13 8a5 5 0 1 1-1.46-3.54" />
+          <path d="M10.8 2.7H13v2.2" />
+        </svg>
+      ) : null}
+      {statusBadge.icon === "success" ? (
+        <svg
+          viewBox="0 0 16 16"
+          className="h-3.5 w-3.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.9"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M3.4 8.1 6.6 11l6-6.2" />
+        </svg>
+      ) : null}
+      {statusBadge.icon === "failed" || statusBadge.icon === "needs_revision" ? (
+        <svg
+          viewBox="0 0 16 16"
+          className="h-3.5 w-3.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.9"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M4.2 4.2 11.8 11.8" />
+          <path d="M11.8 4.2 4.2 11.8" />
+        </svg>
+      ) : null}
+    </span>
+  );
+}
+
+export function getTopologyAgentStatusLabel(agentName: string, agentState: string) {
+  return getAgentStatusBadge(agentName, agentState).label;
+}
+
+export function getTopologyEdgeTriggerAppearance(triggerOn: TopologyEdge["triggerOn"]) {
+  return getEdgeTriggerAppearance(triggerOn);
+}
+
+export function getTopologyNodeOrder(
+  topology: Pick<TopologyRecord, "nodes" | "agentOrderIds">,
+  defaultAgentOrderIds: string[],
+) {
+  return topology.agentOrderIds.length > 0 ? topology.agentOrderIds : defaultAgentOrderIds;
 }
 
 function getRoleRank(role: AgentRole | null | undefined) {
@@ -694,7 +672,7 @@ function getHistoryAppearance(status: string) {
     default:
       return {
         label: "通过",
-        className: APPROVAL_HISTORY_CLASS_NAME,
+        className: "border-accent/55 bg-accent/18 text-foreground",
       };
   }
 }
@@ -766,11 +744,11 @@ function CurvedTopologyEdge({
   const horizontalPhase = data?.horizontalPhase ?? 0;
   const sourceTopY = sourceY + AGENT_EDGE_TOP_INSET;
   const targetTopY = targetY + AGENT_EDGE_TOP_INSET;
-  const maxArcRise = TOPOLOGY_EDGE_LANE_HEIGHT - 12;
+  const maxArcRise = Math.max(12, TOPOLOGY_EDGE_LANE_HEIGHT - 8);
 
   if (Math.abs(targetX - sourceX) < 2) {
-    const loopWidth = 28 + laneIndex * 8;
-    const loopDepth = Math.min(maxArcRise - 4, 18 + laneIndex * 8);
+    const loopWidth = 30 + laneIndex * 10;
+    const loopDepth = Math.min(maxArcRise - 3, 16 + laneIndex * 6);
     const path = [
       `M ${sourceX} ${sourceTopY}`,
       `C ${sourceX + loopWidth} ${sourceTopY - 8}, ${sourceX + loopWidth} ${sourceTopY - loopDepth}, ${sourceX} ${sourceTopY - loopDepth}`,
@@ -795,18 +773,18 @@ function CurvedTopologyEdge({
   const horizontalDistance = Math.abs(targetX - sourceX);
   const verticalDepth = Math.min(
     maxArcRise,
-    12 + span * 4 + laneIndex * 4 + Math.abs(horizontalPhase) * 2,
+    14 + Math.min(span, 5) * 3 + laneIndex * 4.5 + Math.abs(horizontalPhase) * 2.5,
   );
   const horizontalBias = horizontalPhase * 10;
   const startX = sourceX;
   const endX = targetX;
   const startY = sourceTopY;
   const endY = targetTopY;
-  const controlReach = Math.max(28, Math.min(76, horizontalDistance * 0.18));
+  const controlReach = Math.max(28, Math.min(92, horizontalDistance * 0.2));
   const sourceControlX = startX + direction * (controlReach + horizontalBias);
   const targetControlX = endX - direction * (controlReach - horizontalBias);
-  const sourceControlY = startY - verticalDepth * 0.42;
-  const targetControlY = endY - verticalDepth;
+  const sourceControlY = startY - verticalDepth * 0.55;
+  const targetControlY = endY - verticalDepth * 1.02;
   const path = [
     `M ${startX} ${startY}`,
     `C ${sourceControlX} ${sourceControlY}, ${targetControlX} ${targetControlY}, ${endX} ${endY}`,
@@ -1214,8 +1192,7 @@ export function TopologyGraph({
       };
       const runtime = agentState === "running" ? runtimeSnapshots[node.id] : undefined;
       const statusBadge = getAgentStatusBadge(node.id, agentState);
-      const headerLayout = getAgentHeaderLayout(displayName, nodeCardWidth, statusBadge);
-      const agentBlockHeight = headerLayout.blockHeight;
+      const agentBlockHeight = getAgentBlockHeight(agentState);
       const historyItems = agentHistories.get(node.id) ?? [];
       const appearance = getAgentCardAppearance(agentState, agentColor);
       const visibleHistory =
@@ -1312,55 +1289,30 @@ export function TopologyGraph({
                 }}
               >
                 <div
-                  className="absolute inset-x-0 top-1/2 flex -translate-y-1/2 justify-center overflow-hidden"
+                  className="absolute inset-x-0 top-1/2 -translate-y-1/2 overflow-hidden"
                   style={{
                     paddingLeft: `${AGENT_HEADER_SIDE_PADDING}px`,
                     paddingRight: `${AGENT_HEADER_SIDE_PADDING}px`,
                   }}
                 >
                   <div
-                    className="grid h-7 w-full items-center"
+                    className="grid w-full items-center"
                     style={{
-                      gridTemplateColumns: statusBadge
-                        ? `${headerLayout.badgeSlotWidth}px minmax(0, 1fr) ${headerLayout.badgeSlotWidth}px`
-                        : "minmax(0, 1fr)",
+                      gridTemplateColumns: `${AGENT_HEADER_ICON_SLOT_WIDTH}px minmax(0, 1fr) ${AGENT_HEADER_ICON_SLOT_WIDTH}px`,
                     }}
                   >
-                    {statusBadge ? <div aria-hidden="true" className="h-full" /> : null}
-                    <div className="min-w-0 overflow-hidden">
-                      <p
-                        className="block truncate text-center font-semibold leading-none"
-                        style={{
-                          ...getAgentNameStyle(headerLayout.titleFontSize),
-                          maxWidth: `${headerLayout.titleMaxWidth}px`,
-                        }}
-                      >
-                        {displayName}
-                      </p>
+                    <div aria-hidden="true" />
+                    <p
+                      className="block truncate text-center font-semibold"
+                      style={{
+                        ...getAgentNameStyle(),
+                      }}
+                    >
+                      {displayName}
+                    </p>
+                    <div className="relative flex justify-end">
+                      {renderAgentStatusIcon(statusBadge)}
                     </div>
-                    {statusBadge ? (
-                      <span
-                        className={`inline-flex justify-self-end shrink-0 items-center justify-center rounded-full py-1 text-[12px] font-semibold leading-none tracking-[0.01em] shadow-[0_1px_0_rgba(255,255,255,0.45)] ${statusBadge.className} ${statusBadge.effectClassName}`}
-                        style={{
-                          minHeight: AGENT_STATUS_BADGE_HEIGHT,
-                          minWidth: `${headerLayout.badgeMinWidth}px`,
-                          paddingLeft: `${headerLayout.badgePaddingX}px`,
-                          paddingRight: `${headerLayout.badgePaddingX}px`,
-                        }}
-                      >
-                        {statusBadge.indicatorClassName ? (
-                          <span
-                            className={`shrink-0 rounded-full ${statusBadge.indicatorClassName}`}
-                            style={{
-                              width: `${AGENT_STATUS_BADGE_INDICATOR_SIZE}px`,
-                              height: `${AGENT_STATUS_BADGE_INDICATOR_SIZE}px`,
-                              marginRight: `${AGENT_STATUS_BADGE_INDICATOR_GAP}px`,
-                            }}
-                          />
-                        ) : null}
-                        <span className="relative z-[1]">{statusBadge.label}</span>
-                      </span>
-                    ) : null}
                   </div>
                 </div>
               </div>
@@ -1550,7 +1502,7 @@ export function TopologyGraph({
         targetHandle: null,
         data: {
           edgeKind: edge.triggerOn,
-          laneIndex: index % 4,
+          laneIndex: index % 5,
           span: Math.max(
             1,
             Math.abs((nodeOrder.get(edge.target) ?? 0) - (nodeOrder.get(edge.source) ?? 0)),
@@ -1654,8 +1606,8 @@ export function TopologyGraph({
       <div
         className={
           compact || !showEdgeList
-            ? "min-h-0 flex-1 px-5 pb-3 pt-2.5"
-            : "grid min-h-0 flex-1 grid-rows-[320px_minmax(0,1fr)] gap-3 px-5 pb-3 pt-2.5"
+            ? "min-h-0 flex-1 px-2.5 pb-1.5 pt-1.5"
+            : "grid min-h-0 flex-1 grid-rows-[320px_minmax(0,1fr)] gap-3 px-2.5 pb-1.5 pt-1.5"
         }
       >
         {compact ? (
