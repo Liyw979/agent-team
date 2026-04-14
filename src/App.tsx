@@ -234,7 +234,6 @@ function App() {
   }, [activeProject?.project.id, activeTaskView?.task.id]);
 
   const panelMappings = activeTaskView?.panels ?? [];
-  const hasAgentPanelSummary = panelMappings.length > 0 || Boolean(agentPaneActionError);
   const runtimePollKey = useMemo(
     () =>
       activeTaskView?.agents
@@ -526,22 +525,20 @@ function App() {
                   </header>
 
                   <div className="flex flex-1 min-h-0 flex-col px-5 py-3">
-                    {hasAgentPanelSummary ? (
-                      <div className="mb-3 space-y-2">
-                        {panelMappings.length > 0 ? (
-                          <div className="flex flex-wrap gap-2">
-                            <span className="rounded-[6px] bg-card px-3 py-1 text-[11px] text-foreground/80">
-                              {`${panelMappings.length} 个 panel 已绑定`}
-                            </span>
-                          </div>
-                        ) : null}
-                        {agentPaneActionError ? (
-                          <div className="rounded-[8px] border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-700">
-                            {agentPaneActionError}
-                          </div>
-                        ) : null}
+                    <div className="mb-3 space-y-2">
+                      <div className="flex flex-wrap gap-2">
+                        <span className="rounded-[6px] bg-card px-3 py-1 text-[11px] text-foreground/80">
+                          {panelMappings.length > 0
+                            ? `${panelMappings.length} 个 panel 已绑定`
+                            : "当前还没有 panel 绑定记录"}
+                        </span>
                       </div>
-                    ) : null}
+                      {agentPaneActionError ? (
+                        <div className="rounded-[8px] border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-700">
+                          {agentPaneActionError}
+                        </div>
+                      ) : null}
+                    </div>
 
                     <div className="min-h-0 flex-1 overflow-y-auto rounded-[8px] border border-border/60 bg-card/80 p-2">
                       {agentCards.map((agent) => {
