@@ -632,7 +632,7 @@ function App() {
                                     disabled={!canOpenPane || isOpeningPane}
                                     title={
                                       canOpenPane
-                                        ? `打开 ${agent.displayName} 对应的 Zellij pane`
+                                        ? `打开 ${agent.displayName} 对应的 OpenCode 窗口`
                                         : "请先选择一个 Task"
                                     }
                                     onPointerDown={(event) => {

@@ -30,6 +30,13 @@ interface AgentPaneSpec {
   status?: "idle" | "running" | "success" | "failed" | "needs_revision";
 }
 
+interface AgentTerminalSpec {
+  sessionName: string;
+  cwd: string;
+  agentName: string;
+  opencodeSessionId: string | null;
+}
+
 const HIDDEN_PANEL_AGENTS = new Set<string>();
 
 export class ZellijManager {
@@ -271,17 +278,17 @@ export class ZellijManager {
   }
 
   async focusAgentPANEL(panel: TaskPanelRecord): Promise<void> {
-    await this.assertAvailable(`无法打开 Agent ${panel.agentName} 对应的 Zellij pane`);
-    await this.ensureSessionActive(panel.sessionName);
+    throw new Error("focusAgentPANEL 需要携带 Agent OpenCode session 信息，请改用 openAgentTerminal");
+  }
 
-    await execFileAsync("zellij", [
-      "-s",
-      panel.sessionName,
-      "action",
-      "focus-pane-id",
-      panel.paneId,
-    ]).catch(() => undefined);
-    await this.openSessionInTerminal(panel.sessionName, panel.cwd);
+  async openAgentTerminal(spec: AgentTerminalSpec): Promise<void> {
+    const { shellCommand } = this.buildOpencodePaneCommand(
+      spec.sessionName,
+      spec.cwd,
+      spec.agentName,
+      spec.opencodeSessionId,
+    );
+    await this.openCommandInTerminal(spec.cwd, shellCommand);
   }
 
   private isEmptySessionListError(error: unknown): boolean {
