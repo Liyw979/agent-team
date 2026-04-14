@@ -129,10 +129,15 @@ npm run cli -- task init --title "初始化手动测试"
 npm run cli -- task send BA "请先分析需求并推进实现。"
 npm run cli -- task send BA "请先分析需求并推进实现。" --task <taskId>
 
-# 4. 查看当前目录下的 Task、消息和 panel 绑定
+# 4. 查看当前目录下的 Task、排障信息和 panel 绑定
 npm run cli -- task list
+npm run cli -- task debug-info --json
+npm run cli -- task debug-info --json --full
 npm run cli -- task show <taskId>
 npm run cli -- task panels <taskId>
+
+# 4.1 若当前不在本仓库根目录，改用仓库自带入口脚本并显式指定目标 cwd
+/Users/liyw/code/agent-team/bin/agentflow task debug-info --cwd "$PWD" --json
 
 # 5. 查看和修改拓扑
 npm run cli -- topology show
@@ -151,7 +156,7 @@ CLI 能力分组：
 - `project`
   对应 Project 列表、当前 Project 展示、创建 Project
 - `task`
-  对应 Task 列表、Task 初始化、Task 群聊查看、向特定 Agent 发消息、查看当前 Task 的 panel 绑定
+  对应 Task 列表、Task 初始化、Task 群聊查看、排障信息查看、向特定 Agent 发消息、查看当前 Task 的 panel 绑定
 - `agent`
   对应 Project 级 Agent 列表、查看 Agent 元信息、读取 OpenCode 原始配置文件
 - `topology`
@@ -178,6 +183,8 @@ CLI 能力分组：
 - 前端不嵌入终端，不复刻 Zellij PANEL，只展示 Task 级 high level 聊天流、拓扑和 Agent 状态
 - Zellij pane 不再根据运行中的 Agent 动态调整位置；如需调整顺序，直接在前端拖拽 Agent 顺序并保存即可
 - CLI 只支持当前 Agent 名称，例如 `BA`
+- `task debug-info` 默认读取当前 Project 最新 Task，并只输出聊天区里实际展示的合并消息；追加 `--full` 后，才会输出 `zellijSessionId`、`opencodeSessionId`、panel 打开命令和完整运行态数据；也可以显式传入 `taskId`
+- `npm run cli -- ...` 必须在本仓库根目录执行；如果人在别的目录排查当前目录对应的 Project，请改用 `/Users/liyw/code/agent-team/bin/agentflow ... --cwd "$PWD"`
 - `task show <taskId>` 与 `task init` 在交互式终端里默认直接进入对应 zellij session，`task send` 成功后会输出可复制的 zellij 打开命令
 
 ## 后续建议

@@ -71,6 +71,7 @@
 - CLI 支持单独的 `task init` 初始化步骤：先创建 Task，并把全部 Agent 的 OpenCode session / Zellij pane 启动完成；GUI 输入框会优先弹出候选 Agent 并默认选中 `Build`，CLI 仍通过 `task send <agent> <message...>` 指定目标
 - 用户在 Task 群聊里直接发送且未显式指定目标 Agent 时，系统会默认投递给 `Build`，并在群聊历史中自动补上 `@Build`；这类默认首跳转发给 Agent 时，底层格式仍是单行 `[发送者] <正文>`
 - `task send <agent> <message...>` 成功后会打印可复制的 panel 打开命令
+- 分析问题时，必须先主动获取最新 Task 的聊天记录再进行判断；在仓库根目录内默认执行 `npm run cli -- task debug-info --json`，若当前不在仓库根目录，则执行 `/Users/liyw/code/agent-team/bin/agentflow task debug-info --cwd "$PWD" --json`；只有在确实需要 session、panel 等运行态细节时，才追加 `--full`
 
 ## 文档同步要求
 

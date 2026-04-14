@@ -4,6 +4,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { mergeTaskChatMessages, type ChatMessageItem } from "../../src/lib/chat-messages";
 import {
   buildCliAttachSessionCommand,
   buildCliPanelFocusCommand,
@@ -32,6 +33,8 @@ interface ParsedArgv {
 interface CliContext {
   orchestrator: Orchestrator;
 }
+
+const SYSTEM_SENDER_LABEL = "Ocustrater";
 
 function parseArgv(argv: string[]): ParsedArgv {
   const positionals: string[] = [];
@@ -146,6 +149,13 @@ function assertCliZellijAvailable(action: string) {
 
 function printJson(payload: unknown) {
   process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+}
+
+function getChatSenderDisplayName(sender: string) {
+  if (sender === "system") {
+    return SYSTEM_SENDER_LABEL;
+  }
+  return sender;
 }
 
 function formatTimestamp(value: string | null | undefined) {
@@ -436,6 +446,109 @@ function findTaskOrThrow(project: ProjectSnapshot, taskId: string): TaskSnapshot
   return task;
 }
 
+function resolveTaskForDebug(project: ProjectSnapshot, taskId?: string): TaskSnapshot {
+  if (taskId?.trim()) {
+    return findTaskOrThrow(project, taskId.trim());
+  }
+
+  const latestTask = project.tasks[0];
+  if (!latestTask) {
+    fail("当前 Project 还没有 Task，无法获取 debug info。");
+  }
+  return latestTask;
+}
+
+function buildChatTranscript(taskSnapshot: TaskSnapshot) {
+  const merged = mergeTaskChatMessages(
+    [...taskSnapshot.messages].sort((left, right) => left.timestamp.localeCompare(right.timestamp)),
+  );
+
+  return merged.map((message) => ({
+    sender: getChatSenderDisplayName(message.sender),
+    timestamp: message.timestamp,
+    content: message.content,
+  }));
+}
+
+function buildTaskDebugInfo(taskSnapshot: TaskSnapshot) {
+  return {
+    taskId: taskSnapshot.task.id,
+    title: taskSnapshot.task.title,
+    status: taskSnapshot.task.status,
+    cwd: taskSnapshot.task.cwd,
+    zellijSessionId: taskSnapshot.task.zellijSessionId,
+    opencodeSessionId: taskSnapshot.task.opencodeSessionId,
+    initializedAt: taskSnapshot.task.initializedAt,
+    createdAt: taskSnapshot.task.createdAt,
+    completedAt: taskSnapshot.task.completedAt,
+    agentCount: taskSnapshot.task.agentCount,
+    messageCount: taskSnapshot.messages.length,
+    latestMessage: taskSnapshot.messages.at(-1) ?? null,
+    chatTranscript: buildChatTranscript(taskSnapshot),
+    agents: taskSnapshot.agents.map((agent) => ({
+      name: agent.name,
+      status: agent.status,
+      runCount: agent.runCount,
+      opencodeSessionId: agent.opencodeSessionId,
+    })),
+    panels: taskSnapshot.panels.map((panel) => ({
+      agentName: panel.agentName,
+      sessionName: panel.sessionName,
+      paneId: panel.paneId,
+      cwd: panel.cwd,
+      openCommand: buildOpenPanelCommand(panel),
+    })),
+    messages: taskSnapshot.messages,
+  };
+}
+
+function printChatTranscript(messages: Array<{ sender: string; timestamp: string; content: string }>) {
+  if (messages.length === 0) {
+    process.stdout.write("当前 Task 还没有聊天记录。\n");
+    return;
+  }
+
+  for (const message of messages) {
+    process.stdout.write(`${message.sender}\n`);
+    process.stdout.write(`${formatTimestamp(message.timestamp)}\n`);
+    process.stdout.write(`${message.content}\n\n`);
+  }
+}
+
+function printTaskDebugInfo(taskSnapshot: TaskSnapshot, full = false) {
+  if (!full) {
+    printChatTranscript(buildChatTranscript(taskSnapshot));
+    return;
+  }
+
+  const debugInfo = buildTaskDebugInfo(taskSnapshot);
+  printKeyValue("Task", debugInfo.taskId);
+  printKeyValue("Title", debugInfo.title);
+  printKeyValue("Status", debugInfo.status);
+  printKeyValue("Cwd", debugInfo.cwd);
+  printKeyValue("Zellij Session", debugInfo.zellijSessionId);
+  printKeyValue("OpenCode Session", debugInfo.opencodeSessionId);
+  printKeyValue("Messages", debugInfo.messageCount);
+  printKeyValue("Agents", debugInfo.agentCount);
+  printKeyValue("Initialized At", formatTimestamp(debugInfo.initializedAt));
+  printKeyValue("Created At", formatTimestamp(debugInfo.createdAt));
+  printKeyValue("Completed At", formatTimestamp(debugInfo.completedAt));
+
+  printSection("Chat Transcript");
+  printChatTranscript(debugInfo.chatTranscript);
+
+  printSection("Panel Open Commands");
+  if (debugInfo.panels.length > 0) {
+    for (const panel of debugInfo.panels) {
+      process.stdout.write(`- ${panel.agentName}: ${panel.openCommand}\n`);
+    }
+  } else if (debugInfo.zellijSessionId) {
+    process.stdout.write(`${buildAttachSessionCommand(debugInfo.zellijSessionId)}\n`);
+  } else {
+    process.stdout.write("当前 Task 没有可用的 Zellij session。\n");
+  }
+}
+
 function findAgentOrThrow(project: ProjectSnapshot, agentName: string): AgentFileRecord {
   const agent = project.agentFiles.find((item) => item.name === agentName);
   if (!agent) {
@@ -493,6 +606,7 @@ function buildHelp() {
   task list [--cwd <path>]
   task init [--cwd <path>] [--title <title>] [--plain]
   task show <taskId> [--cwd <path>] [--plain]
+  task debug-info [taskId] [--cwd <path>] [--full]
   task messages <taskId> [--cwd <path>]
   task panels <taskId> [--cwd <path>]
   task send <agentName> <message...> [--cwd <path>] [--task <taskId>]
@@ -512,6 +626,7 @@ function buildHelp() {
   --cwd <path>    指定 Project 工作目录，默认当前目录
   --plain         不进入 Zellij，回退到纯文本
   --json          输出 JSON
+  --full          输出完整排障信息；默认只输出聊天记录
 
 关系语义：
   association     当前 Agent 正常完成本轮任务后，直接传递到下游
@@ -522,6 +637,7 @@ function buildHelp() {
   - CLI 会直接复用 Orchestrator、文件存储、OpenCode client、Zellij manager 这套主逻辑。
   - 若当前目录尚未注册为 Project，涉及 Project 语义的命令会自动创建该 Project。
   - \`task init\` 会先创建 Task，并把当前 Project 的全部 Agent 会话 / Zellij pane 初始化好；GUI 群聊默认会优先选中 \`Build\`，CLI 仍通过 \`task send <agent>\` 指定目标。
+  - \`task debug-info\` 默认读取当前 Project 最新 Task，并只输出聊天区展示的合并消息；加 \`--full\` 可输出完整排障信息，也可显式传入 \`taskId\`。
   - \`task send\` 会像 GUI 一样通过 Orchestrator 触发真实 Task 创建/推进与下游调度。
   - \`task show\` 在交互式终端里默认直接进入对应 Task 的 Zellij session。`;
 }
@@ -639,6 +755,17 @@ async function handleTasks(context: CliContext, parsed: ParsedArgv) {
       return;
     }
     printTaskSummary(task);
+    return;
+  }
+
+  if (action === "debug-info") {
+    const task = resolveTaskForDebug(project, parsed.positionals[2]);
+    const full = hasFlag(parsed, "full");
+    if (json) {
+      printJson(full ? buildTaskDebugInfo(task) : buildChatTranscript(task));
+      return;
+    }
+    printTaskDebugInfo(task, full);
     return;
   }
 
