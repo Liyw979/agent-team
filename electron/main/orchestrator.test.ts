@@ -140,3 +140,140 @@ test("审视通过但没有可展示高层结果时返回简洁兜底文案", ()
 
   assert.equal(displayContent, "通过");
 });
+
+test("审视 Agent 执行中止时不会伪造成整改意见", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  const orchestrator = new Orchestrator({
+    userDataPath,
+    enableEventStream: false,
+    zellijManager: {
+      isAvailable: async () => true,
+      createTaskSession: async () => "oap-project-task",
+      createPanelBindings: ({ projectId, taskId, sessionName, cwd }: {
+        projectId: string;
+        taskId: string;
+        sessionName: string;
+        cwd: string;
+      }) => [
+        {
+          id: `${taskId}:CodeReview`,
+          taskId,
+          projectId,
+          sessionName,
+          paneId: "pane-1",
+          agentName: "CodeReview",
+          cwd,
+          order: 0,
+        },
+      ],
+      materializePanelBindings: async () => [],
+      openTaskSession: async () => undefined,
+      deleteTaskSession: async () => undefined,
+    } as never,
+  });
+  const typed = orchestrator as unknown as Orchestrator & {
+    runAgent: (
+      project: { id: string; path: string },
+      task: { id: string },
+      agentName: string,
+      prompt: {
+        mode: "structured";
+        from: string;
+        agentMessage: string;
+      },
+    ) => Promise<void>;
+    opencodeClient: {
+      reloadConfig: () => Promise<void>;
+    };
+    opencodeRunner: {
+      run: () => Promise<{
+        status: "error";
+        finalMessage: string;
+        fallbackMessage: null;
+        messageId: string;
+        timestamp: string;
+        rawMessage: {
+          error: string;
+          content: string;
+        };
+      }>;
+    };
+    ensureTaskPanels: () => Promise<void>;
+    ensureAgentSession: () => Promise<string>;
+  };
+
+  const project = await orchestrator.createProject({ path: projectPath });
+  const topology = {
+    ...project.topology,
+    edges: [
+      ...project.topology.edges.filter((edge) => edge.source !== "CodeReview"),
+      {
+        id: "Build__CodeReview__association",
+        source: "Build",
+        target: "CodeReview",
+        triggerOn: "association" as const,
+      },
+      {
+        id: "CodeReview__Build__review_fail",
+        source: "CodeReview",
+        target: "Build",
+        triggerOn: "review_fail" as const,
+      },
+    ],
+  };
+  await orchestrator.saveTopology({
+    projectId: project.project.id,
+    topology,
+  });
+  const task = await orchestrator.initializeTask({ projectId: project.project.id, title: "demo" });
+
+  typed.ensureTaskPanels = async () => undefined;
+  typed.ensureAgentSession = async () => "session-code-review";
+  typed.opencodeClient.reloadConfig = async () => undefined;
+  typed.opencodeRunner.run = async () => ({
+    status: "error",
+    finalMessage: "Aborted",
+    fallbackMessage: null,
+    messageId: "msg-aborted",
+    timestamp: "2026-04-15T00:00:00.000Z",
+    rawMessage: {
+      error: "Aborted",
+      content: "",
+    },
+  });
+
+  await typed.runAgent(
+    project.project,
+    task.task,
+    "CodeReview",
+    {
+      mode: "structured",
+      from: "Build",
+      agentMessage: "请审查本轮改动",
+    },
+  );
+
+  const snapshot = await orchestrator.getTaskSnapshot(task.task.id);
+  assert.equal(snapshot.task.status, "failed");
+  assert.equal(
+    snapshot.messages.some(
+      (message) =>
+        message.sender === "CodeReview" &&
+        message.meta?.kind === "revision-request",
+    ),
+    false,
+  );
+  assert.equal(
+    snapshot.messages.some(
+      (message) => message.content.includes("具体修改意见：\nAborted"),
+    ),
+    false,
+  );
+  assert.equal(
+    snapshot.messages.some(
+      (message) => message.content === "[CodeReview] 执行失败：Aborted",
+    ),
+    true,
+  );
+});

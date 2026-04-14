@@ -870,14 +870,11 @@ export class Orchestrator {
 
       const topology = this.store.getTopology(project.id);
       const associationTargets = this.getOutgoingEdges(topology, agentName, "association");
-      const reviewTargets = this.getOutgoingEdges(topology, agentName, "review_fail");
       const reviewAgent = this.isReviewAgent({ name: agentName }, topology);
       if (behavior.updateTaskStatusOnStart ?? true) {
         this.store.updateTaskStatus(
           task.id,
-          reviewTargets.length > 0
-            ? "needs_revision"
-            : associationTargets.length > 0 && !reviewAgent
+          associationTargets.length > 0 && !reviewAgent
               ? "running"
               : "failed",
           null,
@@ -905,22 +902,7 @@ export class Orchestrator {
         payload: this.hydrateTask(task.id),
       });
 
-      const reviewTriggered = reviewTargets.length > 0
-        ? await this.triggerReviewDownstream(
-            project,
-            task.id,
-            { name: agentName },
-            {
-              cleanContent: "",
-              decision: "needs_revision",
-              feedback: error instanceof Error ? error.message : "未知错误",
-              rawDecisionBlock: null,
-            },
-            failedMessage.content,
-          )
-        : 0;
-
-      if (reviewTriggered === 0 && (behavior.completeTaskOnFinish ?? true)) {
+      if (behavior.completeTaskOnFinish ?? true) {
         await this.completeTask(task.id, "failed");
       }
     } finally {
