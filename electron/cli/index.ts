@@ -4,6 +4,10 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import {
+  buildCliAttachSessionCommand,
+  buildCliPanelFocusCommand,
+} from "@shared/terminal-commands";
 import { buildZellijMissingMessage, buildZellijMissingReminder } from "@shared/zellij";
 import { Orchestrator } from "../main/orchestrator";
 import { resolveCliUserDataPath } from "../main/user-data-path";
@@ -101,16 +105,12 @@ function createTopologyEdgeId(source: string, target: string, triggerOn: Topolog
   return `${source}__${target}__${triggerOn}`;
 }
 
-function shellQuote(value: string) {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
-
 function buildOpenPanelCommand(panel: TaskPanelRecord) {
-  return `zellij attach --create-background ${shellQuote(panel.sessionName)} && zellij -s ${shellQuote(panel.sessionName)} action focus-pane-id ${shellQuote(panel.paneId)} && zellij attach ${shellQuote(panel.sessionName)}`;
+  return buildCliPanelFocusCommand(panel.taskId, panel.agentName);
 }
 
 function buildAttachSessionCommand(sessionName: string) {
-  return `zellij attach --create-background ${shellQuote(sessionName)} && zellij attach ${shellQuote(sessionName)} --create`;
+  return buildCliAttachSessionCommand(sessionName);
 }
 
 let cliZellijAvailableCache: boolean | null = null;

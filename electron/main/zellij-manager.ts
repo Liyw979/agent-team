@@ -4,6 +4,10 @@ import { execFile, spawn, type SpawnOptions } from "node:child_process";
 import { promisify } from "node:util";
 import type { TaskPanelRecord } from "@shared/types";
 import { buildZellijMissingMessage } from "@shared/zellij";
+import {
+  buildInlineCommand,
+  buildOpencodePaneCommand,
+} from "@shared/terminal-commands";
 import { toOpenCodeAgentName } from "./opencode-agent-name";
 
 const execFileAsync = promisify(execFile);
@@ -377,7 +381,7 @@ export class ZellijManager {
     agentName: string,
     opencodeSessionId: string | null,
   ): Promise<string> {
-    const shellCommand = this.buildOpencodeShellCommand(
+    const { shellLaunch } = this.buildOpencodePaneCommand(
       sessionName,
       cwd,
       agentName,
@@ -392,60 +396,28 @@ export class ZellijManager {
       "--cwd",
       cwd,
       "--",
-      "/bin/sh",
-      "-c",
-      shellCommand,
+      shellLaunch.command,
+      ...shellLaunch.args,
     ]);
     return stdout.trim() || `terminal_${agentName}`;
   }
 
-  private buildOpencodeShellCommand(
+  private buildOpencodePaneCommand(
     sessionName: string,
     cwd: string,
     agentName: string,
     opencodeSessionId: string | null,
-  ): string {
-    const escapedCwd = cwd.replace(/'/g, "'\\''");
-    const escapedAgentName = toOpenCodeAgentName(agentName).replace(/'/g, "'\\''");
-    const escapedSessionId = opencodeSessionId?.replace(/'/g, "'\\''");
+  ) {
     const runtimeDir = this.ensurePaneRuntimeDir(cwd, sessionName, agentName);
-    const escapedRuntimeDir = runtimeDir.replace(/'/g, "'\\''");
     const dbPath = path.join(runtimeDir, "opencode-pane.db");
-    const escapedDbPath = dbPath.replace(/'/g, "'\\''");
-
-    if (escapedSessionId) {
-      return [
-        `mkdir -p '${escapedRuntimeDir}'`,
-        "&&",
-        `cd '${escapedCwd}'`,
-        "&&",
-        `export OPENCODE_CONFIG_DIR='${escapedRuntimeDir}'`,
-        `OPENCODE_DB='${escapedDbPath}'`,
-        "OPENCODE_CLIENT='agentflow-zellij'",
-        "&&",
-        "exec opencode attach 'http://127.0.0.1:4096'",
-        `--session '${escapedSessionId}'`,
-        `--dir '${escapedCwd}'`,
-      ]
-        .filter(Boolean)
-        .join(" ");
-    }
-
-    return [
-      `mkdir -p '${escapedRuntimeDir}'`,
-      "&&",
-      `cd '${escapedCwd}'`,
-      "&&",
-      `export OPENCODE_CONFIG_DIR='${escapedRuntimeDir}'`,
-      `OPENCODE_DB='${escapedDbPath}'`,
-      "OPENCODE_CLIENT='agentflow-zellij'",
-      "&&",
-      "exec opencode .",
-      `--agent '${escapedAgentName}'`,
-      escapedSessionId ? `--session '${escapedSessionId}'` : "",
-    ]
-      .filter(Boolean)
-      .join(" ");
+    return buildOpencodePaneCommand({
+      cwd,
+      runtimeDir,
+      dbPath,
+      agentName,
+      opencodeSessionId,
+      opencodeAgentName: toOpenCodeAgentName(agentName),
+    });
   }
 
   private ensurePaneRuntimeDir(cwd: string, sessionName: string, agentName: string): string {
@@ -465,29 +437,35 @@ export class ZellijManager {
   }
 
   private async openSessionInTerminal(sessionName: string, cwd: string): Promise<void> {
-    const attachArgs = ["attach", sessionName, "--create"];
+    const terminalCommand = buildInlineCommand({
+      command: "zellij",
+      args: ["attach", sessionName, "--create"],
+    });
+    await this.openCommandInTerminal(cwd, terminalCommand);
+  }
 
+  private async openCommandInTerminal(cwd: string, terminalCommand: string): Promise<void> {
     if (process.platform === "darwin") {
-      await this.openMacTerminalSession(sessionName, cwd, attachArgs);
+      await this.openMacTerminalCommand(cwd, terminalCommand);
       return;
     }
 
     if (process.platform === "win32") {
       const openedWithWindowsTerminal = await this.spawnDetachedProcess(
         "wt",
-        ["--fullscreen", "new-window", "--startingDirectory", cwd, "zellij", ...attachArgs],
+        ["--fullscreen", "new-window", "--startingDirectory", cwd, "cmd.exe", "/k", terminalCommand],
         { cwd, windowsHide: false },
       );
       if (openedWithWindowsTerminal) {
         return;
       }
 
-      const openedWithPowerShell = await this.openWindowsCmdSession(cwd, attachArgs);
+      const openedWithPowerShell = await this.openWindowsCmdSession(cwd, terminalCommand);
       if (openedWithPowerShell) {
         return;
       }
 
-      await this.spawnDetachedProcess("cmd.exe", ["/k", "zellij", ...attachArgs], {
+      await this.spawnDetachedProcess("cmd.exe", ["/k", terminalCommand], {
         cwd,
         windowsHide: false,
       });
@@ -497,19 +475,19 @@ export class ZellijManager {
     const linuxOpeners: Array<{ command: string; args: string[] }> = [
       {
         command: "x-terminal-emulator",
-        args: ["-e", "zellij", ...attachArgs],
+        args: ["-e", "/bin/sh", "-lc", terminalCommand],
       },
       {
         command: "gnome-terminal",
-        args: ["--", "zellij", ...attachArgs],
+        args: ["--", "/bin/sh", "-lc", terminalCommand],
       },
       {
         command: "konsole",
-        args: ["-e", "zellij", ...attachArgs],
+        args: ["-e", "/bin/sh", "-lc", terminalCommand],
       },
       {
         command: "xterm",
-        args: ["-e", "zellij", ...attachArgs],
+        args: ["-e", "/bin/sh", "-lc", terminalCommand],
       },
     ];
 
@@ -521,21 +499,14 @@ export class ZellijManager {
     }
   }
 
-  private async openMacTerminalSession(_sessionName: string, cwd: string, attachArgs: string[]) {
-    const terminalCommand = ["zellij", ...attachArgs].map((part) => this.shellQuote(part)).join(" ");
-    const startupCommand = `cd ${this.shellQuote(cwd)}; exec ${terminalCommand}`;
+  private async openMacTerminalCommand(cwd: string, terminalCommand: string) {
+    const startupCommand = `cd ${this.shellQuote(cwd)}; exec /bin/sh -lc ${this.shellQuote(terminalCommand)}`;
     const appleScript = [
-      'set terminalWasRunning to application "Terminal" is running',
       'tell application "Terminal"',
-      'if terminalWasRunning then',
-      "if (count of windows) = 0 then",
       "reopen",
-      "end if",
-      `do script ${JSON.stringify(startupCommand)} in front window`,
-      "else",
-      "reopen",
-      `do script ${JSON.stringify(startupCommand)} in window 1`,
-      "end if",
+      // Always create a fresh Terminal window so opening Zellij does not depend
+      // on whether Terminal was already running or what the front window is.
+      `do script ${JSON.stringify(startupCommand)}`,
       "activate",
       "end tell",
       "delay 0.25",
@@ -558,8 +529,8 @@ export class ZellijManager {
     await this.spawnDetachedProcess("osascript", appleScript.flatMap((line) => ["-e", line]));
   }
 
-  private async openWindowsCmdSession(cwd: string, attachArgs: string[]): Promise<boolean> {
-    const argumentList = ["/k", "zellij", ...attachArgs]
+  private async openWindowsCmdSession(cwd: string, terminalCommand: string): Promise<boolean> {
+    const argumentList = ["/k", terminalCommand]
       .map((part) => `'${this.escapePowerShellSingleQuotedString(part)}'`)
       .join(", ");
     const powerShellScript = [
@@ -716,7 +687,7 @@ export class ZellijManager {
     agent: AgentPaneSpec,
     heightPercent: number | null,
   ): string {
-    const shellCommand = this.buildOpencodeShellCommand(
+    const { shellLaunch } = this.buildOpencodePaneCommand(
       sessionName,
       cwd,
       agent.name,
@@ -724,8 +695,8 @@ export class ZellijManager {
     );
     const size = heightPercent ? ` size="${heightPercent}%"` : "";
     return [
-      `      pane command=${this.toKdlString("/bin/sh")} name=${this.toKdlString(agent.name)}${size} {`,
-      `        args ${this.toKdlString("-c")} ${this.toKdlString(shellCommand)};`,
+      `      pane command=${this.toKdlString(shellLaunch.command)} name=${this.toKdlString(agent.name)}${size} {`,
+      `        args ${shellLaunch.args.map((arg) => this.toKdlString(arg)).join(" ")};`,
       "      }",
     ].join("\n");
   }
