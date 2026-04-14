@@ -21,7 +21,7 @@ function createMessage(overrides: Partial<MessageRecord>): MessageRecord {
 test("合并整改消息时只保留一份具体修改意见与一份 mention", () => {
   const summary = "具体修改意见：暂无修改意见，因为尚未完成润色工作。请先完成需求润色，然后检查实现。";
   const remediationMessage = formatRevisionRequestContent(
-    `审视不通过，请根据以下意见继续处理。\n\n当前阶段高层结果：\n${summary}\n\n具体修改意见：\n暂无修改意见，因为尚未完成润色工作。请先完成需求润色，然后检查实现。`,
+    "审视不通过，请根据以下意见继续处理。\n\n具体修改意见：\n暂无修改意见，因为尚未完成润色工作。请先完成需求润色，然后检查实现。",
     "Build",
   );
 
@@ -64,7 +64,7 @@ test("合并整改消息时保留高层结果并追加一份反馈", () => {
     createMessage({
       id: "revision-request",
       content: formatRevisionRequestContent(
-        `审视不通过，请根据以下意见继续处理。\n\n当前阶段高层结果：\n${summary}\n\n具体修改意见：\n请补充实现并完成验证。`,
+        "审视不通过，请根据以下意见继续处理。\n\n具体修改意见：\n请补充实现并完成验证。",
         "Build",
       ),
       meta: {

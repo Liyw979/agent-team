@@ -32,6 +32,7 @@ import {
   type TaskSnapshot,
   type TopologyRecord,
   type UpdateTopologyPayload,
+  isReviewAgentName,
 } from "@shared/types";
 import {
   formatHighLevelTriggerContent,
@@ -736,11 +737,7 @@ export class Orchestrator {
         id: response.messageId,
         projectId: project.id,
         taskId: task.id,
-        content: this.createDisplayContent(
-          parsedReview,
-          response.finalMessage,
-          response.fallbackMessage,
-        ),
+        content: this.createDisplayContent(parsedReview, response.fallbackMessage),
         sender: agentName,
         timestamp: response.timestamp,
         meta: {
@@ -824,8 +821,6 @@ export class Orchestrator {
                 task.id,
                 latestAgentFile,
                 parsedReview,
-                response.finalMessage,
-                response.fallbackMessage,
               )
             : 0;
         const triggered = associationTriggered + reviewTriggered;
@@ -1081,8 +1076,6 @@ export class Orchestrator {
     taskId: string,
     sourceAgent: Pick<AgentFileRecord, "name">,
     parsedReview: ParsedReview,
-    rawFinalMessage: string,
-    fallbackMessage?: string | null,
   ): Promise<number> {
     const topology = this.store.getTopology(project.id);
     const reviewTargets = [...new Set(
@@ -1095,11 +1088,7 @@ export class Orchestrator {
     }
 
     const feedback = parsedReview.feedback?.trim() || "请根据当前审视意见修复问题，并重新提交本轮结果。";
-    const reviewContent = this.resolveReviewForwardedAgentMessage(
-      parsedReview,
-      rawFinalMessage,
-      fallbackMessage,
-    );
+    const reviewContent = `具体修改意见：\n${feedback}`.trim();
     const latestUserContent = this.getLatestUserMessageContent(taskId);
     const userMessage = latestUserContent && !this.contentContainsNormalized(reviewContent, latestUserContent)
       ? latestUserContent
@@ -1413,6 +1402,20 @@ export class Orchestrator {
       .trim();
   }
 
+  private resolveAgentContextContent(
+    parsedReview: ParsedReview,
+    rawFinalMessage: string,
+    fallbackMessage?: string | null,
+  ): string {
+    const candidates = [
+      parsedReview.cleanContent.trim(),
+      this.stripStructuredSignals(rawFinalMessage).trim(),
+      fallbackMessage?.trim() ?? "",
+    ];
+
+    return candidates.find((item) => item.length > 0) ?? "";
+  }
+
   private buildDownstreamForwardedContext(
     taskId: string,
     sourceContent: string,
@@ -1430,38 +1433,6 @@ export class Orchestrator {
 
   private buildHighLevelTriggerMessageContent(targetAgentIds: string[], content: string): string {
     return formatHighLevelTriggerContent(content, targetAgentIds);
-  }
-
-  private resolveAgentContextContent(
-    parsedReview: ParsedReview,
-    rawFinalMessage: string,
-    fallbackMessage?: string | null,
-  ): string {
-    const candidates = [
-      parsedReview.cleanContent.trim(),
-      this.stripStructuredSignals(rawFinalMessage).trim(),
-      fallbackMessage?.trim() ?? "",
-    ];
-
-    return candidates.find((item) => item.length > 0) ?? "";
-  }
-
-  private resolveReviewForwardedAgentMessage(
-    parsedReview: ParsedReview,
-    rawFinalMessage: string,
-    fallbackMessage?: string | null,
-  ): string {
-    const rawContent = rawFinalMessage.trim();
-    if (rawContent) {
-      return rawContent;
-    }
-
-    const contextContent = this.resolveAgentContextContent(parsedReview, rawFinalMessage, fallbackMessage);
-    if (contextContent) {
-      return contextContent;
-    }
-
-    return "（该上游 Agent 未返回可继续流转的正文。）";
   }
 
   private extractAgentDisplayContent(content: string): string {
@@ -1493,19 +1464,10 @@ export class Orchestrator {
     return trailingSection || content;
   }
 
-  private createDisplayContent(
-    parsedReview: ParsedReview,
-    rawFinalMessage: string,
-    fallbackMessage?: string | null,
-  ): string {
+  private createDisplayContent(parsedReview: ParsedReview, fallbackMessage?: string | null): string {
     const cleanContent = this.extractAgentDisplayContent(parsedReview.cleanContent);
     if (cleanContent) {
       return cleanContent;
-    }
-
-    const rawContent = this.extractAgentDisplayContent(this.stripStructuredSignals(rawFinalMessage));
-    if (rawContent) {
-      return rawContent;
     }
 
     const fallbackContent = this.extractAgentDisplayContent(fallbackMessage?.trim() ?? "");
@@ -1513,7 +1475,18 @@ export class Orchestrator {
       return fallbackContent;
     }
 
-    return "（该 Agent 未返回可展示的正文。）";
+    const feedback = parsedReview.feedback?.trim();
+    if (feedback) {
+      return `具体修改意见：\n${feedback}`;
+    }
+
+    if (parsedReview.decision === "needs_revision") {
+      return "（该 Agent 已给出需要修改的结论，但未返回可展示的高层结果。）";
+    }
+    if (parsedReview.decision === "pass") {
+      return "（该 Agent 已给出通过/完成结论，但未返回可展示的高层结果。）";
+    }
+    return "（该 Agent 未返回可展示的高层结果。）";
   }
 
   private async ensureAgentSession(
@@ -1675,7 +1648,15 @@ export class Orchestrator {
     }
   }
 
+  private isReviewAgent(agent: Pick<AgentFileRecord, "name">): boolean {
+    return isReviewAgentName(agent.name);
+  }
+
   private createSystemPrompt(agent: AgentFileRecord): string {
+    if (!this.isReviewAgent(agent)) {
+      return "";
+    }
+
     return buildAgentSystemPrompt(agent);
   }
 
