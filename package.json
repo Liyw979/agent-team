@@ -12,6 +12,7 @@
     "cli": "node electron/cli/launcher.cjs",
     "test:ba-permission": "tsx --tsconfig tsconfig.node.json scripts/ba-permission-integration.ts",
     "test:build-agent-name": "tsx --tsconfig tsconfig.node.json scripts/build-agent-name-regression.ts",
+    "test:decision-wording": "tsx --tsconfig tsconfig.node.json scripts/decision-wording-regression.ts",
     "test:mention-strip": "tsx --tsconfig tsconfig.node.json scripts/mention-strip-regression.ts",
     "test:zellij-reminder": "tsx --tsconfig tsconfig.node.json scripts/zellij-reminder-regression.ts",
     "electron:dev": "electron-vite dev",
