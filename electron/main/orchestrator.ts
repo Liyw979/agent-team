@@ -66,6 +66,12 @@ interface TaskRuntimeState {
   deliveredMessageIdsByAgent: Map<string, Set<string>>;
 }
 
+interface AgentExecutionPrompt {
+  from: string;
+  message: string;
+  requirement?: string;
+}
+
 const SELF_REVIEW_PROMPT = `在你完成本轮所有工作后，必须用中文严格按照以下格式给出最终决策，不要有任何其他解释或额外文字：
 - 如果你认为自己负责的任务已完全完成（或你负责审核的部分已严格通过），请直接输出：【DECISION】检查通过
 - 如果存在问题需要修改，请直接输出：【DECISION】需要修改
@@ -471,7 +477,11 @@ export class Orchestrator {
       payload: message,
     });
 
-    const runPromise = this.runAgent(project, this.store.getTask(task.id), targetAgent.name, content);
+    const runPromise = this.runAgent(project, this.store.getTask(task.id), targetAgent.name, {
+      from: "User",
+      message: content,
+      requirement: "请基于 [Message] 中的用户请求，继续完成你当前负责的工作。",
+    });
     this.markMessagesDelivered(task.id, targetAgent.name, [message.id]);
     void runPromise.catch((error) => {
       console.error("[orchestrator] 后台发送任务失败", {
@@ -542,7 +552,12 @@ export class Orchestrator {
     this.store.updateTaskAgentCount(task.id, agentFiles.length);
   }
 
-  private async runAgent(project: ProjectRecord, task: TaskRecord, agentName: string, content: string) {
+  private async runAgent(
+    project: ProjectRecord,
+    task: TaskRecord,
+    agentName: string,
+    prompt: AgentExecutionPrompt,
+  ) {
     const runtime = this.getRuntime(task.id);
     runtime.runningAgents.add(agentName);
 
@@ -581,7 +596,7 @@ export class Orchestrator {
         payload: this.hydrateTask(task.id),
       });
 
-      const dispatchedContent = this.appendSelfReviewRequirement(content);
+      const dispatchedContent = this.buildAgentExecutionPrompt(prompt);
       await this.opencodeClient.reloadConfig(project.path);
       const response = await this.opencodeRunner.run({
         projectPath: project.path,
@@ -804,15 +819,22 @@ export class Orchestrator {
         }
 
         const incrementalContext = this.buildIncrementalAgentContext(taskId, targetName);
-        const forwardedBase =
+        const forwardedMessage =
           incrementalContext.content.trim().length > 0
             ? `${incrementalContext.content}\n\n请基于以上新增历史继续处理当前任务。`
             : `上游 Agent ${sourceAgentId} 已完成，请继续处理以下上下文：\n\n${content}`;
-        const forwarded = this.buildAgentHandoffPrompt(forwardedBase, gitDiffSummary);
+        const forwardedRequirement = this.buildAgentHandoffRequirement(
+          "请结合 [Message] 中的上下文继续推进当前任务，并只关注你当前负责的部分。",
+          gitDiffSummary,
+        );
         const signature = this.buildTriggerSignature(topology, completed, targetName);
         runtime.lastSignatureByAgent.set(targetName, signature);
         this.markMessagesDelivered(taskId, targetName, incrementalContext.messageIds);
-        await this.runAgent(project, this.store.getTask(taskId), targetName, forwarded);
+        await this.runAgent(project, this.store.getTask(taskId), targetName, {
+          from: sourceAgentId,
+          message: forwardedMessage,
+          requirement: forwardedRequirement,
+        });
       }),
     );
 
@@ -958,13 +980,6 @@ export class Orchestrator {
       .trim();
   }
 
-  private appendSelfReviewRequirement(content: string): string {
-    if (content.includes("【DECISION】")) {
-      return content;
-    }
-    return `${content.trim()}\n\n${SELF_REVIEW_PROMPT}`.trim();
-  }
-
   private async buildProjectGitDiffSummary(cwd: string): Promise<string> {
     try {
       const [statusResult, stagedStatResult, unstagedStatResult] = await Promise.all([
@@ -1030,11 +1045,29 @@ export class Orchestrator {
     return [...lines.slice(0, maxLines), `... 共 ${lines.length} 行，仅展示前 ${maxLines} 行`];
   }
 
-  private buildAgentHandoffPrompt(baseContent: string, gitDiffSummary: string): string {
-    if (!gitDiffSummary.trim()) {
-      return baseContent.trim();
-    }
-    return `${baseContent.trim()}\n\n${gitDiffSummary}`.trim();
+  private buildAgentHandoffRequirement(baseRequirement: string, gitDiffSummary: string): string {
+    return [baseRequirement, gitDiffSummary]
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .join("\n\n")
+      .trim();
+  }
+
+  private buildAgentExecutionPrompt(prompt: AgentExecutionPrompt): string {
+    const from = prompt.from.trim() || "System";
+    const message = prompt.message.trim() || "（无）";
+    const requirement = this.buildAgentExecutionRequirement(prompt.requirement);
+    return [`[From] ${from}`, `[Message]\n${message}`, `[Requeirement]\n${requirement}`]
+      .join("\n\n")
+      .trim();
+  }
+
+  private buildAgentExecutionRequirement(requirement?: string): string {
+    return [requirement ?? "", SELF_REVIEW_PROMPT]
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .join("\n\n")
+      .trim();
   }
 
   private extractDisplaySummary(content: string): string | null {
@@ -1303,12 +1336,16 @@ export class Orchestrator {
         });
 
         const incrementalContext = this.buildIncrementalAgentContext(taskId, targetName);
-        const forwarded =
+        const forwardedMessage =
           incrementalContext.content.trim().length > 0
             ? `${incrementalContext.content}\n\n请根据以上新增历史继续返工，并重点处理以下修改意见：\n${feedback}`
             : `返工来源 Agent：${sourceAgentId}\n\n${contextSummary}具体修改意见：\n${feedback}`;
         this.markMessagesDelivered(taskId, targetName, incrementalContext.messageIds);
-        await this.runAgent(project, this.store.getTask(taskId), targetName, forwarded);
+        await this.runAgent(project, this.store.getTask(taskId), targetName, {
+          from: sourceAgentId,
+          message: forwardedMessage,
+          requirement: "请根据 [Message] 中的返工背景与修改意见继续处理，并优先修复阻塞当前链路的问题。",
+        });
       }),
     );
   }
