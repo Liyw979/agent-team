@@ -138,7 +138,7 @@ function MessageBubble({
   const hasRevisionRequest = message.kinds.includes("revision-request");
   const hasTopologyBlocked = message.kinds.includes("topology-blocked");
   const agentColor = isAgent ? getAgentColorToken(message.sender) : null;
-  const senderLabel = isUser ? "User" : isAgent ? getAgentDisplayName(message.sender) : message.sender;
+  const senderLabel = isUser ? null : isAgent ? getAgentDisplayName(message.sender) : message.sender;
   const bubbleStyle =
     isAgent && agentColor
       ? {
@@ -190,19 +190,20 @@ function MessageBubble({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-baseline gap-2">
-          <span
-            className={cn(
-              "shrink-0 rounded-[8px] px-2 py-0.5 text-center text-xs font-semibold leading-5 tracking-[0.02em]",
-              isUser && "border border-white/10",
-              !isAgent && !isUser && "bg-black/8 text-current",
-            )}
-            style={{
-              width: senderBadgeWidth,
-              ...senderBadgeStyle,
-            }}
-          >
-            {senderLabel}
-          </span>
+          {senderLabel ? (
+            <span
+              className={cn(
+                "shrink-0 rounded-[8px] px-2 py-0.5 text-center text-xs font-semibold leading-5 tracking-[0.02em]",
+                !isAgent && !isUser && "bg-black/8 text-current",
+              )}
+              style={{
+                width: senderBadgeWidth,
+                ...senderBadgeStyle,
+              }}
+            >
+              {senderLabel}
+            </span>
+          ) : null}
           <div className="min-w-0 text-sm leading-5 break-words">{message.content}</div>
         </div>
         <span className="shrink-0 text-[11px] leading-5 opacity-80" style={metaTextStyle}>
@@ -246,7 +247,7 @@ export function ChatWindow({
     [task],
   );
   const senderBadgeWidth = useMemo(() => {
-    const candidateNames = new Set(["User", "System", ...availableAgents]);
+    const candidateNames = new Set(["System", ...availableAgents]);
     for (const message of messages) {
       candidateNames.add(message.sender === "system" ? "System" : getAgentDisplayName(message.sender));
     }
