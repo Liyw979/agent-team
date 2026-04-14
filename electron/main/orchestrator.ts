@@ -34,6 +34,10 @@ import {
   type UpdateTopologyPayload,
   isReviewAgentName,
 } from "@shared/types";
+import {
+  formatHighLevelTriggerContent,
+  formatRevisionRequestContent,
+} from "@shared/chat-message-format";
 import { buildZellijMissingReminder } from "@shared/zellij";
 import { AgentFileService } from "./agent-files";
 import { OpenCodeClient } from "./opencode-client";
@@ -1098,13 +1102,14 @@ export class Orchestrator {
     );
 
     for (const targetName of reviewTargets) {
+      const remediationBody = `审视不通过，请根据以下意见继续处理。\n\n${contextSummary}具体修改意见：\n${feedback}`;
       const remediationMessage: MessageRecord = {
         id: randomUUID(),
         projectId: project.id,
         taskId,
         sender: sourceAgent.name,
         timestamp: new Date().toISOString(),
-        content: `@${targetName} 审视不通过，请根据以下意见继续处理。\n\n${contextSummary}具体修改意见：\n${feedback}`,
+        content: formatRevisionRequestContent(remediationBody, targetName),
         meta: {
           kind: "revision-request",
           sourceAgentId: sourceAgent.name,
@@ -1428,16 +1433,7 @@ export class Orchestrator {
   }
 
   private buildHighLevelTriggerMessageContent(targetAgentIds: string[], content: string): string {
-    const mentions = targetAgentIds.map((targetName) => `@${targetName}`).join(" ");
-    const summary = this.extractDisplaySummary(content) ?? content.trim();
-    if (!summary) {
-      return `${mentions}\n已收到上游结果并转交下游继续处理。`.trim();
-    }
-    return `${mentions}\n上游摘要：${summary}`.trim();
-  }
-
-  private hasMeaningfulSummaryText(value: string): boolean {
-    return /[\p{L}\p{N}]/u.test(value);
+    return formatHighLevelTriggerContent(content, targetAgentIds);
   }
 
   private extractAgentDisplayContent(content: string): string {
@@ -1467,46 +1463,6 @@ export class Orchestrator {
 
     const trailingSection = content.slice(lastHeadingIndex).trim();
     return trailingSection || content;
-  }
-
-  private extractDisplaySummary(content: string): string | null {
-    const normalized = content
-      .replace(/\r/g, "")
-      .split(/\n+/)
-      .map((item) => item.trim())
-      .filter(Boolean);
-    if (normalized.length === 0) {
-      return null;
-    }
-
-    for (let blockIndex = normalized.length - 1; blockIndex >= 0; blockIndex -= 1) {
-      const block = normalized[blockIndex] ?? "";
-      if (!this.hasMeaningfulSummaryText(block)) {
-        continue;
-      }
-
-      const sentences =
-        block
-          .match(/[^。！？!?]+[。！？!?]?/g)
-          ?.map((item) =>
-            item
-              .trim()
-              .replace(/^[-*]\s+/u, "")
-              .replace(/^\d+[.)、]\s*/u, "")
-              .trim(),
-          )
-          .filter(Boolean) ?? [];
-      for (let sentenceIndex = sentences.length - 1; sentenceIndex >= 0; sentenceIndex -= 1) {
-        const sentence = sentences[sentenceIndex] ?? "";
-        if (this.hasMeaningfulSummaryText(sentence)) {
-          return sentence;
-        }
-      }
-
-      return block;
-    }
-
-    return null;
   }
 
   private createDisplayContent(
