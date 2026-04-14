@@ -65,11 +65,11 @@ const MAIN_NODE_COLUMN_HEIGHT = 440;
 const EXPANDED_NODE_COLUMN_HEIGHT = 820;
 const MAIN_NODE_CARD_WIDTH = 264;
 const EXPANDED_NODE_CARD_WIDTH = 292;
-const MAIN_NODE_CARD_MAX_WIDTH = 324;
+const MAIN_NODE_CARD_MAX_WIDTH = 9999;
 const EXPANDED_NODE_CARD_MAX_WIDTH = 9999;
 const MAIN_NODE_CARD_MIN_WIDTH = 120;
 const EXPANDED_NODE_CARD_MIN_WIDTH = 144;
-const NODE_COLUMN_MIN_GAP = 4;
+const NODE_COLUMN_MIN_GAP = 8;
 const IDLE_AGENT_BLOCK_HEIGHT = 26;
 const RUNNING_AGENT_BLOCK_HEIGHT = 26;
 const HISTORY_STACK_GAP = 0;
@@ -90,6 +90,10 @@ const MAIN_FLOW_TOP_INSET = TOPOLOGY_EDGE_LANE_HEIGHT;
 const EXPANDED_FLOW_TOP_INSET = TOPOLOGY_EDGE_LANE_HEIGHT;
 const MAIN_FLOW_BOTTOM_INSET = 8;
 const EXPANDED_FLOW_BOTTOM_INSET = 10;
+const HISTORY_PANEL_PADDING_X = "0.375rem";
+const HISTORY_PANEL_PADDING_Y = "0.25rem";
+const EMPTY_HISTORY_PANEL_PADDING_X = "0.5rem";
+const EMPTY_HISTORY_PANEL_PADDING_Y = "0.375rem";
 
 const preferredRoleRank: Partial<Record<AgentRole, number>> = {
   business_analyst: 0,
@@ -424,9 +428,6 @@ function computeNodeLayout(
             (availableWidth - resolvedGap * gapCount) / Math.max(nodeCount, 1),
           ),
         );
-        const consumedWidth = resolvedNodeCardWidth * nodeCount + resolvedGap * gapCount;
-        const remainingExtraWidth = Math.max(0, availableWidth - consumedWidth);
-        resolvedGap = gapCount > 0 ? resolvedGap + remainingExtraWidth / gapCount : 0;
       } else {
         const extraWidth = availableWidth - baseContentWidth;
         const widthCapacity = Math.max(0, maxNodeCardWidth - baseNodeCardWidth) * nodeCount;
@@ -982,7 +983,7 @@ export function TopologyGraph({
         horizontalInsetLeft: MAIN_FLOW_LEFT_INSET,
         horizontalInsetRight: MAIN_FLOW_RIGHT_INSET,
         topInset: MAIN_FLOW_TOP_INSET,
-        stretchCards: false,
+        stretchCards: true,
         bottomInset: MAIN_FLOW_BOTTOM_INSET,
         maxNodeCardWidth: MAIN_NODE_CARD_MAX_WIDTH,
         minNodeCardWidth: MAIN_NODE_CARD_MIN_WIDTH,
@@ -1209,11 +1210,15 @@ export function TopologyGraph({
               >
                 {visibleHistory.length > 0 ? (
                   <div
-                    className="flex h-full flex-col rounded-b-[12px] rounded-t-none border border-t-0 px-3 py-2 text-left shadow-sm"
+                    className="flex h-full flex-col rounded-b-[12px] rounded-t-none border border-t-0 text-left shadow-sm"
                     style={{
                       borderColor: agentColor.border,
                       background: agentColor.soft,
                       color: agentColor.text,
+                      paddingLeft: HISTORY_PANEL_PADDING_X,
+                      paddingRight: HISTORY_PANEL_PADDING_X,
+                      paddingTop: HISTORY_PANEL_PADDING_Y,
+                      paddingBottom: HISTORY_PANEL_PADDING_Y,
                     }}
                   >
                     <div
@@ -1284,11 +1289,15 @@ export function TopologyGraph({
                   </div>
                 ) : (
                   <div
-                    className="flex h-full flex-col rounded-b-[12px] rounded-t-none border border-t-0 px-4 py-3 text-left text-[14px] font-medium shadow-sm"
+                    className="flex h-full flex-col rounded-b-[12px] rounded-t-none border border-t-0 text-left text-[14px] font-medium shadow-sm"
                     style={{
                       borderColor: agentColor.border,
                       background: agentColor.soft,
                       color: agentColor.mutedText,
+                      paddingLeft: EMPTY_HISTORY_PANEL_PADDING_X,
+                      paddingRight: EMPTY_HISTORY_PANEL_PADDING_X,
+                      paddingTop: EMPTY_HISTORY_PANEL_PADDING_Y,
+                      paddingBottom: EMPTY_HISTORY_PANEL_PADDING_Y,
                     }}
                   >
                     待启动
