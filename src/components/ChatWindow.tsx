@@ -17,6 +17,14 @@ interface MentionContext {
   query: string;
 }
 
+interface ChatMessageItem {
+  id: string;
+  sender: string;
+  timestamp: string;
+  content: string;
+  kinds: string[];
+}
+
 const MENTION_MENU_WIDTH = 224;
 const MENTION_MENU_MAX_VISIBLE_ITEMS = 5;
 const MENTION_MENU_ITEM_HEIGHT = 41;
@@ -117,27 +125,87 @@ function extractFirstMention(content: string): string | undefined {
   return match?.[1];
 }
 
-function MessageBubble({ message }: { message: MessageRecord }) {
+function getMessageBadge(kind: string | undefined, sender: string) {
+  if (kind === "high-level-trigger") {
+    return "Agent -> Agent";
+  }
+  if (kind === "task-created") {
+    return "Task Started";
+  }
+  if (kind === "task-completed") {
+    return "Task Result";
+  }
+  if (kind === "revision-request") {
+    return "Needs Revision";
+  }
+  if (kind === "topology-blocked") {
+    return "Topology Blocked";
+  }
+  if (sender === "system") {
+    return "System";
+  }
+  return null;
+}
+
+function shouldMergeMessages(
+  previousSender: string | undefined,
+  previousKind: string | undefined,
+  current: MessageRecord,
+) {
+  return (
+    previousSender === current.sender &&
+    previousSender !== "user" &&
+    previousSender !== "system" &&
+    previousKind === "agent-final" &&
+    current.meta?.kind === "high-level-trigger"
+  );
+}
+
+function mergeChatMessages(messages: MessageRecord[]): ChatMessageItem[] {
+  const merged: ChatMessageItem[] = [];
+
+  for (const message of messages) {
+    const last = merged.at(-1);
+    const previousKind = last?.kinds.at(-1);
+
+    if (last && shouldMergeMessages(last.sender, previousKind, message)) {
+      last.id = `${last.id}:${message.id}`;
+      last.timestamp = message.timestamp;
+      last.content = [last.content, message.content].filter(Boolean).join("\n\n");
+      last.kinds.push(message.meta?.kind ?? "");
+      continue;
+    }
+
+    merged.push({
+      id: message.id,
+      sender: message.sender,
+      timestamp: message.timestamp,
+      content: message.content,
+      kinds: message.meta?.kind ? [message.meta.kind] : [],
+    });
+  }
+
+  return merged;
+}
+
+function MessageBubble({ message }: { message: ChatMessageItem }) {
   const isUser = message.sender === "user";
   const isSystem = message.sender === "system";
   const isAgent = !isUser && !isSystem;
-  const kind = message.meta?.kind;
+  const badges = [
+    ...new Set(
+      message.kinds
+        .map((kind) => getMessageBadge(kind, message.sender))
+        .filter((badge): badge is string => Boolean(badge)),
+    ),
+  ];
+  const hasHighLevelTrigger = message.kinds.includes("high-level-trigger");
+  const hasTaskCreated = message.kinds.includes("task-created");
+  const hasTaskCompleted = message.kinds.includes("task-completed");
+  const hasRevisionRequest = message.kinds.includes("revision-request");
+  const hasTopologyBlocked = message.kinds.includes("topology-blocked");
   const agentColor = isAgent ? getAgentColorToken(message.sender) : null;
   const senderLabel = isUser ? "User" : isAgent ? getAgentDisplayName(message.sender) : message.sender;
-  const badge =
-    kind === "high-level-trigger"
-      ? "Agent -> Agent"
-      : kind === "task-created"
-        ? "Task Started"
-        : kind === "task-completed"
-          ? "Task Result"
-          : kind === "revision-request"
-            ? "Needs Revision"
-          : kind === "topology-blocked"
-            ? "Topology Blocked"
-            : isSystem
-              ? "System"
-              : null;
   const bubbleStyle =
     isAgent && agentColor
       ? {
@@ -177,12 +245,12 @@ function MessageBubble({ message }: { message: MessageRecord }) {
         "max-w-[88%] rounded-[8px] px-4 py-3 whitespace-pre-wrap",
         isUser && "ml-auto bg-primary text-primary-foreground",
         isAgent && "border",
-        kind === "high-level-trigger" && !isAgent && "border border-accent/60 bg-accent/35 text-foreground",
-        kind === "task-created" && "border border-border/70 bg-muted/70 text-foreground",
-        kind === "task-completed" && "border border-primary/20 bg-primary/10 text-foreground",
-        kind === "revision-request" && "border border-secondary/60 bg-secondary/15 text-foreground",
-        kind === "topology-blocked" && "border border-primary/40 bg-primary/10 text-foreground",
-        isSystem && !kind && "bg-muted text-foreground",
+        hasHighLevelTrigger && !isAgent && "border border-accent/60 bg-accent/35 text-foreground",
+        hasTaskCreated && "border border-border/70 bg-muted/70 text-foreground",
+        hasTaskCompleted && "border border-primary/20 bg-primary/10 text-foreground",
+        hasRevisionRequest && "border border-secondary/60 bg-secondary/15 text-foreground",
+        hasTopologyBlocked && "border border-primary/40 bg-primary/10 text-foreground",
+        isSystem && message.kinds.length === 0 && "bg-muted text-foreground",
         isAgent && "shadow-sm",
       )}
       style={bubbleStyle}
@@ -199,9 +267,9 @@ function MessageBubble({ message }: { message: MessageRecord }) {
           >
             {senderLabel}
           </span>
-          {badge ? (
+          {badges.length > 0 ? (
             <span className="truncate opacity-80" style={metaTextStyle}>
-              {badge}
+              {badges.join(" · ")}
             </span>
           ) : null}
         </div>
@@ -238,10 +306,9 @@ export function ChatWindow({
   }, [task?.task.id]);
 
   const messages = useMemo(
-    () =>
-      [...(task?.messages ?? [])].sort((left, right) =>
-        left.timestamp.localeCompare(right.timestamp),
-      ),
+    () => mergeChatMessages(
+      [...(task?.messages ?? [])].sort((left, right) => left.timestamp.localeCompare(right.timestamp)),
+    ),
     [task],
   );
   const mentionOptions = useMemo(() => {
