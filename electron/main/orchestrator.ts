@@ -814,7 +814,8 @@ export class Orchestrator {
       payload: triggerMessage,
     });
 
-    const gitDiffSummary = await this.buildProjectGitDiffSummary(task.cwd);
+    const currentTask = this.store.getTask(taskId);
+    const gitDiffSummary = await this.buildProjectGitDiffSummary(currentTask.cwd);
 
     await Promise.all(
       readyTargets.map(async (targetName) => {
