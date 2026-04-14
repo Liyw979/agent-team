@@ -196,12 +196,12 @@ function MessageBubble({
       )}
       style={bubbleStyle}
     >
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           {senderLabel ? (
             <span
               className={cn(
-                "inline-flex max-w-full shrink-0 rounded-[8px] px-2 py-0.5 text-center text-xs font-semibold leading-5 tracking-[0.02em]",
+                "inline-flex max-w-full shrink-0 rounded-[8px] px-2 py-px text-center text-[14px] font-semibold leading-[1.2] tracking-[0.02em]",
                 !isAgent && !isUser && !isSystem && "bg-black/8 text-current",
               )}
               style={senderBadgeStyle}
@@ -209,11 +209,11 @@ function MessageBubble({
               {senderLabel}
             </span>
           ) : null}
-          <span className="shrink-0 text-xs leading-5 opacity-80" style={metaTextStyle}>
+          <span className="shrink-0 text-[13px] leading-[1.2] opacity-80" style={metaTextStyle}>
             {new Date(message.timestamp).toLocaleString()}
           </span>
         </div>
-        <div className="min-w-0 text-sm leading-5 break-words">{message.content}</div>
+        <div className="min-w-0 text-sm leading-[1.36] break-words">{message.content}</div>
       </div>
     </article>
   );
