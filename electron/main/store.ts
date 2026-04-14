@@ -489,7 +489,7 @@ export class StoreService {
               status:
                 task.status === "running" ||
                 task.status === "waiting" ||
-                task.status === "success" ||
+                task.status === "finished" ||
                 task.status === "failed" ||
                 task.status === "needs_revision"
                   ? task.status

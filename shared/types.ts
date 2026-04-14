@@ -1,6 +1,6 @@
 export type AgentStatus = "idle" | "running" | "success" | "failed" | "needs_revision";
 
-export type TaskStatus = "pending" | "running" | "waiting" | "success" | "failed" | "needs_revision";
+export type TaskStatus = "pending" | "running" | "waiting" | "finished" | "failed" | "needs_revision";
 
 export type PermissionMode = "allow" | "ask" | "deny";
 

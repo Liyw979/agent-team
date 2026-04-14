@@ -8,7 +8,7 @@ type StorageWriter = Pick<Storage, "setItem">;
 export type TaskCompletionReminderAcks = Record<string, string>;
 
 function isTerminalTask(task: Pick<TaskRecord, "status">) {
-  return task.status === "success" || task.status === "failed";
+  return task.status === "finished" || task.status === "failed";
 }
 
 export function loadTaskCompletionReminderAcks(

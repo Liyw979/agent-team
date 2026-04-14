@@ -37,6 +37,7 @@ import {
 import {
   formatHighLevelTriggerContent,
   formatRevisionRequestContent,
+  parseTargetAgentIds,
 } from "@shared/chat-message-format";
 import { buildZellijMissingReminder } from "@shared/zellij";
 import { AgentFileService } from "./agent-files";
@@ -70,6 +71,7 @@ interface ParsedReview {
 
 interface TaskRuntimeState {
   completedEdges: Set<string>;
+  edgeTriggerVersion: Map<string, number>;
   lastSignatureByAgent: Map<string, string>;
   runningAgents: Set<string>;
   queuedAgents: Set<string>;
@@ -94,6 +96,10 @@ interface AgentRunBehaviorOptions {
   followTopology?: boolean;
   updateTaskStatusOnStart?: boolean;
   completeTaskOnFinish?: boolean;
+}
+
+function isTerminalTaskStatus(status: TaskRecord["status"]) {
+  return status === "finished" || status === "failed";
 }
 
 export class Orchestrator {
@@ -143,16 +149,19 @@ export class Orchestrator {
 
     const snapshots: ProjectSnapshot[] = [];
     for (const project of this.store.listProjects()) {
+      await this.reconcilePersistedProjectTasks(project.id);
       snapshots.push(this.hydrateProject(project.id));
     }
     return snapshots;
   }
 
   async getProjectSnapshot(projectId: string): Promise<ProjectSnapshot> {
+    await this.reconcilePersistedProjectTasks(projectId);
     return this.hydrateProject(projectId);
   }
 
   async getTaskSnapshot(taskId: string): Promise<TaskSnapshot> {
+    await this.reconcilePersistedTaskStatus(taskId);
     return this.hydrateTask(taskId);
   }
 
@@ -163,6 +172,7 @@ export class Orchestrator {
     if (!project) {
       return null;
     }
+    await this.reconcilePersistedProjectTasks(project.id);
     return this.hydrateProject(project.id);
   }
 
@@ -483,6 +493,7 @@ export class Orchestrator {
 
     this.taskRuntime.set(taskId, {
       completedEdges: new Set(),
+      edgeTriggerVersion: new Map(),
       lastSignatureByAgent: new Map(),
       runningAgents: new Set(),
       queuedAgents: new Set(),
@@ -672,6 +683,7 @@ export class Orchestrator {
   ) {
     const runtime = this.getRuntime(task.id);
     runtime.runningAgents.add(agentName);
+    this.invalidateDownstreamTriggerSignatures(task.id, agentName);
 
     this.store.updateTaskAgentRun(task.id, agentName, "running");
     if (behavior.updateTaskStatusOnStart ?? true) {
@@ -840,6 +852,7 @@ export class Orchestrator {
         (behavior.completeTaskOnFinish ?? true) &&
         (
           (!hasOtherRunningAgents && !hasQueuedAgents && signal.done) ||
+          (!hasOtherRunningAgents && !hasQueuedAgents && this.haveAllTaskAgentsSucceeded(task.id)) ||
           (!hasOtherRunningAgents &&
             !hasQueuedAgents &&
             triggered === 0 &&
@@ -847,7 +860,7 @@ export class Orchestrator {
             this.hasSatisfiedOutgoingAssociation(topology, runtime.completedEdges, agentName))
         )
       ) {
-        await this.completeTask(task.id, "success");
+        await this.completeTask(task.id, "finished");
       } else if (
         (behavior.completeTaskOnFinish ?? true) &&
         !hasOtherRunningAgents &&
@@ -875,8 +888,8 @@ export class Orchestrator {
         this.store.updateTaskStatus(
           task.id,
           associationTargets.length > 0 && !reviewAgent
-              ? "running"
-              : "failed",
+            ? "running"
+            : "failed",
           null,
         );
       }
@@ -908,18 +921,16 @@ export class Orchestrator {
     } finally {
       runtime.runningAgents.delete(agentName);
 
-      if (!runtime.queuedAgents.delete(agentName)) {
-        return;
-      }
-
       const latestTask = this.store.getTask(task.id);
-      if (latestTask.status === "failed" || latestTask.status === "success") {
+      if (isTerminalTaskStatus(latestTask.status)) {
         return;
       }
 
+      const shouldRerun = runtime.queuedAgents.delete(agentName);
       const queuedPrompt = runtime.queuedPromptsByAgent.get(agentName);
       runtime.queuedPromptsByAgent.delete(agentName);
-      if (!queuedPrompt) {
+      if (!shouldRerun || !queuedPrompt) {
+        await this.reconcileTaskCompletionAfterAgentSettles(task.id);
         return;
       }
 
@@ -955,6 +966,7 @@ export class Orchestrator {
     for (const edge of outgoing) {
       completed.add(edge.id);
       runtime.completedEdges.add(edge.id);
+      runtime.edgeTriggerVersion.set(edge.id, (runtime.edgeTriggerVersion.get(edge.id) ?? 0) + 1);
     }
 
     const targetNames = new Set<string>();
@@ -1021,7 +1033,12 @@ export class Orchestrator {
           "请结合 [User Message] 与上游 Agent Message 中的上下文继续推进当前任务，并只关注你当前负责的部分。",
           gitDiffSummary,
         );
-        const signature = this.buildTriggerSignature(topology, completed, targetName);
+        const signature = this.buildTriggerSignature(
+          topology,
+          completed,
+          targetName,
+          runtime.edgeTriggerVersion,
+        );
         runtime.lastSignatureByAgent.set(targetName, signature);
         await this.dispatchAgentRun(project, taskId, targetName, {
           mode: "structured",
@@ -1050,6 +1067,7 @@ export class Orchestrator {
     for (const edge of outgoing) {
       completed.add(edge.id);
       runtime.completedEdges.add(edge.id);
+      runtime.edgeTriggerVersion.set(edge.id, (runtime.edgeTriggerVersion.get(edge.id) ?? 0) + 1);
     }
 
     const readyTargets: string[] = [];
@@ -1092,7 +1110,12 @@ export class Orchestrator {
 
     await Promise.all(
       uniqueTargets.map(async (targetName) => {
-        const signature = this.buildTriggerSignature(topology, completed, targetName);
+        const signature = this.buildTriggerSignature(
+          topology,
+          completed,
+          targetName,
+          runtime.edgeTriggerVersion,
+        );
         runtime.lastSignatureByAgent.set(targetName, signature);
         await this.dispatchAgentRun(project, taskId, targetName, {
           mode: "structured",
@@ -1216,6 +1239,9 @@ export class Orchestrator {
       if (now - timestamp > 1500) {
         break;
       }
+      if (message.sender === sourceAgentId && message.meta?.kind === "agent-final") {
+        return false;
+      }
       if (message.sender !== sourceAgentId || message.meta?.kind !== "high-level-trigger") {
         continue;
       }
@@ -1256,7 +1282,12 @@ export class Orchestrator {
       return false;
     }
 
-    const signature = this.buildTriggerSignature(topology, completedEdges, targetName);
+    const signature = this.buildTriggerSignature(
+      topology,
+      completedEdges,
+      targetName,
+      runtime.edgeTriggerVersion,
+    );
     if (
       runtime.lastSignatureByAgent.get(targetName) === signature &&
       agent.status !== "failed" &&
@@ -1272,6 +1303,7 @@ export class Orchestrator {
     topology: TopologyRecord,
     completedEdges: Set<string>,
     targetName: string,
+    edgeTriggerVersion = new Map<string, number>(),
   ): string {
     const relevantEdgeIds = topology.edges
       .filter(
@@ -1280,7 +1312,7 @@ export class Orchestrator {
           (edge.triggerOn === "association" || edge.triggerOn === "review_pass") &&
           completedEdges.has(edge.id),
       )
-      .map((edge) => edge.id)
+      .map((edge) => `${edge.id}@${edgeTriggerVersion.get(edge.id) ?? 0}`)
       .sort();
     return relevantEdgeIds.join("|") || `direct:${targetName}`;
   }
@@ -1303,6 +1335,162 @@ export class Orchestrator {
     const outgoingEdges = this.getOutgoingEdges(topology, agentName, "association")
       .concat(this.getOutgoingEdges(topology, agentName, "review_pass"));
     return outgoingEdges.every((edge) => completedEdges.has(edge.id));
+  }
+
+  private invalidateDownstreamTriggerSignatures(taskId: string, agentName: string) {
+    const runtime = this.getRuntime(taskId);
+    const task = this.store.getTask(taskId);
+    const topology = this.store.getTopology(task.projectId);
+    const downstreamTargets = this.getOutgoingEdges(topology, agentName, "association")
+      .concat(this.getOutgoingEdges(topology, agentName, "review_pass"))
+      .map((edge) => edge.target);
+
+    for (const targetName of downstreamTargets) {
+      runtime.lastSignatureByAgent.delete(targetName);
+    }
+  }
+
+  private getPersistedCompletionSeedAgentNames(taskId: string): string[] {
+    const task = this.store.getTask(taskId);
+    const topology = this.store.getTopology(task.projectId);
+    const validNames = new Set(topology.nodes.map((node) => node.id));
+    const seeds = new Set<string>();
+
+    for (const agent of this.store.listTaskAgents(taskId)) {
+      if (agent.status !== "idle" || agent.runCount > 0) {
+        seeds.add(agent.name);
+      }
+    }
+
+    for (const message of this.store.listMessages(task.projectId, taskId)) {
+      const targetAgentId = message.meta?.targetAgentId;
+      if (message.sender === "user" && typeof targetAgentId === "string" && targetAgentId.trim()) {
+        seeds.add(targetAgentId.trim());
+      }
+      if (message.meta?.kind === "high-level-trigger") {
+        for (const targetName of parseTargetAgentIds(message.meta.targetAgentIds)) {
+          seeds.add(targetName);
+        }
+      }
+      if (message.meta?.kind === "revision-request" && typeof targetAgentId === "string" && targetAgentId.trim()) {
+        seeds.add(targetAgentId.trim());
+      }
+    }
+
+    if (seeds.size === 0 && topology.startAgentId) {
+      seeds.add(topology.startAgentId);
+    }
+
+    return [...seeds].filter((name) => validNames.has(name));
+  }
+
+  private getPersistedParticipatingAgentNames(taskId: string): Set<string> {
+    return new Set(this.getPersistedCompletionSeedAgentNames(taskId));
+  }
+
+  private haveAllTaskAgentsSucceeded(taskId: string): boolean {
+    const agents = this.store.listTaskAgents(taskId);
+    return agents.length > 0 && agents.every((agent) => agent.status === "success");
+  }
+
+  private async reconcileTaskCompletionAfterAgentSettles(taskId: string) {
+    const task = this.store.getTask(taskId);
+    if (isTerminalTaskStatus(task.status)) {
+      return;
+    }
+
+    const runtime = this.getRuntime(taskId);
+    if (runtime.runningAgents.size > 0 || runtime.queuedAgents.size > 0) {
+      return;
+    }
+
+    if (!this.haveAllTaskAgentsSucceeded(taskId)) {
+      return;
+    }
+
+    await this.completeTask(taskId, "finished");
+  }
+
+  private shouldFinishTaskFromPersistedState(taskId: string): boolean {
+    const task = this.store.getTask(taskId);
+    if (task.status !== "running" && task.status !== "waiting") {
+      return false;
+    }
+
+    const topology = this.store.getTopology(task.projectId);
+    const agents = this.store.listTaskAgents(taskId);
+    if (agents.some((agent) => agent.status === "running")) {
+      return false;
+    }
+
+    const participatingAgents = this.getPersistedParticipatingAgentNames(taskId);
+    if (participatingAgents.size === 0) {
+      return false;
+    }
+
+    const participatingSucceeded = agents
+      .filter((agent) => participatingAgents.has(agent.name))
+      .every((agent) => agent.status === "success");
+    if (!participatingSucceeded) {
+      return false;
+    }
+
+    const reachableFromParticipating = this.collectReachableTopologyNodes(topology, participatingAgents);
+    for (const agent of agents) {
+      if (agent.status !== "idle" || participatingAgents.has(agent.name)) {
+        continue;
+      }
+      if (!reachableFromParticipating.has(agent.name)) {
+        continue;
+      }
+
+      const reachableFromIdle = this.collectReachableTopologyNodes(topology, [agent.name]);
+      const reconnectsToParticipating = [...participatingAgents].some(
+        (participant) => participant !== agent.name && reachableFromIdle.has(participant),
+      );
+      if (!reconnectsToParticipating) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private collectReachableTopologyNodes(
+    topology: TopologyRecord,
+    startNames: Iterable<string>,
+  ): Set<string> {
+    const queue = [...startNames];
+    const visited = new Set<string>();
+
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (!current || visited.has(current)) {
+        continue;
+      }
+      visited.add(current);
+      for (const edge of topology.edges) {
+        if (edge.source === current && !visited.has(edge.target)) {
+          queue.push(edge.target);
+        }
+      }
+    }
+
+    return visited;
+  }
+
+  private async reconcilePersistedTaskStatus(taskId: string) {
+    if (!this.shouldFinishTaskFromPersistedState(taskId)) {
+      return;
+    }
+
+    await this.completeTask(taskId, "finished");
+  }
+
+  private async reconcilePersistedProjectTasks(projectId: string) {
+    for (const task of this.store.listTasks(projectId)) {
+      await this.reconcilePersistedTaskStatus(task.id);
+    }
   }
 
   private parseSignal(content: string): ParsedSignal {
@@ -1925,7 +2113,7 @@ export class Orchestrator {
       return;
     }
 
-    const completedAt = status === "success" || status === "failed" ? new Date().toISOString() : null;
+    const completedAt = status === "finished" || status === "failed" ? new Date().toISOString() : null;
     this.store.updateTaskStatus(taskId, status, completedAt);
     const snapshot = this.hydrateTask(taskId);
     const completionMessage: MessageRecord = {
@@ -1935,8 +2123,8 @@ export class Orchestrator {
       sender: "system",
       timestamp: new Date().toISOString(),
       content:
-        status === "success"
-          ? `Task「${snapshot.task.title}」已完成，群聊中保留的是高层阶段消息与最终回复。`
+        status === "finished"
+          ? `Task「${snapshot.task.title}」已结束，状态已切换为 finished，群聊中保留的是高层阶段消息与最终回复。`
           : `Task「${snapshot.task.title}」已收口为“不通过”或执行失败，请根据当前群聊消息和对应 Agent 状态继续排查。`,
       meta: {
         kind: "task-completed",
@@ -1961,6 +2149,7 @@ export class Orchestrator {
     if (!runtime) {
       runtime = {
         completedEdges: new Set(),
+        edgeTriggerVersion: new Map(),
         lastSignatureByAgent: new Map(),
         runningAgents: new Set(),
         queuedAgents: new Set(),

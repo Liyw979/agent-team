@@ -31,7 +31,7 @@ const taskStatusStyles: Record<string, string> = {
   pending: "bg-muted text-foreground/80",
   running: "bg-secondary text-secondary-foreground",
   waiting: "bg-[#efe4bf] text-[#6b5620]",
-  success: "bg-accent text-foreground",
+  finished: "bg-accent text-foreground",
   needs_revision: "bg-secondary text-secondary-foreground",
   failed: "bg-primary text-primary-foreground",
 };
@@ -40,7 +40,7 @@ const taskStatusLabels: Record<string, string> = {
   pending: "pending",
   running: "running",
   waiting: "waiting",
-  success: "success",
+  finished: "finished",
   needs_revision: "needs_revision",
   failed: "failed",
 };
