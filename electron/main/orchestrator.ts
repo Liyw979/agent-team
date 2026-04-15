@@ -141,7 +141,7 @@ export class Orchestrator {
       projects.find((project) => path.resolve(project.path) === cwd) ??
       projects[0] ??
       null;
-    this.syncInjectedConfigForProject(currentProject);
+    this.setInjectedConfigForProject(currentProject);
 
     await this.ensureEventStream();
   }
@@ -256,15 +256,8 @@ export class Orchestrator {
   async saveAgentPrompt(payload: SaveAgentPromptPayload): Promise<ProjectSnapshot> {
     const project = this.store.getProject(payload.projectId);
     const hasTaskRecords = this.store.listTasks(project.id).length > 0;
-    const normalizedCurrentAgentName = payload.currentAgentName.trim();
-    const normalizedNextAgentName = payload.nextAgentName.trim();
     if (hasTaskRecords) {
-      if (!normalizedCurrentAgentName) {
-        throw new Error("当前 Project 已进入任务驱动阶段，不允许新增 Agent。");
-      }
-      if (normalizedCurrentAgentName !== normalizedNextAgentName) {
-        throw new Error("当前 Project 已进入任务驱动阶段，不允许修改 Agent 名称，仅允许更新 prompt。");
-      }
+      throw new Error("当前 Project 已有 Task 启动记录，不允许再修改 Agent 配置。");
     }
     this.customAgentConfig.saveProjectAgentPrompt(
       project.path,
@@ -285,6 +278,10 @@ export class Orchestrator {
     payload: SaveBuiltinAgentTemplatePayload,
   ): Promise<ProjectSnapshot> {
     const project = this.store.getProject(payload.projectId);
+    const hasTaskRecords = this.store.listTasks(project.id).length > 0;
+    if (hasTaskRecords) {
+      throw new Error("当前 Project 已有 Task 启动记录，不允许再修改内置模板。");
+    }
     this.customAgentConfig.saveBuiltinAgentTemplate(
       project.path,
       payload.templateName,
@@ -303,6 +300,10 @@ export class Orchestrator {
     payload: ResetBuiltinAgentTemplatePayload,
   ): Promise<ProjectSnapshot> {
     const project = this.store.getProject(payload.projectId);
+    const hasTaskRecords = this.store.listTasks(project.id).length > 0;
+    if (hasTaskRecords) {
+      throw new Error("当前 Project 已有 Task 启动记录，不允许再修改内置模板。");
+    }
     this.customAgentConfig.resetBuiltinAgentTemplate(project.path, payload.templateName);
     const updated = this.hydrateProject(project.id);
     this.emit({
@@ -788,7 +789,7 @@ export class Orchestrator {
     prompt: AgentExecutionPrompt,
     behavior: AgentRunBehaviorOptions = {},
   ) {
-    this.syncInjectedConfigForProject(project);
+    this.setInjectedConfigForProject(project);
     const runtime = this.getRuntime(task.id);
     runtime.runningAgents.add(agentName);
     this.invalidateDownstreamTriggerSignatures(task.id, agentName);
@@ -1828,7 +1829,7 @@ export class Orchestrator {
     task: TaskRecord,
     agent: TaskAgentRecord,
   ): Promise<string> {
-    this.syncInjectedConfigForProject(project);
+    this.setInjectedConfigForProject(project);
     if (agent.opencodeSessionId) {
       return agent.opencodeSessionId;
     }
@@ -1862,7 +1863,7 @@ export class Orchestrator {
     agentFiles: AgentFileRecord[],
   ): Promise<TaskSnapshot> {
     await this.ensureEventStream(project.path);
-    this.syncInjectedConfigForProject(project);
+    this.setInjectedConfigForProject(project);
     this.syncTaskAgents(task, agentFiles);
     const currentTask = this.store.getTask(task.id);
     const agents = this.orderTaskAgents(task.id, this.store.listTaskAgents(task.id));
@@ -2020,7 +2021,7 @@ export class Orchestrator {
     return (firstLine ?? "未命名任务").slice(0, 80);
   }
 
-  private syncInjectedConfigForProject(project: ProjectRecord | null) {
+  private setInjectedConfigForProject(project: ProjectRecord | null) {
     if (!project) {
       return;
     }

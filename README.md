@@ -49,7 +49,7 @@
 - 拓扑图在面板尺寸变化时会保持“Agent 在上、历史区在下、首尾节点贴近左右边界但保留少量留白、顶部预留连线通道”的布局约束，而不是把整张图简单等比缩放后居中
 - 拓扑图历史区会优先展示 Agent 最近的运行活动，并明确区分思考、普通消息、步骤与 Tool Call 参数摘要，而不只是单行运行状态
 - 右下角展示 Project 全量 Agent，以及它们在当前 Task 语境下的状态；点击 Agent 可直接编辑并保存当前 Agent 名称与 prompt
-- Agent 来自用户目录中的自定义配置（`$AGENTFLOW_USER_DATA_DIR/custom-agents.json`）；同一份配置里还会保存当前 Project 的“内置模板 prompt 覆盖”。内置模板默认仍是可选项，不会自动写入当前 Project，可先单独编辑模板 prompt 再按需写入为 Agent，而且模板修改只影响当前 Project，不影响新项目默认值。前端不支持编辑权限配置；一旦 Project 进入任务驱动阶段（已有 Task 运行记录），仅允许更新已有 Agent 的 prompt，名称修改、新增与删除会被锁定，但模板 prompt 仍可继续维护
+- Agent 来自用户目录中的自定义配置（`$AGENTFLOW_USER_DATA_DIR/custom-agents.json`）；同一份配置里还会保存当前 Project 的“内置模板 prompt 覆盖”。内置模板默认仍是可选项，不会自动写入当前 Project，可先单独编辑模板 prompt 再按需写入为 Agent，而且模板修改只影响当前 Project，不影响新项目默认值。前端不支持编辑权限配置；一旦当前 Project 出现 Task 启动记录，Agent 与内置模板配置都会被锁定，不允许继续修改
 - 只允许用户自定义 prompt；启动 OpenCode 时会通过 `OPENCODE_CONFIG_CONTENT` 固定注入 `write / edit / bash / task / patch: deny`
 - 当前处于项目开发初期，不要求兼容历史数据；如果现有 Project 状态、拓扑或运行数据与当前实现不一致，优先直接修正当前数据与实现，不额外为旧数据添加兼容分支
 - 默认拓扑只在首次初始化且当前无拓扑数据时按当前 Agent 列表自动推断

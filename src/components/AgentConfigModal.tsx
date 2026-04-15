@@ -90,11 +90,13 @@ export function AgentConfigModal({
   const editingBuiltinTemplate = Boolean(selectedBuiltinTemplate);
   const isNameEditingLocked = hasTaskRecords || editingBuiltinTemplate;
   const isNewAgentCreationLocked = hasTaskRecords;
+  const isAnyConfigEditingLocked = hasTaskRecords;
   const isPromptEditingLocked =
     loading
     || saving
     || deleting
     || resettingTemplate
+    || isAnyConfigEditingLocked
     || (creatingNewAgent && isNewAgentCreationLocked);
 
   useEffect(() => {
@@ -223,6 +225,7 @@ export function AgentConfigModal({
     || saving
     || deleting
     || resettingTemplate
+    || hasTaskRecords
     || editingBuiltinTemplate
     || !selectedFile
     || !selectedAgentDefaultTemplate
@@ -232,6 +235,7 @@ export function AgentConfigModal({
     || saving
     || deleting
     || resettingTemplate
+    || hasTaskRecords
     || !editingBuiltinTemplate
     || prompt === (builtinTemplates.find((template) => template.name === selectedBuiltinTemplate?.name)?.prompt ?? "");
   const canAddSelectedPresets = selectedPresetNames.length > 0
@@ -243,6 +247,7 @@ export function AgentConfigModal({
     || saving
     || deleting
     || resettingTemplate
+    || hasTaskRecords
     || isNewAgentCreationLocked
     || !agentName.trim();
 
@@ -299,6 +304,9 @@ export function AgentConfigModal({
     setSaveSuccess(null);
     try {
       if (editingBuiltinTemplate && selectedBuiltinTemplate) {
+        if (hasTaskRecords) {
+          throw new Error("当前 Project 已有 Task 启动记录，不允许再修改内置模板。");
+        }
         const updatedProject = await window.agentFlow.saveBuiltinAgentTemplate({
           projectId: project.project.id,
           templateName: selectedBuiltinTemplate.name,
@@ -317,11 +325,8 @@ export function AgentConfigModal({
       }
 
       const nextAgentName = agentName.trim();
-      if (isNewAgentCreationLocked && creatingNewAgent) {
-        throw new Error("当前 Project 已进入任务驱动阶段，不允许新增 Agent。");
-      }
-      if (hasTaskRecords && selectedFile && nextAgentName !== selectedFile.name) {
-        throw new Error("当前 Project 已进入任务驱动阶段，不允许修改 Agent 名称，仅允许更新 prompt。");
+      if (hasTaskRecords) {
+        throw new Error("当前 Project 已有 Task 启动记录，不允许再修改 Agent 配置。");
       }
       const updatedProject = await window.agentFlow.saveAgentPrompt({
         projectId: project.project.id,
@@ -392,6 +397,11 @@ export function AgentConfigModal({
     if (!project || !selectedBuiltinTemplate || resettingTemplate) {
       return;
     }
+    if (hasTaskRecords) {
+      setSaveError("当前 Project 已有 Task 启动记录，不允许再修改内置模板。");
+      setSaveSuccess(null);
+      return;
+    }
     setResettingTemplate(true);
     setSaveError(null);
     setSaveSuccess(null);
@@ -418,6 +428,11 @@ export function AgentConfigModal({
 
   async function handleResetAgentPromptToDefault() {
     if (!project || !selectedFile || !selectedAgentDefaultTemplate || saving) {
+      return;
+    }
+    if (hasTaskRecords) {
+      setSaveError("当前 Project 已有 Task 启动记录，不允许再修改 Agent 配置。");
+      setSaveSuccess(null);
       return;
     }
     setSaving(true);
@@ -503,7 +518,7 @@ export function AgentConfigModal({
             <br />
             内置模板会一直保留在这里供选择；删除 Agent 只会从当前 Project 面板移除，不会删掉这里的配置入口。
             {hasTaskRecords
-              ? " 当前 Project 已进入任务驱动阶段：已有 Agent 仅允许更新 prompt，名称修改、新增与删除 Agent 已锁定；内置模板内容仍可单独维护。"
+              ? " 当前 Project 已有 Task 启动记录：Agent 与内置模板均不允许再修改。"
               : ""}
           </Dialog.Description>
 
@@ -659,7 +674,7 @@ export function AgentConfigModal({
                           ? "模板有未保存修改。"
                           : "当前模板已与项目配置同步。"
                         : hasTaskRecords
-                          ? "任务驱动阶段：可编辑 prompt，Agent 名称已锁定。"
+                          ? "当前 Project 已有 Task 启动记录：配置已锁定。"
                           : hasUnsavedChanges
                             ? "有未保存修改。"
                             : "已与磁盘内容同步。"}
@@ -668,7 +683,7 @@ export function AgentConfigModal({
                 {!loadError && creatingNewAgent && (
                   <p className="mt-1 text-xs text-muted-foreground">
                     {isNewAgentCreationLocked
-                      ? "任务驱动后不允许新增 Agent。"
+                      ? "当前 Project 已有 Task 启动记录：不允许新增 Agent。"
                       : hasUnsavedChanges
                         ? "有未保存修改。"
                         : "请输入 Agent 名称和 prompt。"}

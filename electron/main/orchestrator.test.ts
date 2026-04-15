@@ -232,6 +232,58 @@ test("为不同 Project 初始化 Task 时会切换 OpenCode 注入配置", asyn
   );
 });
 
+test("Task 启动后不允许再修改 Agent 配置或内置模板", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  const orchestrator = new Orchestrator({
+    userDataPath,
+    enableEventStream: false,
+    zellijManager: {
+      isAvailable: async () => true,
+      createTaskSession: async () => "oap-project-task",
+      createPanelBindings: () => [],
+      materializePanelBindings: async () => [],
+      openTaskSession: async () => undefined,
+      deleteTaskSession: async () => undefined,
+      setOpenCodeAttachBaseUrl: () => undefined,
+    } as never,
+  });
+
+  let project = await orchestrator.createProject({ path: projectPath });
+  project = await addCustomAgent(orchestrator, project.project.id, "BA", "你是 BA。");
+  await orchestrator.initializeTask({ projectId: project.project.id, title: "demo" });
+
+  await assert.rejects(
+    () =>
+      orchestrator.saveAgentPrompt({
+        projectId: project.project.id,
+        currentAgentName: "BA",
+        nextAgentName: "BA",
+        prompt: "你是新的 BA。",
+      }),
+    /当前 Project 已有 Task 启动记录，不允许再修改 Agent 配置。/,
+  );
+
+  await assert.rejects(
+    () =>
+      orchestrator.saveBuiltinAgentTemplate({
+        projectId: project.project.id,
+        templateName: "BA",
+        prompt: "你是模板 BA。",
+      }),
+    /当前 Project 已有 Task 启动记录，不允许再修改内置模板。/,
+  );
+
+  await assert.rejects(
+    () =>
+      orchestrator.resetBuiltinAgentTemplate({
+        projectId: project.project.id,
+        templateName: "BA",
+      }),
+    /当前 Project 已有 Task 启动记录，不允许再修改内置模板。/,
+  );
+});
+
 test("审视通过但没有可展示高层结果时返回简洁兜底文案", () => {
   const orchestrator = new Orchestrator({
     userDataPath: createTempDir(),
