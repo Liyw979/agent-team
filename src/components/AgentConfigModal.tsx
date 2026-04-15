@@ -1,36 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { BUILD_AGENT_NAME, type ProjectSnapshot } from "@shared/types";
+import {
+  BUILD_AGENT_NAME,
+  DEFAULT_BUILTIN_AGENT_TEMPLATES,
+  type BuiltinAgentTemplateRecord,
+  type ProjectSnapshot,
+} from "@shared/types";
 
 export const NEW_AGENT_DRAFT_PATH = "__agentflow_new_agent__";
 
-interface DefaultAgentPreset {
-  name: string;
-  prompt: string;
+const BUILTIN_TEMPLATE_PATH_PREFIX = "__agentflow_builtin_template__:";
+
+function toBuiltinTemplatePath(name: string) {
+  return `${BUILTIN_TEMPLATE_PATH_PREFIX}${name}`;
 }
 
-const DEFAULT_AGENT_PRESETS: DefaultAgentPreset[] = [
-  {
-    name: "BA",
-    prompt:
-      "你是 BA。\n你的职责：\n1. 润色原始 User Story，输出完善、可执行的需求，不需要写代码\n2. 明确目标、范围、约束与验收标准，让实现方可以直接推进",
-  },
-  {
-    name: "UnitTest",
-    prompt:
-      "你是单元测试审查角色，负责检查单元测试是否遵循四条标准：单功能单测试、每个测试有注释、执行极快、尽量使用纯函数而不是 Mock。\n\n并给出修改建议。",
-  },
-  {
-    name: "TaskReview",
-    prompt:
-      "你是任务交付审视角色，负责站在最终交付质量的角度审视本轮结果是否已经达到可交付标准。\n\n请重点检查：\n1. 用户真正要解决的问题是否被完整解决。\n2. 最终交付是否自洽，关键说明、验证结论与必要文档是否同步。\n3. 是否还存在阻塞交付的问题，若有就明确指出具体修改意见。",
-  },
-  {
-    name: "CodeReview",
-    prompt:
-      "你是代码审查角色，关注冗余实现、可读性和是否符合 BA 定义的使用旅程。\n\n要求代码最小化改动，思考并质疑当前的改动是不是最小的，并给出修改建议。",
-  },
-];
+function getBuiltinTemplateName(selectedPath: string | null): string | null {
+  if (!selectedPath?.startsWith(BUILTIN_TEMPLATE_PATH_PREFIX)) {
+    return null;
+  }
+  return selectedPath.slice(BUILTIN_TEMPLATE_PATH_PREFIX.length) || null;
+}
 
 interface AgentConfigModalProps {
   project: ProjectSnapshot | undefined;
@@ -54,11 +44,13 @@ export function AgentConfigModal({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [resettingTemplate, setResettingTemplate] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [selectedPresetNames, setSelectedPresetNames] = useState<string[]>([]);
   const [addingPresets, setAddingPresets] = useState(false);
+
   const viewableAgents = useMemo(
     () => project?.agentFiles.filter((agent) => agent.name !== BUILD_AGENT_NAME) ?? [],
     [project],
@@ -68,34 +60,78 @@ export function AgentConfigModal({
     () => new Set(viewableAgents.map((agent) => agent.name)),
     [viewableAgents],
   );
-
-  useEffect(() => {
-    if (!selectedPath && viewableAgents[0]) {
-      onSelectPath(viewableAgents[0].name);
-    }
-  }, [onSelectPath, selectedPath, viewableAgents]);
-
+  const builtinTemplates = useMemo(
+    () => project?.builtinAgentTemplates ?? [],
+    [project],
+  );
+  const selectedTemplateName = useMemo(
+    () => getBuiltinTemplateName(selectedPath),
+    [selectedPath],
+  );
   const selectedFile = useMemo(
     () => viewableAgents.find((agent) => agent.name === selectedPath),
     [selectedPath, viewableAgents],
   );
+  const selectedBuiltinTemplate = useMemo(
+    () =>
+      selectedTemplateName
+        ? builtinTemplates.find((template) => template.name === selectedTemplateName) ?? null
+        : null,
+    [builtinTemplates, selectedTemplateName],
+  );
+  const selectedAgentDefaultTemplate = useMemo(
+    () =>
+      selectedFile
+        ? DEFAULT_BUILTIN_AGENT_TEMPLATES.find((template) => template.name === selectedFile.name) ?? null
+        : null,
+    [selectedFile],
+  );
   const creatingNewAgent = selectedPath === NEW_AGENT_DRAFT_PATH;
-  const isNameEditingLocked = hasTaskRecords;
+  const editingBuiltinTemplate = Boolean(selectedBuiltinTemplate);
+  const isNameEditingLocked = hasTaskRecords || editingBuiltinTemplate;
   const isNewAgentCreationLocked = hasTaskRecords;
   const isPromptEditingLocked =
-    loading || saving || deleting || (creatingNewAgent && isNewAgentCreationLocked);
+    loading
+    || saving
+    || deleting
+    || resettingTemplate
+    || (creatingNewAgent && isNewAgentCreationLocked);
 
   useEffect(() => {
-    if (!open || !project || !selectedFile) {
-      if (!selectedFile) {
-        setAgentName("");
-        setSavedAgentName("");
-        setPrompt("");
-        setSavedPrompt("");
-        setLoadError(null);
-        setSaveError(null);
-        setSaveSuccess(null);
-      }
+    if (!creatingNewAgent) {
+      return;
+    }
+    setAgentName("");
+    setSavedAgentName("");
+    setPrompt("");
+    setSavedPrompt("");
+    setLoadError(null);
+    setSaveError(null);
+    setSaveSuccess(null);
+  }, [creatingNewAgent]);
+
+  useEffect(() => {
+    if (selectedPath) {
+      return;
+    }
+    if (viewableAgents[0]) {
+      onSelectPath(viewableAgents[0].name);
+      return;
+    }
+    if (builtinTemplates[0]) {
+      onSelectPath(toBuiltinTemplatePath(builtinTemplates[0].name));
+    }
+  }, [builtinTemplates, onSelectPath, selectedPath, viewableAgents]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    if (!project) {
+      return;
+    }
+
+    if (!selectedFile && !selectedBuiltinTemplate) {
       return;
     }
 
@@ -103,11 +139,17 @@ export function AgentConfigModal({
     setLoading(true);
     setLoadError(null);
 
-    void window.agentFlow
-      .readAgentFile({
-        projectId: project.project.id,
-        agentName: selectedFile.name,
-      })
+    const request = selectedFile
+      ? window.agentFlow.readAgentFile({
+          projectId: project.project.id,
+          agentName: selectedFile.name,
+        })
+      : window.agentFlow.readBuiltinAgentTemplate({
+          projectId: project.project.id,
+          templateName: selectedBuiltinTemplate!.name,
+        });
+
+    void request
       .then((file) => {
         if (cancelled) {
           return;
@@ -121,10 +163,13 @@ export function AgentConfigModal({
         if (cancelled) {
           return;
         }
-        setAgentName(selectedFile.name);
-        setSavedAgentName(selectedFile.name);
-        setPrompt(selectedFile.prompt);
-        setSavedPrompt(selectedFile.prompt);
+        const fallback = selectedFile ?? selectedBuiltinTemplate;
+        if (fallback) {
+          setAgentName(fallback.name);
+          setSavedAgentName(fallback.name);
+          setPrompt(fallback.prompt);
+          setSavedPrompt(fallback.prompt);
+        }
         setLoadError(error instanceof Error ? error.message : "读取文件失败");
       })
       .finally(() => {
@@ -136,18 +181,30 @@ export function AgentConfigModal({
     return () => {
       cancelled = true;
     };
-  }, [open, project?.project.id, selectedFile?.name, selectedFile?.prompt]);
+  }, [
+    open,
+    project?.project.id,
+    selectedPath,
+  ]);
+
+  useEffect(() => {
+    setSelectedPresetNames((prev) =>
+      prev.filter((name) => builtinTemplates.some((template) => template.name === name)),
+    );
+  }, [builtinTemplates]);
 
   const hasUnsavedChanges = creatingNewAgent
     ? Boolean(agentName.trim() || prompt.trim())
     : prompt !== savedPrompt || agentName !== savedAgentName;
   const isRenamingBlocked = hasTaskRecords
     && !creatingNewAgent
+    && !editingBuiltinTemplate
     && Boolean(selectedFile)
     && agentName.trim() !== (selectedFile?.name ?? "");
   const saveDisabled = loading
     || saving
     || deleting
+    || resettingTemplate
     || !hasUnsavedChanges
     || !agentName.trim()
     || (creatingNewAgent && isNewAgentCreationLocked)
@@ -156,12 +213,38 @@ export function AgentConfigModal({
     loading
     || saving
     || deleting
+    || resettingTemplate
     || creatingNewAgent
+    || editingBuiltinTemplate
     || !selectedFile
     || hasTaskRecords;
+  const resetAgentPromptDisabled =
+    loading
+    || saving
+    || deleting
+    || resettingTemplate
+    || editingBuiltinTemplate
+    || !selectedFile
+    || !selectedAgentDefaultTemplate
+    || prompt === selectedAgentDefaultTemplate.prompt;
+  const resetTemplateDisabled =
+    loading
+    || saving
+    || deleting
+    || resettingTemplate
+    || !editingBuiltinTemplate
+    || prompt === (builtinTemplates.find((template) => template.name === selectedBuiltinTemplate?.name)?.prompt ?? "");
   const canAddSelectedPresets = selectedPresetNames.length > 0
     && !isNewAgentCreationLocked
     && !addingPresets;
+  const addCurrentTemplateDisabled =
+    !editingBuiltinTemplate
+    || loading
+    || saving
+    || deleting
+    || resettingTemplate
+    || isNewAgentCreationLocked
+    || !agentName.trim();
 
   async function handleAddPresetAgents() {
     if (!project || isNewAgentCreationLocked || addingPresets || selectedPresetNames.length === 0) {
@@ -179,7 +262,7 @@ export function AgentConfigModal({
           skippedCount += 1;
           continue;
         }
-        const preset = DEFAULT_AGENT_PRESETS.find((item) => item.name === presetName);
+        const preset = project.builtinAgentTemplates.find((item) => item.name === presetName);
         if (!preset) {
           skippedCount += 1;
           continue;
@@ -199,9 +282,9 @@ export function AgentConfigModal({
         }
       }
       setSelectedPresetNames([]);
-      setSaveSuccess(`已添加 ${createdCount} 个默认 Agent${skippedCount > 0 ? `，跳过 ${skippedCount} 个已存在项` : ""}。`);
+      setSaveSuccess(`已添加 ${createdCount} 个内置模板${skippedCount > 0 ? `，跳过 ${skippedCount} 个已存在项` : ""}。`);
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "添加默认 Agent 失败");
+      setSaveError(error instanceof Error ? error.message : "添加内置模板失败");
     } finally {
       setAddingPresets(false);
     }
@@ -215,6 +298,24 @@ export function AgentConfigModal({
     setSaveError(null);
     setSaveSuccess(null);
     try {
+      if (editingBuiltinTemplate && selectedBuiltinTemplate) {
+        const updatedProject = await window.agentFlow.saveBuiltinAgentTemplate({
+          projectId: project.project.id,
+          templateName: selectedBuiltinTemplate.name,
+          prompt,
+        });
+        const matchedTemplate = updatedProject.builtinAgentTemplates.find(
+          (template) => template.name === selectedBuiltinTemplate.name,
+        );
+        const nextPrompt = matchedTemplate?.prompt ?? prompt;
+        setAgentName(selectedBuiltinTemplate.name);
+        setSavedAgentName(selectedBuiltinTemplate.name);
+        setPrompt(nextPrompt);
+        setSavedPrompt(nextPrompt);
+        setSaveSuccess("保存成功，已更新当前 Project 的内置模板覆盖，不会影响新项目默认值。");
+        return;
+      }
+
       const nextAgentName = agentName.trim();
       if (isNewAgentCreationLocked && creatingNewAgent) {
         throw new Error("当前 Project 已进入任务驱动阶段，不允许新增 Agent。");
@@ -248,6 +349,101 @@ export function AgentConfigModal({
     }
   }
 
+  async function handleAddCurrentTemplateAsAgent() {
+    if (!project || !selectedBuiltinTemplate || saving || isNewAgentCreationLocked) {
+      return;
+    }
+    setSaving(true);
+    setSaveError(null);
+    setSaveSuccess(null);
+    try {
+      await window.agentFlow.saveBuiltinAgentTemplate({
+        projectId: project.project.id,
+        templateName: selectedBuiltinTemplate.name,
+        prompt,
+      });
+      const updatedProject = await window.agentFlow.saveAgentPrompt({
+        projectId: project.project.id,
+        currentAgentName: "",
+        nextAgentName: selectedBuiltinTemplate.name,
+        prompt,
+      });
+      const matchedAgent = updatedProject.agentFiles.find(
+        (agent) => agent.name === selectedBuiltinTemplate.name,
+      );
+      if (!matchedAgent) {
+        throw new Error(`写入 Agent 失败：${selectedBuiltinTemplate.name}`);
+      }
+      setAgentName(matchedAgent.name);
+      setSavedAgentName(matchedAgent.name);
+      setPrompt(matchedAgent.prompt);
+      setSavedPrompt(matchedAgent.prompt);
+      onSelectPath(matchedAgent.name);
+      setSelectedPresetNames((prev) => prev.filter((name) => name !== matchedAgent.name));
+      setSaveSuccess(`已将内置模板「${matchedAgent.name}」写入当前 Project。`);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "写入 Agent 失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleResetBuiltinTemplate() {
+    if (!project || !selectedBuiltinTemplate || resettingTemplate) {
+      return;
+    }
+    setResettingTemplate(true);
+    setSaveError(null);
+    setSaveSuccess(null);
+    try {
+      const updatedProject = await window.agentFlow.resetBuiltinAgentTemplate({
+        projectId: project.project.id,
+        templateName: selectedBuiltinTemplate.name,
+      });
+      const matchedTemplate = updatedProject.builtinAgentTemplates.find(
+        (template) => template.name === selectedBuiltinTemplate.name,
+      );
+      const nextPrompt = matchedTemplate?.prompt ?? "";
+      setAgentName(selectedBuiltinTemplate.name);
+      setSavedAgentName(selectedBuiltinTemplate.name);
+      setPrompt(nextPrompt);
+      setSavedPrompt(nextPrompt);
+      setSaveSuccess("已恢复为默认模板内容，不会影响其他项目。");
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "恢复默认模板失败");
+    } finally {
+      setResettingTemplate(false);
+    }
+  }
+
+  async function handleResetAgentPromptToDefault() {
+    if (!project || !selectedFile || !selectedAgentDefaultTemplate || saving) {
+      return;
+    }
+    setSaving(true);
+    setSaveError(null);
+    setSaveSuccess(null);
+    try {
+      const updatedProject = await window.agentFlow.saveAgentPrompt({
+        projectId: project.project.id,
+        currentAgentName: selectedFile.name,
+        nextAgentName: selectedFile.name,
+        prompt: selectedAgentDefaultTemplate.prompt,
+      });
+      const matchedAgent = updatedProject.agentFiles.find((agent) => agent.name === selectedFile.name);
+      const nextPrompt = matchedAgent?.prompt ?? selectedAgentDefaultTemplate.prompt;
+      setAgentName(selectedFile.name);
+      setSavedAgentName(selectedFile.name);
+      setPrompt(nextPrompt);
+      setSavedPrompt(nextPrompt);
+      setSaveSuccess("已恢复为默认 Prompt。");
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "恢复默认 Prompt 失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleDeleteAgent() {
     if (!project || !selectedFile || deleting) {
       return;
@@ -272,7 +468,10 @@ export function AgentConfigModal({
       const nextViewableAgents = updatedProject.agentFiles.filter(
         (agent) => agent.name !== BUILD_AGENT_NAME,
       );
-      onSelectPath(nextViewableAgents[0]?.name ?? NEW_AGENT_DRAFT_PATH);
+      const restoredTemplate = updatedProject.builtinAgentTemplates.find(
+        (template) => template.name === selectedFile.name,
+      );
+      onSelectPath(nextViewableAgents[0]?.name ?? (restoredTemplate ? toBuiltinTemplatePath(restoredTemplate.name) : NEW_AGENT_DRAFT_PATH));
       setAgentName("");
       setSavedAgentName("");
       setPrompt("");
@@ -285,6 +484,10 @@ export function AgentConfigModal({
     }
   }
 
+  const detailTitle = selectedFile?.name
+    ?? selectedBuiltinTemplate?.name
+    ?? (creatingNewAgent ? "新建 Agent" : "未选择文件");
+
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
@@ -295,10 +498,12 @@ export function AgentConfigModal({
           </Dialog.Title>
           <Dialog.Description className="mt-1 text-sm text-muted-foreground">
             当前项目设计为单一 Build Agent 负责代码改动，且 Build 为默认必选 Agent（不在这里编辑）。
-            自定义 Agent 均为建议性 Agent，不参与代码修改。
-            自定义 Agent 默认禁用 write / edit / patch / bash / task 工具，且不支持在这里修改工具权限。
+            <br />
+            自定义 Agent 与内置模板均固定禁用 write / edit / patch / bash / task 工具，且不支持在这里修改工具权限。
+            <br />
+            内置模板会一直保留在这里供选择；删除 Agent 只会从当前 Project 面板移除，不会删掉这里的配置入口。
             {hasTaskRecords
-              ? " 当前 Project 已进入任务驱动阶段：仅允许更新 prompt，名称修改、新增与删除 Agent 已锁定。"
+              ? " 当前 Project 已进入任务驱动阶段：已有 Agent 仅允许更新 prompt，名称修改、新增与删除 Agent 已锁定；内置模板内容仍可单独维护。"
               : ""}
           </Dialog.Description>
 
@@ -346,38 +551,68 @@ export function AgentConfigModal({
                   + 新建 Agent
                 </button>
                 <div className="mt-3 rounded-[8px] border border-border/70 bg-white/60 px-3 py-3">
-                  <p className="text-xs font-semibold text-foreground/85">默认 Agent 模板</p>
+                  <p className="text-xs font-semibold text-foreground/85">内置 Agent 模板</p>
                   <p className="mt-1 text-[11px] text-muted-foreground">
-                    可勾选并批量添加历史默认模板（仅添加不存在的 Agent）。
+                    模板入口会一直保留在这里。你可以先编辑模板，再按需写入为 Agent。
                   </p>
                   <div className="mt-2 space-y-1.5">
-                    {DEFAULT_AGENT_PRESETS.map((preset) => {
-                      const exists = existingAgentNames.has(preset.name);
-                      const checked = selectedPresetNames.includes(preset.name);
+                    {builtinTemplates.map((template) => {
+                      const exists = existingAgentNames.has(template.name);
+                      const checked = selectedPresetNames.includes(template.name);
+                      const isSelected = selectedPath === toBuiltinTemplatePath(template.name);
                       return (
-                        <label
-                          key={preset.name}
-                          className={`flex items-center gap-2 rounded-[6px] px-2 py-1 text-xs ${
-                            exists ? "text-muted-foreground/70" : "text-foreground/85"
+                        <div
+                          key={template.name}
+                          className={`rounded-[6px] border px-2 py-2 ${
+                            isSelected ? "border-primary/50 bg-primary/10" : "border-border/60 bg-white/40"
                           }`}
                         >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            disabled={exists || isNewAgentCreationLocked || addingPresets}
-                            onChange={(event) => {
-                              const nextChecked = event.target.checked;
-                              setSelectedPresetNames((prev) => {
-                                if (nextChecked) {
-                                  return prev.includes(preset.name) ? prev : [...prev, preset.name];
-                                }
-                                return prev.filter((name) => name !== preset.name);
-                              });
-                            }}
-                          />
-                          <span className="font-medium">{preset.name}</span>
-                          {exists ? <span className="text-[10px]">已存在</span> : null}
-                        </label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={exists || isNewAgentCreationLocked || addingPresets}
+                              onChange={(event) => {
+                                const nextChecked = event.target.checked;
+                                setSelectedPresetNames((prev) => {
+                                  if (nextChecked) {
+                                    return prev.includes(template.name) ? prev : [...prev, template.name];
+                                  }
+                                  return prev.filter((name) => name !== template.name);
+                                });
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onSelectPath(toBuiltinTemplatePath(template.name));
+                                onOpenChange(true);
+                                setSaveError(null);
+                                setSaveSuccess(null);
+                              }}
+                              className="min-w-0 flex-1 text-left text-xs font-medium text-foreground/90"
+                            >
+                              {template.name}
+                            </button>
+                            {exists && (
+                              <span className="shrink-0 text-[10px] text-muted-foreground">
+                                已写入
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onSelectPath(toBuiltinTemplatePath(template.name));
+                                onOpenChange(true);
+                                setSaveError(null);
+                                setSaveSuccess(null);
+                              }}
+                              className="shrink-0 rounded-[6px] border border-border px-2 py-1 text-[10px] text-foreground/75"
+                            >
+                              编辑
+                            </button>
+                          </div>
+                        </div>
                       );
                     })}
                   </div>
@@ -392,9 +627,9 @@ export function AgentConfigModal({
                     {addingPresets ? "添加中..." : "添加选中模板"}
                   </button>
                 </div>
-                {viewableAgents.length === 0 && (
+                {viewableAgents.length === 0 && !creatingNewAgent && builtinTemplates.length === 0 && (
                   <div className="rounded-[8px] border border-dashed border-border bg-white/50 px-3 py-4 text-sm text-muted-foreground">
-                    当前还没有自定义 Agent，点击上方“新建 Agent”开始配置。
+                    当前还没有自定义 Agent，也没有可写入的内置模板。
                   </div>
                 )}
               </div>
@@ -402,28 +637,32 @@ export function AgentConfigModal({
 
             <div className="flex min-h-0 flex-col rounded-[8px] border border-border bg-card/80 p-4">
               <div className="mb-3">
-                <p className="font-semibold text-primary">
-                  {selectedFile?.name ?? (creatingNewAgent ? "新建 Agent" : "未选择文件")}
-                </p>
+                <p className="font-semibold text-primary">{detailTitle}</p>
                 <p className="text-xs text-muted-foreground">
                   {selectedFile
                     ? "打开时会直接读取最新配置；仅可修改 Agent 名称与 prompt，工具权限固定禁用。"
-                    : creatingNewAgent
-                      ? "填写 Agent 名称和 prompt 后可直接创建到用户目录配置。"
-                      : "这里只查看用户目录下的自定义 Agent 配置。"}
+                    : selectedBuiltinTemplate
+                      ? "这是当前 Project 的内置模板入口。保存这里只会更新模板本身，不会自动创建 Agent，也不会影响新项目默认值。"
+                      : creatingNewAgent
+                        ? ""
+                        : "请选择左侧已有 Agent，或选择一个内置模板继续编辑。"}
                 </p>
                 {loadError && <p className="mt-1 text-xs text-[#9a5a2e]">{loadError}</p>}
                 {saveError && <p className="mt-1 text-xs text-[#9a5a2e]">{saveError}</p>}
                 {saveSuccess && <p className="mt-1 text-xs text-[#2f6b34]">{saveSuccess}</p>}
-                {!loadError && selectedFile && (
+                {!loadError && (selectedFile || selectedBuiltinTemplate) && (
                   <p className="mt-1 text-xs text-muted-foreground">
                     {loading
                       ? "正在读取磁盘..."
-                      : hasTaskRecords
-                        ? "任务驱动阶段：可编辑 prompt，Agent 名称已锁定。"
-                        : hasUnsavedChanges
-                          ? "有未保存修改。"
-                          : "已与磁盘内容同步。"}
+                      : editingBuiltinTemplate
+                        ? hasUnsavedChanges
+                          ? "模板有未保存修改。"
+                          : "当前模板已与项目配置同步。"
+                        : hasTaskRecords
+                          ? "任务驱动阶段：可编辑 prompt，Agent 名称已锁定。"
+                          : hasUnsavedChanges
+                            ? "有未保存修改。"
+                            : "已与磁盘内容同步。"}
                   </p>
                 )}
                 {!loadError && creatingNewAgent && (
@@ -449,7 +688,7 @@ export function AgentConfigModal({
                       setSaveSuccess(null);
                     }
                   }}
-                  disabled={loading || saving || deleting || isNameEditingLocked}
+                  disabled={loading || saving || deleting || resettingTemplate || isNameEditingLocked}
                   placeholder="输入 Agent 名称"
                   className="w-full rounded-[8px] border border-border bg-white px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-60"
                 />
@@ -466,61 +705,109 @@ export function AgentConfigModal({
                   }
                 }}
                 disabled={isPromptEditingLocked}
-                placeholder="在这里编辑当前 Agent 的 prompt..."
+                placeholder={
+                  editingBuiltinTemplate
+                    ? "在这里编辑当前内置模板的 prompt..."
+                    : "在这里编辑当前 Agent 的 prompt..."
+                }
                 className="min-h-0 flex-1 resize-none rounded-[8px] border border-border bg-[#172019] px-4 py-4 font-mono text-sm leading-6 text-[#F4EFE6] placeholder:text-[#A8B0A6] focus:outline-none focus:ring-2 focus:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-60"
               />
             </div>
           </div>
 
           <div className="mt-4 flex items-center justify-between gap-3 border-t border-border/60 pt-4">
-            <button
-              type="button"
-              onClick={() => {
-                void handleDeleteAgent();
-              }}
-              disabled={deleteDisabled}
-              className="rounded-[8px] border border-[#c96f3b] px-4 py-2 text-sm text-[#8d4c22] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {deleting ? "删除中..." : "删除 Agent"}
-            </button>
-            <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => {
-                setPrompt(savedPrompt);
-                setAgentName(savedAgentName);
-                setSaveError(null);
-                setSaveSuccess(null);
-              }}
-              disabled={
-                loading
-                || saving
-                || deleting
-                || !hasUnsavedChanges
-                || (creatingNewAgent && isNewAgentCreationLocked)
-              }
-              className="rounded-[8px] border border-border px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              还原
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                void handleSavePrompt();
-              }}
-              disabled={saveDisabled}
-              className="rounded-[8px] border border-primary bg-primary px-4 py-2 text-sm text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {saving ? "保存中..." : creatingNewAgent ? "创建 Agent" : "保存 Prompt"}
-            </button>
-            <Dialog.Close asChild>
+            {editingBuiltinTemplate ? (
               <button
                 type="button"
-                className="rounded-[8px] border border-border px-4 py-2 text-sm"
+                onClick={() => {
+                  void handleResetBuiltinTemplate();
+                }}
+                disabled={resetTemplateDisabled}
+                className="rounded-[8px] border border-[#c96f3b] px-4 py-2 text-sm text-[#8d4c22] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                关闭
+                {resettingTemplate ? "恢复中..." : "恢复默认模板"}
               </button>
-            </Dialog.Close>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  void handleDeleteAgent();
+                }}
+                disabled={deleteDisabled}
+                className="rounded-[8px] border border-[#c96f3b] px-4 py-2 text-sm text-[#8d4c22] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {deleting ? "删除中..." : "删除 Agent"}
+              </button>
+            )}
+            <div className="flex items-center gap-3">
+              {!editingBuiltinTemplate && selectedAgentDefaultTemplate && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleResetAgentPromptToDefault();
+                  }}
+                  disabled={resetAgentPromptDisabled}
+                  className="rounded-[8px] border border-border px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  恢复默认 Prompt
+                </button>
+              )}
+              {editingBuiltinTemplate && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleAddCurrentTemplateAsAgent();
+                  }}
+                  disabled={addCurrentTemplateDisabled}
+                  className="rounded-[8px] border border-border px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  添加为项目成员
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setPrompt(savedPrompt);
+                  setAgentName(savedAgentName);
+                  setSaveError(null);
+                  setSaveSuccess(null);
+                }}
+                disabled={
+                  loading
+                  || saving
+                  || deleting
+                  || resettingTemplate
+                  || !hasUnsavedChanges
+                  || (creatingNewAgent && isNewAgentCreationLocked)
+                }
+                className="rounded-[8px] border border-border px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                还原
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleSavePrompt();
+                }}
+                disabled={saveDisabled}
+                className="rounded-[8px] border border-primary bg-primary px-4 py-2 text-sm text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {saving
+                  ? "保存中..."
+                  : creatingNewAgent
+                    ? "创建 Agent"
+                    : editingBuiltinTemplate
+                      ? "保存模板"
+                      : "保存 Prompt"}
+              </button>
+              <Dialog.Close asChild>
+                <button
+                  type="button"
+                  className="rounded-[8px] border border-border px-4 py-2 text-sm"
+                >
+                  关闭
+                </button>
+              </Dialog.Close>
             </div>
           </div>
         </Dialog.Content>

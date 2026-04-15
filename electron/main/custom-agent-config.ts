@@ -1,6 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { BUILD_AGENT_NAME, type AgentFileRecord } from "@shared/types";
+import {
+  BUILD_AGENT_NAME,
+  DEFAULT_BUILTIN_AGENT_TEMPLATES,
+  type AgentFileRecord,
+  type BuiltinAgentTemplateRecord,
+} from "@shared/types";
 
 const CUSTOM_AGENT_CONFIG_FILE_NAME = "custom-agents.json";
 
@@ -8,9 +13,14 @@ interface UserAgentEntry {
   prompt: string;
 }
 
+interface UserBuiltinAgentTemplateEntry {
+  prompt: string;
+}
+
 interface UserAgentConfig {
   version: 1;
   agents: Record<string, UserAgentEntry>;
+  builtinTemplates: Record<string, UserBuiltinAgentTemplateEntry>;
 }
 
 interface UserAgentConfigRegistry {
@@ -32,7 +42,9 @@ function sanitizeAgentName(name: string): string {
 function normalizeUserAgentConfig(value: unknown): UserAgentConfig {
   const parsed = asRecord(value);
   const agentsRecord = asRecord(parsed.agents);
+  const builtinTemplatesRecord = asRecord(parsed.builtinTemplates ?? parsed.templates);
   const normalizedAgents: Record<string, UserAgentEntry> = {};
+  const normalizedBuiltinTemplates: Record<string, UserBuiltinAgentTemplateEntry> = {};
 
   for (const [rawName, rawAgentValue] of Object.entries(agentsRecord)) {
     const name = sanitizeAgentName(rawName);
@@ -45,10 +57,26 @@ function normalizeUserAgentConfig(value: unknown): UserAgentConfig {
     };
   }
 
+  for (const [rawName, rawTemplateValue] of Object.entries(builtinTemplatesRecord)) {
+    const name = sanitizeAgentName(rawName);
+    if (!name) {
+      continue;
+    }
+    const rawTemplate = asRecord(rawTemplateValue);
+    normalizedBuiltinTemplates[name] = {
+      prompt: typeof rawTemplate.prompt === "string" ? rawTemplate.prompt : "",
+    };
+  }
+
   return {
     version: 1,
     agents: normalizedAgents,
+    builtinTemplates: normalizedBuiltinTemplates,
   };
+}
+
+function getDefaultBuiltinAgentTemplate(name: string): BuiltinAgentTemplateRecord | undefined {
+  return DEFAULT_BUILTIN_AGENT_TEMPLATES.find((template) => template.name === name);
 }
 
 export class CustomAgentConfigService {
@@ -129,6 +157,7 @@ export class CustomAgentConfigService {
     return {
       version: 1,
       agents: {},
+      builtinTemplates: {},
     };
   }
 
@@ -151,6 +180,25 @@ export class CustomAgentConfigService {
     );
     if (!matched) {
       throw new Error(`Agent 配置不存在：${agentName}`);
+    }
+    return matched;
+  }
+
+  listBuiltinAgentTemplates(projectPath: string): BuiltinAgentTemplateRecord[] {
+    const userConfig = this.ensureUserConfig(projectPath);
+    return DEFAULT_BUILTIN_AGENT_TEMPLATES.map((template) => ({
+      name: template.name,
+      prompt: userConfig.builtinTemplates[template.name]?.prompt ?? template.prompt,
+    }));
+  }
+
+  getBuiltinAgentTemplate(projectPath: string, templateName: string): BuiltinAgentTemplateRecord {
+    const normalizedTemplateName = sanitizeAgentName(templateName);
+    const matched = this.listBuiltinAgentTemplates(projectPath).find(
+      (template) => template.name === normalizedTemplateName,
+    );
+    if (!matched) {
+      throw new Error(`内置 Agent 模板不存在：${templateName}`);
     }
     return matched;
   }
@@ -215,6 +263,55 @@ export class CustomAgentConfigService {
     const next = normalizeUserAgentConfig({
       ...current,
       agents: reorderedAgents,
+    });
+    this.setProjectConfig(projectPath, next);
+  }
+
+  saveBuiltinAgentTemplate(projectPath: string, templateName: string, prompt: string): void {
+    const normalizedTemplateName = sanitizeAgentName(templateName);
+    const defaultTemplate = getDefaultBuiltinAgentTemplate(normalizedTemplateName);
+    if (!defaultTemplate) {
+      throw new Error(`内置 Agent 模板不存在：${templateName}`);
+    }
+
+    const current = this.ensureUserConfig(projectPath);
+    const nextBuiltinTemplates = {
+      ...current.builtinTemplates,
+    };
+
+    if (prompt === defaultTemplate.prompt) {
+      delete nextBuiltinTemplates[normalizedTemplateName];
+    } else {
+      nextBuiltinTemplates[normalizedTemplateName] = { prompt };
+    }
+
+    const next = normalizeUserAgentConfig({
+      ...current,
+      builtinTemplates: nextBuiltinTemplates,
+    });
+    this.setProjectConfig(projectPath, next);
+  }
+
+  resetBuiltinAgentTemplate(projectPath: string, templateName: string): void {
+    const normalizedTemplateName = sanitizeAgentName(templateName);
+    const defaultTemplate = getDefaultBuiltinAgentTemplate(normalizedTemplateName);
+    if (!defaultTemplate) {
+      throw new Error(`内置 Agent 模板不存在：${templateName}`);
+    }
+
+    const current = this.ensureUserConfig(projectPath);
+    if (!current.builtinTemplates[normalizedTemplateName]) {
+      return;
+    }
+
+    const nextBuiltinTemplates = {
+      ...current.builtinTemplates,
+    };
+    delete nextBuiltinTemplates[normalizedTemplateName];
+
+    const next = normalizeUserAgentConfig({
+      ...current,
+      builtinTemplates: nextBuiltinTemplates,
     });
     this.setProjectConfig(projectPath, next);
   }

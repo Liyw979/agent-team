@@ -208,6 +208,7 @@ function App() {
           ...agentFile,
           id: agentFile.name,
           displayName: getAgentDisplayName(agentFile.name),
+          isBuiltin: agentFile.name === BUILD_AGENT_NAME,
           roleSummary,
           status: runtime?.status ?? "idle",
           messageCount: runtimeSnapshot?.messageCount ?? 0,
@@ -620,6 +621,19 @@ function App() {
                                     >
                                       {agent.displayName}
                                     </p>
+                                    {agent.isBuiltin && (
+                                      <span
+                                        className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em]"
+                                        title="当前唯一允许写代码的 Agent"
+                                        style={{
+                                          color: agentColor.text,
+                                          borderColor: agentColor.border,
+                                          background: "#fff8",
+                                        }}
+                                      >
+                                        唯一可写
+                                      </span>
+                                    )}
                                   </div>
                                   {mappedPanel && (
                                     <div

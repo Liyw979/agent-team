@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   AgentRuntimeSnapshot,
+  BuiltinAgentTemplateRecord,
   AgentFlowEvent,
   CreateProjectPayload,
   DeleteAgentPayload,
@@ -10,7 +11,10 @@ import type {
   OpenTaskSessionPayload,
   ProjectSnapshot,
   ReadAgentFilePayload,
+  ReadBuiltinAgentTemplatePayload,
+  ResetBuiltinAgentTemplatePayload,
   SaveAgentPromptPayload,
+  SaveBuiltinAgentTemplatePayload,
   SubmitTaskPayload,
   TaskSnapshot,
   UpdateTopologyPayload,
@@ -32,8 +36,14 @@ const api = {
     ipcRenderer.invoke(IPC_CHANNELS.openTaskSession, payload),
   readAgentFile: (payload: ReadAgentFilePayload) =>
     ipcRenderer.invoke(IPC_CHANNELS.readAgentFile, payload),
+  readBuiltinAgentTemplate: (payload: ReadBuiltinAgentTemplatePayload): Promise<BuiltinAgentTemplateRecord> =>
+    ipcRenderer.invoke(IPC_CHANNELS.readBuiltinAgentTemplate, payload),
   saveAgentPrompt: (payload: SaveAgentPromptPayload): Promise<ProjectSnapshot> =>
     ipcRenderer.invoke(IPC_CHANNELS.saveAgentPrompt, payload),
+  saveBuiltinAgentTemplate: (payload: SaveBuiltinAgentTemplatePayload): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke(IPC_CHANNELS.saveBuiltinAgentTemplate, payload),
+  resetBuiltinAgentTemplate: (payload: ResetBuiltinAgentTemplatePayload): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke(IPC_CHANNELS.resetBuiltinAgentTemplate, payload),
   deleteAgent: (payload: DeleteAgentPayload): Promise<ProjectSnapshot> =>
     ipcRenderer.invoke(IPC_CHANNELS.deleteAgent, payload),
   saveTopology: (payload: UpdateTopologyPayload): Promise<ProjectSnapshot> =>

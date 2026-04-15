@@ -1,6 +1,17 @@
-export type AgentStatus = "idle" | "running" | "completed" | "failed" | "needs_revision";
+export type AgentStatus =
+  | "idle"
+  | "running"
+  | "completed"
+  | "failed"
+  | "needs_revision";
 
-export type TaskStatus = "pending" | "running" | "waiting" | "finished" | "failed" | "needs_revision";
+export type TaskStatus =
+  | "pending"
+  | "running"
+  | "waiting"
+  | "finished"
+  | "failed"
+  | "needs_revision";
 
 export type PermissionMode = "allow" | "ask" | "deny";
 
@@ -51,6 +62,11 @@ export interface TaskRecord {
 }
 
 export interface AgentFileRecord {
+  name: string;
+  prompt: string;
+}
+
+export interface BuiltinAgentTemplateRecord {
   name: string;
   prompt: string;
 }
@@ -145,6 +161,7 @@ export interface TaskSnapshot {
 export interface ProjectSnapshot {
   project: ProjectRecord;
   agentFiles: AgentFileRecord[];
+  builtinAgentTemplates: BuiltinAgentTemplateRecord[];
   topology: TopologyRecord;
   messages: MessageRecord[];
   tasks: TaskSnapshot[];
@@ -171,11 +188,27 @@ export interface ReadAgentFilePayload {
   agentName: string;
 }
 
+export interface ReadBuiltinAgentTemplatePayload {
+  projectId: string;
+  templateName: string;
+}
+
 export interface SaveAgentPromptPayload {
   projectId: string;
   currentAgentName: string;
   nextAgentName: string;
   prompt: string;
+}
+
+export interface SaveBuiltinAgentTemplatePayload {
+  projectId: string;
+  templateName: string;
+  prompt: string;
+}
+
+export interface ResetBuiltinAgentTemplatePayload {
+  projectId: string;
+  templateName: string;
 }
 
 export interface UpdateTopologyPayload {
@@ -237,6 +270,29 @@ export const DEFAULT_TOOL_PERMISSIONS: ToolPermission[] = [
   { name: "skill", mode: "allow" },
 ];
 
+export const DEFAULT_BUILTIN_AGENT_TEMPLATES: BuiltinAgentTemplateRecord[] = [
+  {
+    name: "BA",
+    prompt:
+      "你是 BA。\n你的职责：\n1. 润色原始 User Story，输出完善、可执行的需求，不需要写代码\n2. 明确目标、范围、约束与验收标准，让实现方可以直接推进",
+  },
+  {
+    name: "UnitTest",
+    prompt:
+      "你是单元测试审查角色，负责检查单元测试是否遵循四条标准：一个功能点一个测试、分支覆盖完全、每个测试有注释、执行极快、尽量使用纯函数而不是 Mock。\n\n并给出修改建议。",
+  },
+  {
+    name: "TaskReview",
+    prompt:
+      "你是任务交付审视角色，负责站在最终交付质量的角度审视本轮结果是否已经达到可交付标准。\n\n请重点检查：\n1. 用户真正要解决的问题是否被完整解决。\n2. 最终交付是否自洽，关键说明、验证结论与必要文档是否同步。\n3. 是否还存在阻塞交付的问题，若有就明确指出具体修改意见。",
+  },
+  {
+    name: "CodeReview",
+    prompt:
+      "你是代码审查角色，关注冗余实现、可读性和是否符合 BA 定义的使用旅程。\n\n要求代码最小化改动，思考并质疑当前的改动是不是最小的，越少改动越好审查，并给出修改建议。",
+  },
+];
+
 function createNode(name: string): TopologyNode {
   return {
     id: name,
@@ -260,7 +316,10 @@ export function resolveTopologyStartAgent(
   agents: Array<Pick<TopologyAgentSeed, "name">>,
   preferredStartAgentId?: string | null,
 ): string | null {
-  if (preferredStartAgentId && agents.some((agent) => agent.name === preferredStartAgentId)) {
+  if (
+    preferredStartAgentId &&
+    agents.some((agent) => agent.name === preferredStartAgentId)
+  ) {
     return preferredStartAgentId;
   }
 
@@ -297,15 +356,20 @@ export function resolveTopologyAgentOrder(
   return order;
 }
 
-export function createDefaultTopology(projectId: string, agents: TopologyAgentSeed[]): TopologyRecord {
+export function createDefaultTopology(
+  projectId: string,
+  agents: TopologyAgentSeed[],
+): TopologyRecord {
   const agentOrderIds = resolveTopologyAgentOrder(agents);
   const names = new Set(agentOrderIds);
   const nodes = agentOrderIds.map(createNode);
   const edges: TopologyEdge[] = [];
 
   const startAgentName = resolveTopologyStartAgent(agents);
-  const startAgent = agents.find((agent) => agent.name === startAgentName) ?? null;
-  const nextAgent = agents.find((agent) => agent.name !== startAgent?.name) ?? null;
+  const startAgent =
+    agents.find((agent) => agent.name === startAgentName) ?? null;
+  const nextAgent =
+    agents.find((agent) => agent.name !== startAgent?.name) ?? null;
 
   const push = (
     source: string | null | undefined,
@@ -318,7 +382,12 @@ export function createDefaultTopology(projectId: string, agents: TopologyAgentSe
     if (!names.has(source) || !names.has(target)) {
       return;
     }
-    edges.push({ id: `${source}__${target}__${triggerOn}`, source, target, triggerOn });
+    edges.push({
+      id: `${source}__${target}__${triggerOn}`,
+      source,
+      target,
+      triggerOn,
+    });
   };
 
   push(startAgent?.name, nextAgent?.name, "association");

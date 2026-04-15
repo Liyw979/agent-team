@@ -28,6 +28,7 @@ function createProjectSnapshot(topology: TopologyRecord): ProjectSnapshot {
         prompt: "",
       },
     ],
+    builtinAgentTemplates: [],
     topology,
     messages: [],
     tasks: [],

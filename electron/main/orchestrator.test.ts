@@ -4,16 +4,44 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { DEFAULT_BUILTIN_AGENT_TEMPLATES } from "@shared/types";
 import { Orchestrator } from "./orchestrator";
 
 function createTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "agentflow-orchestrator-"));
 }
 
-function writeAgentFile(projectPath: string, fileName: string, body: string) {
-  const agentsDir = path.join(projectPath, ".opencode", "agents");
-  fs.mkdirSync(agentsDir, { recursive: true });
-  fs.writeFileSync(path.join(agentsDir, fileName), body, "utf8");
+async function addBuiltinAgents(
+  orchestrator: Orchestrator,
+  projectId: string,
+  agentNames: string[],
+) {
+  let latestProject = await orchestrator.getProjectSnapshot(projectId);
+  for (const agentName of agentNames) {
+    const template = DEFAULT_BUILTIN_AGENT_TEMPLATES.find((item) => item.name === agentName);
+    assert.notEqual(template, undefined, `缺少内置模板：${agentName}`);
+    latestProject = await orchestrator.saveAgentPrompt({
+      projectId,
+      currentAgentName: "",
+      nextAgentName: agentName,
+      prompt: template.prompt,
+    });
+  }
+  return latestProject;
+}
+
+async function addCustomAgent(
+  orchestrator: Orchestrator,
+  projectId: string,
+  agentName: string,
+  prompt: string,
+) {
+  return orchestrator.saveAgentPrompt({
+    projectId,
+    currentAgentName: "",
+    nextAgentName: agentName,
+    prompt,
+  });
 }
 
 test("task init 会写入 Zellij session 信息并补齐运行态", async () => {
@@ -65,6 +93,7 @@ test("task init 会写入 Zellij session 信息并补齐运行态", async () => 
       ],
       openTaskSession: async () => undefined,
       deleteTaskSession: async () => undefined,
+      setOpenCodeAttachBaseUrl: () => undefined,
     } as never,
   });
 
@@ -107,6 +136,7 @@ test("zellij 不可用时会追加系统提醒", async () => {
       materializePanelBindings: async () => [],
       openTaskSession: async () => undefined,
       deleteTaskSession: async () => undefined,
+      setOpenCodeAttachBaseUrl: () => undefined,
     } as never,
   });
 
@@ -114,6 +144,44 @@ test("zellij 不可用时会追加系统提醒", async () => {
   const task = await orchestrator.initializeTask({ projectId: project.project.id, title: "demo" });
 
   assert.equal(task.messages.some((message) => message.meta?.kind === "zellij-missing"), true);
+});
+
+test("内置模板可按 Project 单独覆盖且不会直接写入 agentFiles", async () => {
+  const userDataPath = createTempDir();
+  const projectAPath = createTempDir();
+  const projectBPath = createTempDir();
+  const orchestrator = new Orchestrator({
+    userDataPath,
+    enableEventStream: false,
+  });
+
+  const defaultBaPrompt = DEFAULT_BUILTIN_AGENT_TEMPLATES.find((template) => template.name === "BA")?.prompt;
+  assert.notEqual(defaultBaPrompt, undefined);
+
+  const projectA = await orchestrator.createProject({ path: projectAPath });
+  assert.equal(projectA.agentFiles.some((agent) => agent.name === "BA"), false);
+  assert.equal(
+    projectA.builtinAgentTemplates.find((template) => template.name === "BA")?.prompt,
+    defaultBaPrompt,
+  );
+
+  const updatedProjectA = await orchestrator.saveBuiltinAgentTemplate({
+    projectId: projectA.project.id,
+    templateName: "BA",
+    prompt: "你是 BA（项目 A 定制版）。\n请把需求拆到开发可以直接执行。",
+  });
+  assert.equal(
+    updatedProjectA.builtinAgentTemplates.find((template) => template.name === "BA")?.prompt,
+    "你是 BA（项目 A 定制版）。\n请把需求拆到开发可以直接执行。",
+  );
+  assert.equal(updatedProjectA.agentFiles.some((agent) => agent.name === "BA"), false);
+
+  const projectB = await orchestrator.createProject({ path: projectBPath });
+  assert.equal(
+    projectB.builtinAgentTemplates.find((template) => template.name === "BA")?.prompt,
+    defaultBaPrompt,
+  );
+  assert.equal(projectB.agentFiles.some((agent) => agent.name === "BA"), false);
 });
 
 test("审视通过但没有可展示高层结果时返回简洁兜底文案", () => {
@@ -176,6 +244,7 @@ test("群聊保留 @Agent，但下游转发读取的用户消息会去掉寻址 
       materializePanelBindings: async () => [],
       openTaskSession: async () => undefined,
       deleteTaskSession: async () => undefined,
+      setOpenCodeAttachBaseUrl: () => undefined,
     } as never,
   });
 
@@ -249,6 +318,7 @@ test("审视 Agent 执行中止时不会伪造成整改意见", async () => {
       materializePanelBindings: async () => [],
       openTaskSession: async () => undefined,
       deleteTaskSession: async () => undefined,
+      setOpenCodeAttachBaseUrl: () => undefined,
     } as never,
   });
   const typed = orchestrator as unknown as Orchestrator & {
@@ -282,7 +352,8 @@ test("审视 Agent 执行中止时不会伪造成整改意见", async () => {
     ensureAgentSession: () => Promise<string>;
   };
 
-  const project = await orchestrator.createProject({ path: projectPath });
+  let project = await orchestrator.createProject({ path: projectPath });
+  project = await addBuiltinAgents(orchestrator, project.project.id, ["CodeReview"]);
   const topology = {
     ...project.topology,
     edges: [
@@ -357,21 +428,9 @@ test("审视 Agent 执行中止时不会伪造成整改意见", async () => {
   );
 });
 
-test("所有 Agent 都已完成时 Task 会切到 finished 并追加结束系统消息", async () => {
+test("Task 收口为 finished 时会统一把所有 Agent 节点显示为已完成，并追加结束系统消息", async () => {
   const userDataPath = createTempDir();
   const projectPath = createTempDir();
-  writeAgentFile(
-    projectPath,
-    "QA.md",
-    `---
-	mode: primary
-role: integration_test
-permission:
-  read: allow
----
-你是 QA。
-`,
-  );
 
   const orchestrator = new Orchestrator({
     userDataPath,
@@ -383,6 +442,7 @@ permission:
       materializePanelBindings: async () => [],
       openTaskSession: async () => undefined,
       deleteTaskSession: async () => undefined,
+      setOpenCodeAttachBaseUrl: () => undefined,
     } as never,
   });
 
@@ -440,7 +500,8 @@ permission:
     },
   });
 
-  const project = await orchestrator.createProject({ path: projectPath });
+  let project = await orchestrator.createProject({ path: projectPath });
+  project = await addCustomAgent(orchestrator, project.project.id, "QA", "你是 QA。");
   await orchestrator.saveTopology({
     projectId: project.project.id,
     topology: {
@@ -522,6 +583,7 @@ test("Build 在收到 UnitTest 回流后再次交付时会重新触发全部 ass
       materializePanelBindings: async () => [],
       openTaskSession: async () => undefined,
       deleteTaskSession: async () => undefined,
+      setOpenCodeAttachBaseUrl: () => undefined,
     } as never,
   });
 
@@ -583,7 +645,8 @@ test("Build 在收到 UnitTest 回流后再次交付时会重新触发全部 ass
     };
   };
 
-  const project = await orchestrator.createProject({ path: projectPath });
+  let project = await orchestrator.createProject({ path: projectPath });
+  project = await addBuiltinAgents(orchestrator, project.project.id, ["UnitTest", "CodeReview"]);
   await orchestrator.saveTopology({
     projectId: project.project.id,
     topology: {
@@ -638,17 +701,17 @@ test("Build 在收到 UnitTest 回流后再次交付时会重新触发全部 ass
   );
 
   const snapshot = await orchestrator.getTaskSnapshot(task.task.id);
-  const buildTriggerMessages = snapshot.messages.filter(
-    (message) => message.sender === "Build" && message.meta?.kind === "high-level-trigger",
+  assert.equal(callCount.get("Build"), 2);
+  assert.equal(callCount.get("UnitTest"), 2);
+  assert.equal(callCount.get("CodeReview"), 2);
+  assert.deepEqual(
+    snapshot.agents.map((agent) => [agent.name, agent.runCount]),
+    [
+      ["Build", 2],
+      ["CodeReview", 2],
+      ["UnitTest", 2],
+    ],
   );
-
-  assert.equal(buildTriggerMessages.length >= 2, true);
-  const latestTriggerTargets = (buildTriggerMessages.at(-1)?.meta?.targetAgentIds ?? "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .sort();
-  assert.deepEqual(latestTriggerTargets, ["CodeReview", "UnitTest"]);
 });
 
 test("旧运行数据里悬空 idle Agent 不会阻止 Task 自动收口", async () => {
@@ -680,6 +743,7 @@ test("旧运行数据里悬空 idle Agent 不会阻止 Task 自动收口", async
       materializePanelBindings: async () => [],
       openTaskSession: async () => undefined,
       deleteTaskSession: async () => undefined,
+      setOpenCodeAttachBaseUrl: () => undefined,
     } as never,
   });
 
@@ -690,7 +754,18 @@ test("旧运行数据里悬空 idle Agent 不会阻止 Task 自动收口", async
     };
   };
 
-  const project = await orchestrator.createProject({ path: projectPath });
+  let project = await orchestrator.createProject({ path: projectPath });
+  project = await addBuiltinAgents(
+    orchestrator,
+    project.project.id,
+    ["BA", "UnitTest", "TaskReview", "CodeReview"],
+  );
+  project = await addCustomAgent(
+    orchestrator,
+    project.project.id,
+    "IntegrationTest",
+    "你是集成测试角色，负责验证跨模块集成与关键路径。",
+  );
   await orchestrator.saveTopology({
     projectId: project.project.id,
     topology: {

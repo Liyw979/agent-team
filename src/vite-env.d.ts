@@ -3,6 +3,7 @@
 import type {
   AgentFileRecord,
   AgentRuntimeSnapshot,
+  BuiltinAgentTemplateRecord,
   AgentFlowEvent,
   CreateProjectPayload,
   DeleteAgentPayload,
@@ -11,7 +12,10 @@ import type {
   OpenTaskSessionPayload,
   ProjectSnapshot,
   ReadAgentFilePayload,
+  ReadBuiltinAgentTemplatePayload,
+  ResetBuiltinAgentTemplatePayload,
   SaveAgentPromptPayload,
+  SaveBuiltinAgentTemplatePayload,
   SubmitTaskPayload,
   TaskSnapshot,
   UpdateTopologyPayload,
@@ -27,7 +31,10 @@ declare global {
       deleteTask: (payload: DeleteTaskPayload) => Promise<ProjectSnapshot>;
       openTaskSession: (payload: OpenTaskSessionPayload) => Promise<void>;
       readAgentFile: (payload: ReadAgentFilePayload) => Promise<AgentFileRecord>;
+      readBuiltinAgentTemplate: (payload: ReadBuiltinAgentTemplatePayload) => Promise<BuiltinAgentTemplateRecord>;
       saveAgentPrompt: (payload: SaveAgentPromptPayload) => Promise<ProjectSnapshot>;
+      saveBuiltinAgentTemplate: (payload: SaveBuiltinAgentTemplatePayload) => Promise<ProjectSnapshot>;
+      resetBuiltinAgentTemplate: (payload: ResetBuiltinAgentTemplatePayload) => Promise<ProjectSnapshot>;
       deleteAgent: (payload: DeleteAgentPayload) => Promise<ProjectSnapshot>;
       saveTopology: (payload: UpdateTopologyPayload) => Promise<ProjectSnapshot>;
       getTaskRuntime: (payload: GetTaskRuntimePayload) => Promise<AgentRuntimeSnapshot[]>;

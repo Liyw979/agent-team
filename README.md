@@ -49,13 +49,13 @@
 - 拓扑图在面板尺寸变化时会保持“Agent 在上、历史区在下、首尾节点贴近左右边界但保留少量留白、顶部预留连线通道”的布局约束，而不是把整张图简单等比缩放后居中
 - 拓扑图历史区会优先展示 Agent 最近的运行活动，并明确区分思考、普通消息、步骤与 Tool Call 参数摘要，而不只是单行运行状态
 - 右下角展示 Project 全量 Agent，以及它们在当前 Task 语境下的状态；点击 Agent 可直接编辑并保存当前 Agent 名称与 prompt
-- Agent 来自用户目录中的自定义配置（`$AGENTFLOW_USER_DATA_DIR/custom-agents.json`），前端仅支持编辑名称与 prompt，权限配置不可编辑；一旦 Project 进入任务驱动阶段（已有 Task 运行记录），仅允许更新 prompt，名称修改、新增与删除会被锁定
+- Agent 来自用户目录中的自定义配置（`$AGENTFLOW_USER_DATA_DIR/custom-agents.json`）；同一份配置里还会保存当前 Project 的“内置模板 prompt 覆盖”。内置模板默认仍是可选项，不会自动写入当前 Project，可先单独编辑模板 prompt 再按需写入为 Agent，而且模板修改只影响当前 Project，不影响新项目默认值。前端不支持编辑权限配置；一旦 Project 进入任务驱动阶段（已有 Task 运行记录），仅允许更新已有 Agent 的 prompt，名称修改、新增与删除会被锁定，但模板 prompt 仍可继续维护
 - 只允许用户自定义 prompt；启动 OpenCode 时会通过 `OPENCODE_CONFIG_CONTENT` 固定注入 `write / edit / bash / task / patch: deny`
 - 当前处于项目开发初期，不要求兼容历史数据；如果现有 Project 状态、拓扑或运行数据与当前实现不一致，优先直接修正当前数据与实现，不额外为旧数据添加兼容分支
 - 默认拓扑只在首次初始化且当前无拓扑数据时按当前 Agent 列表自动推断
 - Project 是全局注册信息；拓扑、Task、消息、panel 绑定等运行数据都保存在各自 Project 目录下的 `.agentflow/`
 - Project 拓扑是唯一真源；Task 后续执行始终读取当前 Project 生效中的拓扑，而不是依赖固定 Agent 名称
-- Task 不再快照 Agent 的 prompt / permission 定义；运行时始终读取用户目录里当前生效的自定义 Agent 配置，`.agentflow/state.json` 里的 `taskAgents` 只保留运行态字段
+- Task 不再快照 Agent 的 prompt / permission 定义；运行时始终读取用户目录里当前 Project 当前生效的自定义 Agent 配置，`.agentflow/state.json` 里的 `taskAgents` 只保留运行态字段
 - 若本机未安装或无法连接 `opencode serve`，会退化为模拟响应
 
 ## 目录结构
@@ -170,7 +170,7 @@ CLI 能力分组：
 
 - 当前实现使用单个 `opencode serve`；会优先尝试监听 `127.0.0.1:4096`，若端口已被非 OpenCode 进程占用，则自动切换到本机空闲端口，并让 pane attach / 健康检查跟随实际端口
 - 不同 Project 通过 `x-opencode-directory` 请求头按目录路由到各自工作区实例
-- Agent 配置会在 `opencode serve` 启动前一次性注入，且只注入当前 Project 的自定义 Agent（仅 name + prompt，权限固定 deny）
+- Agent 配置会在 `opencode serve` 启动前一次性注入，且只注入当前 Project 已经写入的自定义 Agent（仅 name + prompt，权限固定 deny）；未写入的内置模板只用于 UI 里按需创建 Agent，不会直接注入运行时
 - 默认拓扑只在首次初始化且当前还没有拓扑数据时按 Agent `role / mode / 是否内置` 自动推断；后续运行时不依赖固定名字
 - OpenCode 配置只在启动 `opencode serve` 时通过 `OPENCODE_CONFIG_CONTENT` 注入；运行过程中不再做配置 Reload
 - `task init` 会先创建 Task，并完成该 Task 下全部 Agent 的 OpenCode session 与 Zellij pane 初始化；GUI 群聊会优先推荐并默认选中当前列表第一个 Agent

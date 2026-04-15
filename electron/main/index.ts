@@ -10,7 +10,10 @@ import type {
   OpenAgentPanePayload,
   OpenTaskSessionPayload,
   ReadAgentFilePayload,
+  ReadBuiltinAgentTemplatePayload,
+  ResetBuiltinAgentTemplatePayload,
   SaveAgentPromptPayload,
+  SaveBuiltinAgentTemplatePayload,
   SubmitTaskPayload,
   UpdateTopologyPayload,
 } from "@shared/types";
@@ -181,8 +184,20 @@ app.whenReady().then(async () => {
     (_event, payload: ReadAgentFilePayload) => orchestrator.readAgentFile(payload),
   );
   ipcMain.handle(
+    IPC_CHANNELS.readBuiltinAgentTemplate,
+    (_event, payload: ReadBuiltinAgentTemplatePayload) => orchestrator.readBuiltinAgentTemplate(payload),
+  );
+  ipcMain.handle(
     IPC_CHANNELS.saveAgentPrompt,
     (_event, payload: SaveAgentPromptPayload) => orchestrator.saveAgentPrompt(payload),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.saveBuiltinAgentTemplate,
+    (_event, payload: SaveBuiltinAgentTemplatePayload) => orchestrator.saveBuiltinAgentTemplate(payload),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.resetBuiltinAgentTemplate,
+    (_event, payload: ResetBuiltinAgentTemplatePayload) => orchestrator.resetBuiltinAgentTemplate(payload),
   );
   ipcMain.handle(
     IPC_CHANNELS.deleteAgent,
