@@ -3,6 +3,7 @@ import type { ProjectSnapshot, TaskSnapshot } from "@shared/types";
 import { cn } from "@/lib/utils";
 import { getAgentColorToken } from "@/lib/agent-colors";
 import { mergeTaskChatMessages, type ChatMessageItem } from "@/lib/chat-messages";
+import { getMentionOptions } from "@/lib/chat-mentions";
 
 interface ChatWindowProps {
   project: ProjectSnapshot | undefined;
@@ -234,6 +235,7 @@ export function ChatWindow({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messageViewportRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
+  const mentionQuery = mentionContext?.query ?? null;
 
   useEffect(() => {
     if (task) {
@@ -252,18 +254,16 @@ export function ChatWindow({
     [task],
   );
   const mentionOptions = useMemo(() => {
-    if (!mentionContext) {
+    if (mentionQuery === null) {
       return [];
     }
-    const query = mentionContext.query.toLowerCase();
-    const filtered = availableAgents.filter((name) => name.toLowerCase().includes(query));
-    return [...filtered].sort((left, right) => left.localeCompare(right));
-  }, [availableAgents, mentionContext]);
+    return getMentionOptions(availableAgents, mentionQuery);
+  }, [availableAgents, mentionQuery]);
 
   useEffect(() => {
     const defaultIndex = defaultAgentName ? mentionOptions.indexOf(defaultAgentName) : -1;
     setActiveIndex(defaultIndex >= 0 ? defaultIndex : 0);
-  }, [defaultAgentName, mentionContext?.query, mentionOptions]);
+  }, [defaultAgentName, mentionOptions]);
 
   useEffect(() => {
     const viewport = messageViewportRef.current;
@@ -343,9 +343,7 @@ export function ChatWindow({
 
     const textarea = textareaRef.current;
     if (nextContext && textarea) {
-      const matchingOptions = availableAgents.filter((name) =>
-        name.toLowerCase().includes(nextContext.query.toLowerCase()),
-      );
+      const matchingOptions = getMentionOptions(availableAgents, nextContext.query);
       updateMenuPosition(textarea, caret, matchingOptions.length);
     }
   }
@@ -500,6 +498,15 @@ export function ChatWindow({
                 });
               }}
               onKeyUp={(event) => {
+                if (
+                  event.key === "ArrowDown" ||
+                  event.key === "ArrowUp" ||
+                  event.key === "Enter" ||
+                  event.key === "Tab" ||
+                  event.key === "Escape"
+                ) {
+                  return;
+                }
                 updateMentionState(event.currentTarget.value, event.currentTarget.selectionStart ?? 0);
               }}
               onKeyDown={(event) => {
