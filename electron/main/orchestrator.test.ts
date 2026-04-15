@@ -806,7 +806,7 @@ test("审视 Agent 执行中止时不会伪造成整改意见", async () => {
   );
 });
 
-test("Task 收口为 finished 时会统一把所有 Agent 节点显示为已完成，并追加结束系统消息", async () => {
+test("Task 进入 finished 状态时会统一把所有 Agent 节点显示为已完成，并追加结束系统消息", async () => {
   const userDataPath = createTempDir();
   const projectPath = createTempDir();
 
@@ -1093,7 +1093,7 @@ test("Build 在收到 UnitTest 回流后再次交付时会重新触发全部 ass
   );
 });
 
-test("旧运行数据里悬空 idle Agent 不会阻止 Task 自动收口", async () => {
+test("旧运行数据里悬空 idle Agent 不会阻止 Task 自动结束", async () => {
   const userDataPath = createTempDir();
   const projectPath = createTempDir();
   const orchestrator = new Orchestrator({
