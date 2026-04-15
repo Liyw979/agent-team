@@ -36,7 +36,7 @@
 - 群聊落库与 Agent 间转发只使用 OpenCode 返回消息里的公开 `text` part；`reasoning`、步骤和工具调用不会混入群聊正文或下游 Prompt
 - 这类批量 `agent -> agent` 派发消息仅用于群聊展示给人看；Agent 自动派发下游时，不再补充任何群聊历史，但会携带完整用户消息与当前这一次的上游结果；若上游结果已完整包含用户消息，会自动去重
 - 用户在 Task 群聊里直接 `@Agent` 时，群聊展示仍保留原始 `@Agent` 文本；底层以 `raw` 方式转发给目标 Agent 的消息会统一封装成单行 `[发送者] <正文>`，并自动去掉仅用于寻址的开头或结尾 `@Agent`
-- Agent 自动派发下游时会拆成结构化段落：用户原始需求放入 `[User Message]`，来源消息放入固定的 `[@来源 Agent Message]` 段；对非 `Build` 下游，系统会把当前 Project Git Diff 的精简摘要附加到转发 Prompt 的 `[Requeirement]` 段；发给 `Build` 时不再附带 `[Requeirement]`
+- Agent 自动派发下游时会拆成结构化段落：用户原始需求放入 `[User Message]`，来源消息放入带真实 Agent 名称的 `[<AgentName> Message]` 段；对非 `Build` 下游，系统会把当前 Project Git Diff 的精简摘要附加到转发 Prompt 的 `[Requeirement]` 段；发给 `Build` 时不再附带 `[Requeirement]`
 - 每个 Agent 都会按名称自动分配一套稳定配色；聊天记录里会使用对应的浅色底、描边与标签色来区分不同 Agent
 - 右下角团队成员列表支持直接调整 Agent 顺序；该顺序会持久化到拓扑配置，并直接决定右上角拓扑图从左到右的节点排列
 - 团队成员面板顶部仅展示当前 Task 的 panel 绑定摘要，不再额外显示最后一条群聊消息预览
@@ -49,7 +49,7 @@
 - 拓扑图在面板尺寸变化时会保持“Agent 在上、历史区在下、首尾节点贴近左右边界但保留少量留白、顶部预留连线通道”的布局约束，而不是把整张图简单等比缩放后居中
 - 拓扑图历史区会优先展示 Agent 最近的运行活动，并明确区分思考、普通消息、步骤与 Tool Call 参数摘要，而不只是单行运行状态
 - 右下角展示 Project 全量 Agent，以及它们在当前 Task 语境下的状态；点击 Agent 可直接编辑并保存当前 Agent 名称与 prompt
-- Agent 来自用户目录中的自定义配置（`$AGENTFLOW_USER_DATA_DIR/custom-agents.json`）；同一份配置里还会保存当前 Project 的“内置模板 prompt 覆盖”。内置模板默认仍是可选项，不会自动写入当前 Project，可先单独编辑模板 prompt 再按需写入为 Agent，而且模板修改只影响当前 Project，不影响新项目默认值。前端不支持编辑权限配置；一旦当前 Project 出现 Task 启动记录，Agent 与内置模板配置都会被锁定，不允许继续修改
+- Agent 来自用户目录中的自定义配置（`$AGENTFLOW_USER_DATA_DIR/custom-agents.json`）；同一份配置里还会保存当前 Project 的“内置模板 prompt 覆盖”。内置模板默认仍是可选项，不会自动写入当前 Project，可先单独编辑可编辑模板的 prompt，再按需写入为 Agent，而且模板修改只影响当前 Project，不影响新项目默认值。Build 也作为默认模板提供，但它使用 OpenCode 自带 prompt，只负责选择是否加入当前 Project，并支持像其他已写入 Agent 一样删除。前端不支持编辑权限配置；一旦当前 Project 出现 Task 启动记录，Agent 与内置模板配置都会被锁定，不允许继续修改
 - 只允许用户自定义 prompt；启动 OpenCode 时会通过 `OPENCODE_CONFIG_CONTENT` 固定注入 `write / edit / bash / task / patch: deny`
 - 当前处于项目开发初期，不要求兼容历史数据；如果现有 Project 状态、拓扑或运行数据与当前实现不一致，优先直接修正当前数据与实现，不额外为旧数据添加兼容分支
 - 默认拓扑只在首次初始化且当前无拓扑数据时按当前 Agent 列表自动推断
@@ -179,7 +179,7 @@ CLI 能力分组：
 
 - 当前实现为每个 Project 启动独立的 `opencode serve`；实例会优先尝试监听 `127.0.0.1:4096`，若该端口已被占用，则自动切换到本机空闲端口，并让该 Project 的 pane attach / 健康检查跟随各自实际端口
 - 不同 Project 的请求仍会携带 `x-opencode-directory` 请求头，保持会话与工作区目录一致
-- Agent 配置会在各自 Project 的 `opencode serve` 启动前一次性注入，且只注入当前 Project 已经写入的自定义 Agent（仅 name + prompt，权限固定 deny）；未写入的内置模板只用于 UI 里按需创建 Agent，不会直接注入运行时
+- Agent 配置会在各自 Project 的 `opencode serve` 启动前一次性注入；其中普通已写入 Agent 会按 `name + prompt` 注入并固定 deny 写权限，Build 即使已写入 Project 也继续复用 OpenCode 内置 `build` agent，不会注入自定义 prompt；未写入的内置模板只用于 UI 里按需创建 Agent，不会直接注入运行时
 - 默认拓扑只在首次初始化且当前还没有拓扑数据时按 Agent `role / mode / 是否内置` 自动推断；后续运行时不依赖固定名字
 - OpenCode 配置只在启动 `opencode serve` 时通过 `OPENCODE_CONFIG_CONTENT` 注入；运行过程中不再做配置 Reload
 - `task init` 会先创建 Task，并完成该 Task 下全部 Agent 的 OpenCode session 与 Zellij pane 初始化；GUI 群聊会优先推荐并默认选中当前列表第一个 Agent

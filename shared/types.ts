@@ -17,6 +17,10 @@ export type PermissionMode = "allow" | "ask" | "deny";
 
 export const BUILD_AGENT_NAME = "Build";
 
+export function usesOpenCodeBuiltinPrompt(agentName: string): boolean {
+  return agentName.trim().toLowerCase() === BUILD_AGENT_NAME.toLowerCase();
+}
+
 export type AgentRole =
   | "business_analyst"
   | "implementation"
@@ -271,6 +275,10 @@ export const DEFAULT_TOOL_PERMISSIONS: ToolPermission[] = [
 ];
 
 export const DEFAULT_BUILTIN_AGENT_TEMPLATES: BuiltinAgentTemplateRecord[] = [
+  {
+    name: BUILD_AGENT_NAME,
+    prompt: "",
+  },
   {
     name: "BA",
     prompt:

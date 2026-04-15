@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
-  BUILD_AGENT_NAME,
   DEFAULT_BUILTIN_AGENT_TEMPLATES,
-  type BuiltinAgentTemplateRecord,
   type ProjectSnapshot,
+  usesOpenCodeBuiltinPrompt,
 } from "@shared/types";
 
 export const NEW_AGENT_DRAFT_PATH = "__agentflow_new_agent__";
@@ -52,7 +51,7 @@ export function AgentConfigModal({
   const [addingPresets, setAddingPresets] = useState(false);
 
   const viewableAgents = useMemo(
-    () => project?.agentFiles.filter((agent) => agent.name !== BUILD_AGENT_NAME) ?? [],
+    () => project?.agentFiles ?? [],
     [project],
   );
   const hasTaskRecords = (project?.tasks.length ?? 0) > 0;
@@ -88,7 +87,12 @@ export function AgentConfigModal({
   );
   const creatingNewAgent = selectedPath === NEW_AGENT_DRAFT_PATH;
   const editingBuiltinTemplate = Boolean(selectedBuiltinTemplate);
-  const isNameEditingLocked = hasTaskRecords || editingBuiltinTemplate;
+  const selectedFileUsesBuiltinPrompt = usesOpenCodeBuiltinPrompt(selectedFile?.name ?? "");
+  const selectedTemplateUsesBuiltinPrompt = usesOpenCodeBuiltinPrompt(selectedBuiltinTemplate?.name ?? "");
+  const currentSelectionUsesBuiltinPrompt =
+    selectedFileUsesBuiltinPrompt || selectedTemplateUsesBuiltinPrompt;
+  const isNameEditingLocked =
+    hasTaskRecords || editingBuiltinTemplate || selectedFileUsesBuiltinPrompt;
   const isNewAgentCreationLocked = hasTaskRecords;
   const isAnyConfigEditingLocked = hasTaskRecords;
   const isPromptEditingLocked =
@@ -97,6 +101,7 @@ export function AgentConfigModal({
     || deleting
     || resettingTemplate
     || isAnyConfigEditingLocked
+    || currentSelectionUsesBuiltinPrompt
     || (creatingNewAgent && isNewAgentCreationLocked);
 
   useEffect(() => {
@@ -209,6 +214,7 @@ export function AgentConfigModal({
     || resettingTemplate
     || !hasUnsavedChanges
     || !agentName.trim()
+    || currentSelectionUsesBuiltinPrompt
     || (creatingNewAgent && isNewAgentCreationLocked)
     || isRenamingBlocked;
   const deleteDisabled =
@@ -228,6 +234,7 @@ export function AgentConfigModal({
     || hasTaskRecords
     || editingBuiltinTemplate
     || !selectedFile
+    || selectedFileUsesBuiltinPrompt
     || !selectedAgentDefaultTemplate
     || prompt === selectedAgentDefaultTemplate.prompt;
   const resetTemplateDisabled =
@@ -237,6 +244,7 @@ export function AgentConfigModal({
     || resettingTemplate
     || hasTaskRecords
     || !editingBuiltinTemplate
+    || selectedTemplateUsesBuiltinPrompt
     || prompt === (builtinTemplates.find((template) => template.name === selectedBuiltinTemplate?.name)?.prompt ?? "");
   const canAddSelectedPresets = selectedPresetNames.length > 0
     && !isNewAgentCreationLocked
@@ -250,6 +258,11 @@ export function AgentConfigModal({
     || hasTaskRecords
     || isNewAgentCreationLocked
     || !agentName.trim();
+  const showResetBuiltinTemplateButton = editingBuiltinTemplate && !selectedTemplateUsesBuiltinPrompt;
+  const showResetAgentPromptButton =
+    !editingBuiltinTemplate && Boolean(selectedAgentDefaultTemplate) && !selectedFileUsesBuiltinPrompt;
+  const showRestoreButton = !currentSelectionUsesBuiltinPrompt || creatingNewAgent;
+  const showSaveButton = !currentSelectionUsesBuiltinPrompt || creatingNewAgent;
 
   async function handleAddPresetAgents() {
     if (!project || isNewAgentCreationLocked || addingPresets || selectedPresetNames.length === 0) {
@@ -304,6 +317,9 @@ export function AgentConfigModal({
     setSaveSuccess(null);
     try {
       if (editingBuiltinTemplate && selectedBuiltinTemplate) {
+        if (selectedTemplateUsesBuiltinPrompt) {
+          throw new Error("Build 使用 OpenCode 内置 prompt，不支持在这里保存模板内容。");
+        }
         if (hasTaskRecords) {
           throw new Error("当前 Project 已有 Task 启动记录，不允许再修改内置模板。");
         }
@@ -325,6 +341,9 @@ export function AgentConfigModal({
       }
 
       const nextAgentName = agentName.trim();
+      if (selectedFileUsesBuiltinPrompt) {
+        throw new Error("Build 使用 OpenCode 内置 prompt，不支持修改名称或 prompt。");
+      }
       if (hasTaskRecords) {
         throw new Error("当前 Project 已有 Task 启动记录，不允许再修改 Agent 配置。");
       }
@@ -362,11 +381,13 @@ export function AgentConfigModal({
     setSaveError(null);
     setSaveSuccess(null);
     try {
-      await window.agentFlow.saveBuiltinAgentTemplate({
-        projectId: project.project.id,
-        templateName: selectedBuiltinTemplate.name,
-        prompt,
-      });
+      if (!selectedTemplateUsesBuiltinPrompt) {
+        await window.agentFlow.saveBuiltinAgentTemplate({
+          projectId: project.project.id,
+          templateName: selectedBuiltinTemplate.name,
+          prompt,
+        });
+      }
       const updatedProject = await window.agentFlow.saveAgentPrompt({
         projectId: project.project.id,
         currentAgentName: "",
@@ -395,6 +416,11 @@ export function AgentConfigModal({
 
   async function handleResetBuiltinTemplate() {
     if (!project || !selectedBuiltinTemplate || resettingTemplate) {
+      return;
+    }
+    if (selectedTemplateUsesBuiltinPrompt) {
+      setSaveError("Build 使用 OpenCode 内置 prompt，不支持在这里恢复模板。");
+      setSaveSuccess(null);
       return;
     }
     if (hasTaskRecords) {
@@ -428,6 +454,11 @@ export function AgentConfigModal({
 
   async function handleResetAgentPromptToDefault() {
     if (!project || !selectedFile || !selectedAgentDefaultTemplate || saving) {
+      return;
+    }
+    if (selectedFileUsesBuiltinPrompt) {
+      setSaveError("Build 使用 OpenCode 内置 prompt，不支持在这里恢复 Prompt。");
+      setSaveSuccess(null);
       return;
     }
     if (hasTaskRecords) {
@@ -480,9 +511,7 @@ export function AgentConfigModal({
         projectId: project.project.id,
         agentName: selectedFile.name,
       });
-      const nextViewableAgents = updatedProject.agentFiles.filter(
-        (agent) => agent.name !== BUILD_AGENT_NAME,
-      );
+      const nextViewableAgents = updatedProject.agentFiles;
       const restoredTemplate = updatedProject.builtinAgentTemplates.find(
         (template) => template.name === selectedFile.name,
       );
@@ -512,11 +541,11 @@ export function AgentConfigModal({
             自定义 Agent Prompt 配置
           </Dialog.Title>
           <Dialog.Description className="mt-1 text-sm text-muted-foreground">
-            当前项目设计为单一 Build Agent 负责代码改动，且 Build 为默认必选 Agent（不在这里编辑）。
+            Build 现作为默认内置模板提供，可按需写入当前 Project，也可像其他已写入 Agent 一样删除。
             <br />
-            自定义 Agent 与内置模板均固定禁用 write / edit / patch / bash / task 工具，且不支持在这里修改工具权限。
+            自定义 Agent 与可编辑内置模板固定禁用 write / edit / patch / bash / task 工具，且不支持在这里修改工具权限。
             <br />
-            内置模板会一直保留在这里供选择；删除 Agent 只会从当前 Project 面板移除，不会删掉这里的配置入口。
+            内置模板会一直保留在这里供选择；其中 Build 使用 OpenCode 自带 prompt，这里只负责选择是否加入当前 Project。
             {hasTaskRecords
               ? " 当前 Project 已有 Task 启动记录：Agent 与内置模板均不允许再修改。"
               : ""}
@@ -568,7 +597,7 @@ export function AgentConfigModal({
                 <div className="mt-3 rounded-[8px] border border-border/70 bg-white/60 px-3 py-3">
                   <p className="text-xs font-semibold text-foreground/85">内置 Agent 模板</p>
                   <p className="mt-1 text-[11px] text-muted-foreground">
-                    模板入口会一直保留在这里。你可以先编辑模板，再按需写入为 Agent。
+                    模板入口会一直保留在这里。可编辑模板可先修改再写入；Build 会直接使用 OpenCode 内置 prompt。
                   </p>
                   <div className="mt-2 space-y-1.5">
                     {builtinTemplates.map((template) => {
@@ -655,9 +684,13 @@ export function AgentConfigModal({
                 <p className="font-semibold text-primary">{detailTitle}</p>
                 <p className="text-xs text-muted-foreground">
                   {selectedFile
-                    ? "打开时会直接读取最新配置；仅可修改 Agent 名称与 prompt，工具权限固定禁用。"
+                    ? selectedFileUsesBuiltinPrompt
+                      ? "这是已写入当前 Project 的 Build Agent。它继续使用 OpenCode 内置 prompt，这里仅支持查看与删除。"
+                      : "打开时会直接读取最新配置；仅可修改 Agent 名称与 prompt，工具权限固定禁用。"
                     : selectedBuiltinTemplate
-                      ? "这是当前 Project 的内置模板入口。保存这里只会更新模板本身，不会自动创建 Agent，也不会影响新项目默认值。"
+                      ? selectedTemplateUsesBuiltinPrompt
+                        ? "这是 Build 的默认模板入口。它使用 OpenCode 自带 prompt，这里不支持编辑模板内容，但可直接写入当前 Project。"
+                        : "这是当前 Project 的内置模板入口。保存这里只会更新模板本身，不会自动创建 Agent，也不会影响新项目默认值。"
                       : creatingNewAgent
                         ? ""
                         : "请选择左侧已有 Agent，或选择一个内置模板继续编辑。"}
@@ -669,6 +702,10 @@ export function AgentConfigModal({
                   <p className="mt-1 text-xs text-muted-foreground">
                     {loading
                       ? "正在读取磁盘..."
+                      : currentSelectionUsesBuiltinPrompt
+                        ? editingBuiltinTemplate
+                          ? "该模板使用 OpenCode 内置 prompt，可直接写入当前 Project。"
+                          : "该 Agent 使用 OpenCode 内置 prompt；如需移除请直接删除。"
                       : editingBuiltinTemplate
                         ? hasUnsavedChanges
                           ? "模板有未保存修改。"
@@ -721,9 +758,11 @@ export function AgentConfigModal({
                 }}
                 disabled={isPromptEditingLocked}
                 placeholder={
-                  editingBuiltinTemplate
-                    ? "在这里编辑当前内置模板的 prompt..."
-                    : "在这里编辑当前 Agent 的 prompt..."
+                  currentSelectionUsesBuiltinPrompt
+                    ? "Build Agent 的 prompt 由 OpenCode 内置提供，这里不支持编辑。"
+                    : editingBuiltinTemplate
+                      ? "在这里编辑当前内置模板的 prompt..."
+                      : "在这里编辑当前 Agent 的 prompt..."
                 }
                 className="min-h-0 flex-1 resize-none rounded-[8px] border border-border bg-[#172019] px-4 py-4 font-mono text-sm leading-6 text-[#F4EFE6] placeholder:text-[#A8B0A6] focus:outline-none focus:ring-2 focus:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-60"
               />
@@ -731,7 +770,7 @@ export function AgentConfigModal({
           </div>
 
           <div className="mt-4 flex items-center justify-between gap-3 border-t border-border/60 pt-4">
-            {editingBuiltinTemplate ? (
+            {showResetBuiltinTemplateButton ? (
               <button
                 type="button"
                 onClick={() => {
@@ -742,7 +781,7 @@ export function AgentConfigModal({
               >
                 {resettingTemplate ? "恢复中..." : "恢复默认模板"}
               </button>
-            ) : (
+            ) : !editingBuiltinTemplate ? (
               <button
                 type="button"
                 onClick={() => {
@@ -753,9 +792,11 @@ export function AgentConfigModal({
               >
                 {deleting ? "删除中..." : "删除 Agent"}
               </button>
+            ) : (
+              <div />
             )}
             <div className="flex items-center gap-3">
-              {!editingBuiltinTemplate && selectedAgentDefaultTemplate && (
+              {showResetAgentPromptButton && (
                 <button
                   type="button"
                   onClick={() => {
@@ -779,42 +820,46 @@ export function AgentConfigModal({
                   添加为项目成员
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => {
-                  setPrompt(savedPrompt);
-                  setAgentName(savedAgentName);
-                  setSaveError(null);
-                  setSaveSuccess(null);
-                }}
-                disabled={
-                  loading
-                  || saving
-                  || deleting
-                  || resettingTemplate
-                  || !hasUnsavedChanges
-                  || (creatingNewAgent && isNewAgentCreationLocked)
-                }
-                className="rounded-[8px] border border-border px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                还原
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  void handleSavePrompt();
-                }}
-                disabled={saveDisabled}
-                className="rounded-[8px] border border-primary bg-primary px-4 py-2 text-sm text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {saving
-                  ? "保存中..."
-                  : creatingNewAgent
-                    ? "创建 Agent"
-                    : editingBuiltinTemplate
-                      ? "保存模板"
-                      : "保存 Prompt"}
-              </button>
+              {showRestoreButton && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPrompt(savedPrompt);
+                    setAgentName(savedAgentName);
+                    setSaveError(null);
+                    setSaveSuccess(null);
+                  }}
+                  disabled={
+                    loading
+                    || saving
+                    || deleting
+                    || resettingTemplate
+                    || !hasUnsavedChanges
+                    || (creatingNewAgent && isNewAgentCreationLocked)
+                  }
+                  className="rounded-[8px] border border-border px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  还原
+                </button>
+              )}
+              {showSaveButton && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleSavePrompt();
+                  }}
+                  disabled={saveDisabled}
+                  className="rounded-[8px] border border-primary bg-primary px-4 py-2 text-sm text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {saving
+                    ? "保存中..."
+                    : creatingNewAgent
+                      ? "创建 Agent"
+                      : editingBuiltinTemplate
+                        ? "保存模板"
+                        : "保存 Prompt"}
+                </button>
+              )}
               <Dialog.Close asChild>
                 <button
                   type="button"

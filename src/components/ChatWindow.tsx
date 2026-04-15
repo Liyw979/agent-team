@@ -225,6 +225,7 @@ export function ChatWindow({
   onOpenTaskSession,
 }: ChatWindowProps) {
   const defaultAgentName = getDefaultAgentName(availableAgents);
+  const hasAvailableAgents = availableAgents.length > 0;
   const [draft, setDraft] = useState("");
   const [mentionContext, setMentionContext] = useState<MentionContext | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -368,6 +369,10 @@ export function ChatWindow({
   async function handleSubmit() {
     const content = draft.trim();
     if (!content || !project || submitting) {
+      return;
+    }
+    if (!hasAvailableAgents) {
+      setSubmitError("当前 Project 还没有可用 Agent，请先到右侧团队成员里配置并添加模板。");
       return;
     }
 
@@ -548,9 +553,9 @@ export function ChatWindow({
                 }
               }}
               placeholder={
-                task
+                hasAvailableAgents
                   ? "默认向首个 Agent 发送消息，使用@指定Agent"
-                  : "默认向首个 Agent 发送消息，使用@指定Agent"
+                  : "当前还没有可用 Agent，请先配置团队成员"
               }
               className="no-drag block min-h-[68px] w-full resize-none rounded-[8px] border border-border bg-card px-4 py-2.5 text-sm leading-6 outline-none transition focus:border-primary"
             />

@@ -14,7 +14,7 @@ import {
 } from "./lib/task-completion-reminders";
 import { getAgentColorToken } from "./lib/agent-colors";
 import { useAgentFlowStore } from "./store/useAgentFlowStore";
-import { BUILD_AGENT_NAME, resolveTopologyAgentOrder } from "@shared/types";
+import { BUILD_AGENT_NAME, resolveTopologyAgentOrder, usesOpenCodeBuiltinPrompt } from "@shared/types";
 import type { AgentRuntimeSnapshot, MessageRecord, TaskSnapshot, TopologyRecord } from "@shared/types";
 
 interface OptimisticSubmission {
@@ -200,10 +200,12 @@ function App() {
         const runtime = taskAgents.get(agentFile.name);
         const runtimeSnapshot = runtimeSnapshots[agentFile.name];
         const roleSummary =
-          agentFile.prompt
-            .split(/\n+/)
-            .map((line) => line.trim())
-            .find((line) => line && !line.startsWith("你是")) ?? "点击后可查看完整 Agent prompt。";
+          usesOpenCodeBuiltinPrompt(agentFile.name)
+            ? "使用 OpenCode 内置 Build prompt。"
+            : agentFile.prompt
+              .split(/\n+/)
+              .map((line) => line.trim())
+              .find((line) => line && !line.startsWith("你是")) ?? "点击后可查看完整 Agent prompt。";
         return {
           ...agentFile,
           id: agentFile.name,
@@ -464,6 +466,9 @@ function App() {
                       const resolvedMentionAgent =
                         mentionAgent ||
                         activeProject.agentFiles[0]?.name;
+                      if (!resolvedMentionAgent) {
+                        throw new Error("当前 Project 还没有可用 Agent，请先配置团队成员。");
+                      }
                       let optimisticId: string | null = null;
                       if (activeTask) {
                         const optimisticContent = buildUserHistoryContent(content, resolvedMentionAgent);
@@ -582,9 +587,6 @@ function App() {
                               if (suppressNextAgentCardClickRef.current) {
                                 return;
                               }
-                              if (agent.name === BUILD_AGENT_NAME) {
-                                return;
-                              }
                               setAgentConfigPath(agent.name);
                               setAgentConfigOpen(true);
                             }}
@@ -593,9 +595,6 @@ function App() {
                                 return;
                               }
                               event.preventDefault();
-                              if (agent.name === BUILD_AGENT_NAME) {
-                                return;
-                              }
                               setAgentConfigPath(agent.name);
                               setAgentConfigOpen(true);
                             }}

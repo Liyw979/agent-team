@@ -1,10 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
-  BUILD_AGENT_NAME,
   DEFAULT_BUILTIN_AGENT_TEMPLATES,
   type AgentFileRecord,
   type BuiltinAgentTemplateRecord,
+  usesOpenCodeBuiltinPrompt,
 } from "@shared/types";
 
 const CUSTOM_AGENT_CONFIG_FILE_NAME = "custom-agents.json";
@@ -163,9 +163,7 @@ export class CustomAgentConfigService {
 
   listProjectAgents(projectPath: string): AgentFileRecord[] {
     const userConfig = this.ensureUserConfig(projectPath);
-    const customAgentNames = Object.keys(userConfig.agents).filter((name) => name !== BUILD_AGENT_NAME);
-    const agentNames = [BUILD_AGENT_NAME, ...customAgentNames];
-    return agentNames.map((agentName) => {
+    return Object.keys(userConfig.agents).map((agentName) => {
       const prompt = userConfig.agents[agentName]?.prompt ?? "";
       return {
         name: agentName,
@@ -214,14 +212,31 @@ export class CustomAgentConfigService {
     if (!normalizedNextAgentName) {
       throw new Error("新的 Agent 名称不能为空。");
     }
-    if (normalizedCurrentAgentName === BUILD_AGENT_NAME) {
-      throw new Error("Build 是系统默认且必选 Agent，不支持在自定义配置里编辑。");
-    }
-    if (normalizedNextAgentName === BUILD_AGENT_NAME) {
-      throw new Error("Build 是系统默认且必选 Agent，不支持作为自定义 Agent 新增或重命名。");
+    if (usesOpenCodeBuiltinPrompt(normalizedCurrentAgentName)) {
+      throw new Error("Build 使用 OpenCode 内置 prompt，不支持修改名称或 prompt；如需移除请删除该 Agent。");
     }
 
     const current = this.ensureUserConfig(projectPath);
+    if (!normalizedCurrentAgentName && usesOpenCodeBuiltinPrompt(normalizedNextAgentName)) {
+      if (current.agents[normalizedNextAgentName]) {
+        throw new Error(`Agent 名称已存在：${normalizedNextAgentName}`);
+      }
+      const next = normalizeUserAgentConfig({
+        ...current,
+        agents: {
+          ...current.agents,
+          [normalizedNextAgentName]: {
+            prompt: "",
+          },
+        },
+      });
+      this.setProjectConfig(projectPath, next);
+      return;
+    }
+
+    if (usesOpenCodeBuiltinPrompt(normalizedNextAgentName)) {
+      throw new Error("Build 只能通过默认模板加入当前 Project，不支持把其他 Agent 重命名为 Build。");
+    }
     if (!normalizedCurrentAgentName) {
       if (current.agents[normalizedNextAgentName]) {
         throw new Error(`Agent 名称已存在：${normalizedNextAgentName}`);
@@ -273,6 +288,9 @@ export class CustomAgentConfigService {
     if (!defaultTemplate) {
       throw new Error(`内置 Agent 模板不存在：${templateName}`);
     }
+    if (usesOpenCodeBuiltinPrompt(normalizedTemplateName)) {
+      throw new Error("Build 使用 OpenCode 内置 prompt，不支持在 AgentFlow 中覆盖模板内容。");
+    }
 
     const current = this.ensureUserConfig(projectPath);
     const nextBuiltinTemplates = {
@@ -298,6 +316,9 @@ export class CustomAgentConfigService {
     if (!defaultTemplate) {
       throw new Error(`内置 Agent 模板不存在：${templateName}`);
     }
+    if (usesOpenCodeBuiltinPrompt(normalizedTemplateName)) {
+      throw new Error("Build 使用 OpenCode 内置 prompt，不支持在 AgentFlow 中重置模板内容。");
+    }
 
     const current = this.ensureUserConfig(projectPath);
     if (!current.builtinTemplates[normalizedTemplateName]) {
@@ -320,9 +341,6 @@ export class CustomAgentConfigService {
     const normalizedAgentName = sanitizeAgentName(agentName);
     if (!normalizedAgentName) {
       throw new Error("要删除的 Agent 名称不能为空。");
-    }
-    if (normalizedAgentName === BUILD_AGENT_NAME) {
-      throw new Error("Build 是系统默认且必选 Agent，不支持删除。");
     }
 
     const current = this.ensureUserConfig(projectPath);
@@ -347,7 +365,7 @@ export class CustomAgentConfigService {
 
   buildInjectedConfigContent(projectPath: string): string {
     const userConfig = this.ensureUserConfig(projectPath);
-    const agentNames = Object.keys(userConfig.agents).filter((name) => name !== BUILD_AGENT_NAME);
+    const agentNames = Object.keys(userConfig.agents).filter((name) => !usesOpenCodeBuiltinPrompt(name));
 
     const agents = Object.fromEntries(
       agentNames.map((name) => [
