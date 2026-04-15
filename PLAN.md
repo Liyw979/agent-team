@@ -155,7 +155,7 @@ Task 群聊中至少要出现三类消息：
 4. Build：
    `@IntegrationTest 请开始集成测试。`
 5. TaskReview：
-   `已完成文档审查，README.md 和 AGENTS.md 已同步核对。`
+   `已完成文档审查，AGENTS.md 已同步核对。`
 
 这里要注意：
 
