@@ -12,10 +12,10 @@ import {
   createDefaultTopology,
   type AgentFileRecord,
   type CreateProjectPayload,
+  type DeleteAgentPayload,
   type DeleteTaskPayload,
   type GetTaskRuntimePayload,
   type InitializeTaskPayload,
-  isBuiltinAgentPath,
   getProjectNameFromPath,
   type MessageRecord,
   type OpenAgentPanePayload,
@@ -23,6 +23,7 @@ import {
   type ProjectRecord,
   type ProjectSnapshot,
   type ReadAgentFilePayload,
+  type SaveAgentPromptPayload,
   resolveTopologyAgentOrder,
   resolveTopologyStartAgent,
   type SubmitTaskPayload,
@@ -40,7 +41,7 @@ import {
   parseTargetAgentIds,
 } from "@shared/chat-message-format";
 import { buildZellijMissingReminder } from "@shared/zellij";
-import { AgentFileService } from "./agent-files";
+import { CustomAgentConfigService } from "./custom-agent-config";
 import { buildAgentSystemPrompt } from "./agent-system-prompt";
 import { OpenCodeClient } from "./opencode-client";
 import { OpenCodeRunner } from "./opencode-runner";
@@ -104,7 +105,7 @@ function isTerminalTaskStatus(status: TaskRecord["status"]) {
 
 export class Orchestrator {
   private readonly store: StoreService;
-  private readonly agentFiles = new AgentFileService();
+  private readonly customAgentConfig: CustomAgentConfigService;
   private readonly opencodeClient: OpenCodeClient;
   private readonly opencodeRunner: OpenCodeRunner;
   private readonly zellijManager: ZellijManager;
@@ -117,6 +118,7 @@ export class Orchestrator {
 
   constructor(options: OrchestratorOptions) {
     this.store = new StoreService(options.userDataPath);
+    this.customAgentConfig = new CustomAgentConfigService(options.userDataPath);
     this.opencodeClient = new OpenCodeClient(options.userDataPath);
     this.opencodeRunner = new OpenCodeRunner(this.opencodeClient);
     this.autoOpenTaskSession = options.autoOpenTaskSession ?? false;
@@ -125,12 +127,23 @@ export class Orchestrator {
   }
 
   async initialize() {
-    await this.ensureEventStream();
-
-    const existing = this.store.listProjects();
-    if (existing.length === 0) {
+    if (this.store.listProjects().length === 0) {
       await this.ensureProjectForPath(process.cwd());
     }
+
+    const projects = this.store.listProjects();
+    const cwd = path.resolve(process.cwd());
+    const currentProject =
+      projects.find((project) => path.resolve(project.path) === cwd) ??
+      projects[0] ??
+      null;
+    this.opencodeClient.setInjectedConfigContent(
+      currentProject
+        ? this.customAgentConfig.buildInjectedConfigContent(currentProject.path)
+        : null,
+    );
+
+    await this.ensureEventStream();
   }
 
   async dispose() {
@@ -199,8 +212,7 @@ export class Orchestrator {
     };
 
     this.store.insertProject(record);
-    this.agentFiles.ensureProjectAgents(projectPath);
-    const agentFiles = this.agentFiles.listAgentFiles(projectId, projectPath);
+    const agentFiles = this.listProjectAgents(record);
     const topology = this.syncTopology(record, agentFiles);
 
     const welcome: MessageRecord = {
@@ -208,7 +220,7 @@ export class Orchestrator {
       projectId,
       taskId: null,
       content:
-        "项目已初始化：支持 Project/Task 两层结构、Task 级独立会话、.opencode/agents 本地 Agent 文件，以及项目级拓扑编辑。",
+        "项目已初始化：支持 Project/Task 两层结构、Task 级独立会话、用户目录下的自定义 Agent 配置，以及项目级拓扑编辑。",
       sender: "system",
       timestamp: new Date().toISOString(),
     };
@@ -229,12 +241,60 @@ export class Orchestrator {
 
   async readAgentFile(payload: ReadAgentFilePayload): Promise<AgentFileRecord> {
     const project = this.store.getProject(payload.projectId);
-    return this.agentFiles.readAgentFile(project.id, project.path, payload.relativePath);
+    return this.customAgentConfig.getProjectAgent(project.path, payload.agentName);
+  }
+
+  async saveAgentPrompt(payload: SaveAgentPromptPayload): Promise<ProjectSnapshot> {
+    const project = this.store.getProject(payload.projectId);
+    const hasTaskRecords = this.store.listTasks(project.id).length > 0;
+    const normalizedCurrentAgentName = payload.currentAgentName.trim();
+    const normalizedNextAgentName = payload.nextAgentName.trim();
+    if (hasTaskRecords) {
+      if (!normalizedCurrentAgentName) {
+        throw new Error("当前 Project 已进入任务驱动阶段，不允许新增 Agent。");
+      }
+      if (normalizedCurrentAgentName !== normalizedNextAgentName) {
+        throw new Error("当前 Project 已进入任务驱动阶段，不允许修改 Agent 名称，仅允许更新 prompt。");
+      }
+    }
+    this.customAgentConfig.saveProjectAgentPrompt(
+      project.path,
+      payload.currentAgentName,
+      payload.nextAgentName,
+      payload.prompt,
+    );
+    const updated = this.hydrateProject(project.id, true);
+    this.emit({
+      type: "project-updated",
+      projectId: project.id,
+      payload: updated,
+    });
+    return updated;
+  }
+
+  async deleteAgent(payload: DeleteAgentPayload): Promise<ProjectSnapshot> {
+    const project = this.store.getProject(payload.projectId);
+    const hasTaskRecords = this.store.listTasks(project.id).length > 0;
+    if (hasTaskRecords) {
+      throw new Error("当前 Project 已进入任务驱动阶段，不允许删除 Agent。");
+    }
+    this.customAgentConfig.deleteProjectAgent(project.path, payload.agentName);
+    const updated = this.hydrateProject(project.id, true);
+    this.emit({
+      type: "project-updated",
+      projectId: project.id,
+      payload: updated,
+    });
+    return updated;
+  }
+
+  private listProjectAgents(project: ProjectRecord): AgentFileRecord[] {
+    return this.customAgentConfig.listProjectAgents(project.path);
   }
 
   async saveTopology(payload: UpdateTopologyPayload): Promise<ProjectSnapshot> {
     const project = this.store.getProject(payload.projectId);
-    const agentFiles = this.agentFiles.listAgentFiles(project.id, project.path);
+    const agentFiles = this.listProjectAgents(project);
     const normalized = this.normalizeTopology(project.id, agentFiles, payload.topology);
     this.store.upsertTopology(normalized);
     this.syncProjectTaskPanelOrders(project.id, agentFiles, normalized);
@@ -269,12 +329,12 @@ export class Orchestrator {
 
   async submitTask(payload: SubmitTaskPayload): Promise<TaskSnapshot> {
     const project = this.store.getProject(payload.projectId);
-    const agentFiles = this.agentFiles.listAgentFiles(project.id, project.path);
+    const agentFiles = this.listProjectAgents(project);
     this.syncTopology(project, agentFiles);
     const mentionName =
       payload.mentionAgent ||
       this.extractMention(payload.content) ||
-      this.findAgentFile(agentFiles, BUILD_AGENT_NAME)?.name;
+      agentFiles[0]?.name;
     if (!mentionName) {
       throw new Error("当前没有可用的目标 Agent。");
     }
@@ -299,7 +359,7 @@ export class Orchestrator {
 
   async initializeTask(payload: InitializeTaskPayload): Promise<TaskSnapshot> {
     const project = this.store.getProject(payload.projectId);
-    const agentFiles = this.agentFiles.listAgentFiles(project.id, project.path);
+    const agentFiles = this.listProjectAgents(project);
     this.syncTopology(project, agentFiles);
 
     return this.createTask(project, agentFiles, {
@@ -318,7 +378,7 @@ export class Orchestrator {
     const snapshot = await this.ensureTaskInitialized(
       project,
       task,
-      this.agentFiles.listAgentFiles(project.id, project.path),
+      this.customAgentConfig.listProjectAgents(project.path),
     );
     this.emit({
       type: "task-updated",
@@ -350,7 +410,7 @@ export class Orchestrator {
     const snapshot = await this.ensureTaskInitialized(
       project,
       task,
-      this.agentFiles.listAgentFiles(project.id, project.path),
+      this.listProjectAgents(project),
     );
     this.emit({
       type: "task-updated",
@@ -422,7 +482,7 @@ export class Orchestrator {
     },
   ): Promise<TaskSnapshot> {
     if (agentFiles.length === 0) {
-      throw new Error("当前项目没有可用的 Agent 文件");
+      throw new Error("当前项目没有可用的 Agent");
     }
 
     const taskId = randomUUID();
@@ -616,7 +676,12 @@ export class Orchestrator {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const message = messages[index];
       if (message?.sender === "user") {
-        return message.content.trim();
+        const rawContent = message.content.trim();
+        const targetAgentName = message.meta?.targetAgentId?.trim();
+        if (!targetAgentName) {
+          return rawContent;
+        }
+        return this.stripTargetMention(rawContent, targetAgentName);
       }
     }
     return "";
@@ -699,10 +764,9 @@ export class Orchestrator {
       const currentTask = this.store.getTask(task.id);
       await this.ensureTaskPanels(currentTask);
       const agentSessionId = await this.ensureAgentSession(project, currentTask, currentAgent);
-      const latestAgentFile =
-        this.findAgentFile(this.agentFiles.listAgentFiles(project.id, project.path), agentName);
+      const latestAgentFile = this.findAgentFile(this.listProjectAgents(project), agentName);
       if (!latestAgentFile) {
-        throw new Error(`当前 Project 缺少 Agent 文件 ${agentName}`);
+        throw new Error(`当前 Project 缺少 Agent ${agentName}`);
       }
       panels = this.store.listTaskPanels(task.id);
 
@@ -724,11 +788,6 @@ export class Orchestrator {
 
       const topology = this.store.getTopology(project.id);
       const dispatchedContent = this.buildAgentExecutionPrompt(prompt);
-      await this.opencodeClient.reloadConfig(
-        project.path,
-        this.agentFiles.listAgentFiles(project.id, project.path),
-        topology,
-      );
       const response = await this.opencodeRunner.run({
         projectPath: project.path,
         sessionId: agentSessionId,
@@ -1197,7 +1256,7 @@ export class Orchestrator {
     await Promise.all(
       reviewTargets.map(async (targetName) => {
         const targetAgent = this.findAgentFile(
-          this.agentFiles.listAgentFiles(project.id, project.path),
+          this.customAgentConfig.listProjectAgents(project.path),
           targetName,
         );
         if (!targetAgent) {
@@ -1740,7 +1799,7 @@ export class Orchestrator {
 
   private async ensureTaskPanels(task: TaskRecord) {
     const project = this.store.getProject(task.projectId);
-    await this.ensureTaskInitialized(project, task, this.agentFiles.listAgentFiles(project.id, project.path));
+    await this.ensureTaskInitialized(project, task, this.listProjectAgents(project));
   }
 
   private async ensureTaskAgentSessions(project: ProjectRecord, task: TaskRecord): Promise<Map<string, string>> {
@@ -1788,7 +1847,7 @@ export class Orchestrator {
 
   private getOrderedAgentNames(
     projectId: string,
-    agentFiles: Array<Pick<AgentFileRecord, "name" | "mode" | "role" | "relativePath">>,
+    agentFiles: Array<Pick<AgentFileRecord, "name">>,
     topologyOverride?: TopologyRecord,
   ): string[] {
     const topology = topologyOverride ?? this.store.getTopology(projectId);
@@ -1814,7 +1873,7 @@ export class Orchestrator {
     const project = this.store.getProject(task.projectId);
     const orderedNames = this.getOrderedAgentNames(
       task.projectId,
-      this.agentFiles.listAgentFiles(project.id, project.path),
+      this.listProjectAgents(project),
       topologyOverride,
     );
     const agentByName = new Map(agents.map((agent) => [agent.name, agent]));
@@ -1957,7 +2016,7 @@ export class Orchestrator {
 
   private hydrateProject(projectId: string, forceSyncTopology = false): ProjectSnapshot {
     const project = this.store.getProject(projectId);
-    const agentFiles = this.agentFiles.listAgentFiles(project.id, project.path);
+    const agentFiles = this.listProjectAgents(project);
     const topology = forceSyncTopology
       ? this.syncTopology(project, agentFiles)
       : this.ensureTopologyExists(project, agentFiles);
@@ -1978,7 +2037,7 @@ export class Orchestrator {
   private hydrateTask(taskId: string): TaskSnapshot {
     const task = this.store.getTask(taskId);
     const project = this.store.getProject(task.projectId);
-    const agentFiles = this.agentFiles.listAgentFiles(project.id, project.path);
+    const agentFiles = this.listProjectAgents(project);
     this.syncTaskAgents(task, agentFiles);
     return {
       task: this.store.getTask(taskId),
@@ -2056,12 +2115,7 @@ export class Orchestrator {
       kind: "agent" as const,
     }));
     const agentOrderIds = resolveTopologyAgentOrder(
-      agentFiles.map((file) => ({
-        name: file.name,
-        mode: file.mode,
-        role: file.role,
-        relativePath: file.relativePath,
-      })),
+      agentFiles.map((file) => ({ name: file.name })),
       Array.isArray(topology.agentOrderIds)
         ? topology.agentOrderIds
             .filter((item): item is string => typeof item === "string" && validNames.has(item))
@@ -2075,12 +2129,7 @@ export class Orchestrator {
     return {
       projectId,
       startAgentId: resolveTopologyStartAgent(
-        agentFiles.map((file) => ({
-          name: file.name,
-          mode: file.mode,
-          role: file.role,
-          relativePath: file.relativePath,
-        })),
+        agentFiles.map((file) => ({ name: file.name })),
       ),
       agentOrderIds,
       nodes: orderedNodes,
@@ -2142,7 +2191,7 @@ export class Orchestrator {
       timestamp: new Date().toISOString(),
       content:
         status === "finished"
-          ? `Task「${snapshot.task.title}」已结束，状态已切换为 finished，群聊中保留的是高层阶段消息与最终回复。`
+          ? "所有Agent任务已完成"
           : `Task「${snapshot.task.title}」已结束，本轮结果未通过检查，或执行过程已中断。请直接查看群聊中最近一条失败消息，并继续处理状态为“审视不通过”或“执行失败”的 Agent。`,
       meta: {
         kind: "task-completed",

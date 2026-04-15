@@ -14,7 +14,7 @@ import {
   type Node,
 } from "@xyflow/react";
 import { getAgentColorToken } from "@/lib/agent-colors";
-import { isBuiltinAgentPath, isReviewAgentInTopology, resolveTopologyAgentOrder } from "@shared/types";
+import { isReviewAgentInTopology, resolveTopologyAgentOrder } from "@shared/types";
 import type {
   AgentRole,
   AgentRuntimeSnapshot,
@@ -199,9 +199,9 @@ function getEdgeTriggerDescription(triggerOn: TopologyEdge["triggerOn"]) {
     case "association":
       return "当前 Agent 正常完成本轮任务后，会自动传递到这个下游 Agent。";
     case "review_pass":
-      return "当前 Agent 输出“【DECISION】检查通过”时，才会传递到这个下游 Agent。";
+      return "当前 Agent 给出审查通过结论时，才会传递到这个下游 Agent。";
     case "review_fail":
-      return "当前 Agent 输出“【DECISION】需要修改”时，才会传递到这个下游 Agent。";
+      return "当前 Agent 给出需要修改结论时，才会传递到这个下游 Agent。";
     default:
       return "";
   }
@@ -613,20 +613,6 @@ function computeNodeLayout(
   };
 }
 
-function getAgentKindMeta(isBuiltin: boolean) {
-  return isBuiltin
-    ? {
-        label: "Built-in",
-        badgeClassName: "border border-sky-200/90 bg-sky-100/90 text-sky-700",
-        panelClassName: "border-sky-200/70 bg-sky-50/65",
-      }
-    : {
-        label: "Custom",
-        badgeClassName: "border border-amber-200/90 bg-amber-100/90 text-amber-800",
-        panelClassName: "border-amber-200/70 bg-amber-50/55",
-      };
-}
-
 function toShortTime(timestamp: string | null | undefined) {
   if (!timestamp) {
     return "";
@@ -695,7 +681,7 @@ function getRuntimeActivityAppearance(kind: string) {
   }
 }
 
-function getHistoryAppearance(status: string) {
+function getHistoryAppearance(status: string, reviewAgent: boolean) {
   switch (status) {
     case "running":
       return {
@@ -704,23 +690,28 @@ function getHistoryAppearance(status: string) {
       };
     case "needs_revision":
       return {
-        label: "不通过",
+        label: "审视不通过",
         className: REJECTION_HISTORY_CLASS_NAME,
       };
     case "failed":
       return {
-        label: "不通过",
+        label: reviewAgent ? "审视不通过" : "执行失败",
         className: REJECTION_HISTORY_CLASS_NAME,
       };
     default:
       return {
-        label: "通过",
+        label: reviewAgent ? "审视通过" : "已完成",
         className: "border-accent/55 bg-accent/18 text-foreground",
       };
   }
 }
 
-function getAgentHistoryFromMessages(messages: MessageRecord[], agentId: string) {
+function getAgentHistoryFromMessages(
+  messages: MessageRecord[],
+  topology: Pick<TopologyRecord, "edges">,
+  agentId: string,
+) {
+  const reviewAgent = isReviewAgentInTopology(topology, agentId);
   return messages
     .filter((message) => message.sender === agentId && message.meta?.kind === "agent-final")
     .sort((left, right) => left.timestamp.localeCompare(right.timestamp))
@@ -730,7 +721,7 @@ function getAgentHistoryFromMessages(messages: MessageRecord[], agentId: string)
         message.meta?.reviewDecision === "needs_revision"
           ? "needs_revision"
           : message.meta?.status ?? "completed";
-      const appearance = getHistoryAppearance(status);
+      const appearance = getHistoryAppearance(status, reviewAgent);
       return {
         id: message.id,
         label: appearance.label,
@@ -1087,19 +1078,11 @@ export function TopologyGraph({
     () => new Map(task?.agents.map((agent) => [agent.name, agent.status]) ?? []),
     [task],
   );
-  const agentRoles = useMemo(
-    () => new Map(project?.agentFiles.map((agent) => [agent.name, agent.role]) ?? []),
-    [project],
-  );
+  const agentRoles = useMemo(() => new Map<string, AgentRole | null>(), []);
   const defaultAgentOrderIds = useMemo(
     () =>
       resolveTopologyAgentOrder(
-        project?.agentFiles.map((agent) => ({
-          name: agent.name,
-          mode: agent.mode,
-          role: agent.role,
-          relativePath: agent.relativePath,
-        })) ?? [],
+        project?.agentFiles.map((agent) => ({ name: agent.name })) ?? [],
         project?.topology.agentOrderIds ?? null,
       ),
     [project],
@@ -1169,7 +1152,7 @@ export function TopologyGraph({
     const histories = new Map<string, ReturnType<typeof getAgentHistoryFromMessages>>();
 
     for (const node of draft?.nodes ?? []) {
-      histories.set(node.id, getAgentHistoryFromMessages(taskMessages, node.id));
+      histories.set(node.id, getAgentHistoryFromMessages(taskMessages, draft, node.id));
     }
 
     return histories;
@@ -1796,28 +1779,16 @@ export function TopologyGraph({
             </Dialog.Description>
 
             <div className="mt-5 rounded-[8px] border border-border bg-card/70 px-4 py-3">
-              <div className="flex items-center gap-2">
-                <p className="text-sm font-semibold text-primary">
-                  {getAgentDisplayName(editingAgent?.name ?? editingAgentId ?? "Agent")}
-                </p>
-                {editingAgent ? (
-                  <span
-                    className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold tracking-[0.06em] ${
-                      getAgentKindMeta(isBuiltinAgentPath(editingAgent.relativePath)).badgeClassName
-                    }`}
-                  >
-                    {getAgentKindMeta(isBuiltinAgentPath(editingAgent.relativePath)).label}
-                  </span>
-                ) : null}
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">{editingAgent?.mode ?? "未读取到模式信息"}</p>
+              <p className="text-sm font-semibold text-primary">
+                {getAgentDisplayName(editingAgent?.name ?? editingAgentId ?? "Agent")}
+              </p>
             </div>
 
             <div className="mt-5 rounded-[8px] border border-border/70 bg-[#f8f4ea] px-4 py-3 text-xs text-muted-foreground">
               <p className="font-semibold text-primary">关系类型</p>
               <p className="mt-1">传递：上游 Agent 正常完成本轮任务后，直接传递到下游。</p>
-              <p className="mt-1">审视通过：上游 Agent 输出“【DECISION】检查通过”后，才传递到下游。</p>
-              <p className="mt-1">审视不通过：上游 Agent 输出“【DECISION】需要修改”后，才传递到下游。</p>
+              <p className="mt-1">审视通过：上游 Agent 给出审查通过结论后，才传递到下游。</p>
+              <p className="mt-1">审视不通过：上游 Agent 给出需要修改结论后，才传递到下游。</p>
             </div>
 
             <div className="mt-5 space-y-2">
@@ -1826,25 +1797,16 @@ export function TopologyGraph({
                 .map((agent) => {
                   const selectedTriggers =
                     downstreamTriggersByTarget.get(agent.name) ?? new Set<TopologyEdge["triggerOn"]>();
-                  const kindMeta = getAgentKindMeta(isBuiltinAgentPath(agent.relativePath));
                   const selectedLabels = [...selectedTriggers].map((trigger) => getEdgeTriggerLabel(trigger));
                   return (
                     <div
                       key={agent.name}
-                      className={`flex items-center justify-between gap-4 rounded-[8px] border px-4 py-3 ${kindMeta.panelClassName}`}
+                      className="flex items-center justify-between gap-4 rounded-[8px] border border-border px-4 py-3"
                     >
                       <div>
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-semibold text-foreground">
-                            {getAgentDisplayName(agent.name)}
-                          </p>
-                          <span
-                            className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold tracking-[0.06em] ${kindMeta.badgeClassName}`}
-                          >
-                            {kindMeta.label}
-                          </span>
-                        </div>
-                        <p className="mt-1 text-xs text-muted-foreground">{agent.mode}</p>
+                        <p className="text-sm font-semibold text-foreground">
+                          {getAgentDisplayName(agent.name)}
+                        </p>
                         {selectedLabels.length > 0 ? (
                           <p className="mt-1 text-xs text-muted-foreground">
                             已启用：{selectedLabels.join(" / ")}

@@ -32,6 +32,8 @@ interface ParsedArgv {
 
 interface CliContext {
   orchestrator: Orchestrator;
+  userDataPath: string;
+  customAgentConfigPath: string;
 }
 
 const SYSTEM_SENDER_LABEL = "Ocustrater";
@@ -173,13 +175,15 @@ function printKeyValue(label: string, value: string | number | null | undefined)
   process.stdout.write(`${label}: ${value ?? "-"}\n`);
 }
 
-function isBuiltinAgent(agent: AgentFileRecord) {
-  return agent.relativePath.startsWith("builtin://");
-}
-
-function printAgentList(agentFiles: AgentFileRecord[]) {
+function printAgentList(agentFiles: AgentFileRecord[], customAgentConfigPath: string) {
   if (agentFiles.length === 0) {
-    process.stdout.write("当前目录下没有发现任何 agent。请检查 `.opencode/agents/**/*.md`。\n");
+    process.stdout.write(
+      [
+        "当前目录下没有发现任何 agent。",
+        `请检查全局配置文件：${customAgentConfigPath}`,
+        "该文件位于用户目录，不会写入当前工作区。",
+      ].join("\n") + "\n",
+    );
     return;
   }
 
@@ -187,10 +191,7 @@ function printAgentList(agentFiles: AgentFileRecord[]) {
     process.stdout.write(
       [
         `- ${agent.name}`,
-        `  path: ${isBuiltinAgent(agent) ? "OpenCode built-in agent" : agent.relativePath}`,
-        `  mode: ${agent.mode}`,
-        `  permission: ${agent.tools.map((tool) => `${tool.name}:${tool.mode}`).join(", ")}`,
-        `  prompt: ${summarizePrompt(agent.prompt) || (isBuiltinAgent(agent) ? "OpenCode 内置 Build agent" : "-")}`,
+        `  prompt: ${summarizePrompt(agent.prompt) || "-"}`,
       ].join("\n") + "\n",
     );
   }
@@ -410,13 +411,18 @@ function printProjectSummary(project: ProjectSnapshot) {
 }
 
 async function createCliContext(): Promise<CliContext> {
+  const userDataPath = resolveCliUserDataPath();
   const orchestrator = new Orchestrator({
-    userDataPath: resolveCliUserDataPath(),
+    userDataPath,
     autoOpenTaskSession: false,
     enableEventStream: false,
   });
   await orchestrator.initialize();
-  return { orchestrator };
+  return {
+    orchestrator,
+    userDataPath,
+    customAgentConfigPath: path.join(userDataPath, "custom-agents.json"),
+  };
 }
 
 async function resolveProject(
@@ -630,13 +636,13 @@ function buildHelp() {
 
 关系语义：
   association     当前 Agent 正常完成本轮任务后，直接传递到下游
-  review_pass     当前 Agent 输出“【DECISION】检查通过”后，才传递到下游
-  review_fail     当前 Agent 输出“【DECISION】需要修改”后，才传递到下游
+  review_pass     当前 Agent 给出审查通过结论后，才传递到下游
+  review_fail     当前 Agent 给出需要修改结论后，才传递到下游
 
-说明：
+  说明：
   - CLI 会直接复用 Orchestrator、文件存储、OpenCode client、Zellij manager 这套主逻辑。
   - 若当前目录尚未注册为 Project，涉及 Project 语义的命令会自动创建该 Project。
-  - \`task init\` 会先创建 Task，并把当前 Project 的全部 Agent 会话 / Zellij pane 初始化好；GUI 群聊默认会优先选中 \`Build\`，CLI 仍通过 \`task send <agent>\` 指定目标。
+  - \`task init\` 会先创建 Task，并把当前 Project 的全部 Agent 会话 / Zellij pane 初始化好；GUI 群聊默认会优先选中当前列表第一个 Agent，CLI 仍通过 \`task send <agent>\` 指定目标。
   - \`task debug-info\` 默认读取当前 Project 最新 Task，并只输出聊天区展示的合并消息；加 \`--full\` 可输出完整排障信息，也可显式传入 \`taskId\`。
   - \`task send\` 会像 GUI 一样通过 Orchestrator 触发真实 Task 创建/推进与下游调度。
   - \`task show\` 在交互式终端里默认直接进入对应 Task 的 Zellij session。`;
@@ -730,7 +736,7 @@ async function handleTasks(context: CliContext, parsed: ParsedArgv) {
     }
 
     process.stdout.write(
-      `已完成 Task 初始化：${snapshot.task.id}。GUI 群聊会默认优先选中 Build；若走 CLI，请继续使用 \`task send <agent>\` 指定目标。\n`,
+      `已完成 Task 初始化：${snapshot.task.id}。GUI 群聊会默认优先选中当前列表第一个 Agent；若走 CLI，请继续使用 \`task send <agent>\` 指定目标。\n`,
     );
 
     if (!hasFlag(parsed, "plain") && process.stdout.isTTY && process.stdin.isTTY) {
@@ -844,7 +850,8 @@ async function handleAgents(context: CliContext, parsed: ParsedArgv) {
       printJson(project.agentFiles);
       return;
     }
-    printAgentList(project.agentFiles);
+    printKeyValue("Agent Config", context.customAgentConfigPath);
+    printAgentList(project.agentFiles, context.customAgentConfigPath);
     return;
   }
 
@@ -857,19 +864,16 @@ async function handleAgents(context: CliContext, parsed: ParsedArgv) {
     }
 
     printKeyValue("Agent", agent.name);
-    printKeyValue("Path", isBuiltinAgent(agent) ? "OpenCode built-in agent" : agent.relativePath);
-    printKeyValue("Mode", agent.mode);
-    printKeyValue("Permission", agent.tools.map((tool) => `${tool.name}:${tool.mode}`).join(", "));
     printSection("Prompt");
-    process.stdout.write(`${agent.prompt || "OpenCode 内置 Build agent\n"}\n`);
+    process.stdout.write(`${agent.prompt || "-\n"}\n`);
     return;
   }
 
   if (action === "cat") {
     assertPositionals(parsed, 3, "agents cat <agentName> [--cwd <path>]");
     const agent = findAgentOrThrow(project, parsed.positionals[2] ?? "");
-    process.stdout.write(agent.content);
-    if (!agent.content.endsWith("\n")) {
+    process.stdout.write(agent.prompt);
+    if (!agent.prompt.endsWith("\n")) {
       process.stdout.write("\n");
     }
     return;

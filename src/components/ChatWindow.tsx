@@ -120,9 +120,6 @@ function extractFirstMention(content: string): string | undefined {
 }
 
 function getDefaultAgentName(agents: string[]): string | undefined {
-  if (agents.includes("Build")) {
-    return "Build";
-  }
   return agents[0];
 }
 
@@ -257,15 +254,7 @@ export function ChatWindow({
     }
     const query = mentionContext.query.toLowerCase();
     const filtered = availableAgents.filter((name) => name.toLowerCase().includes(query));
-    return [...filtered].sort((left, right) => {
-      if (left === "Build") {
-        return -1;
-      }
-      if (right === "Build") {
-        return 1;
-      }
-      return left.localeCompare(right);
-    });
+    return [...filtered].sort((left, right) => left.localeCompare(right));
   }, [availableAgents, mentionContext]);
 
   useEffect(() => {
@@ -522,8 +511,8 @@ export function ChatWindow({
               }}
               placeholder={
                 task
-                  ? "默认向Build Agent发送消息，使用@指定Agent"
-                  : "默认向Build Agent发送消息，使用@指定Agent"
+                  ? "默认向首个 Agent 发送消息，使用@指定Agent"
+                  : "默认向首个 Agent 发送消息，使用@指定Agent"
               }
               className="no-drag block min-h-[68px] w-full resize-none rounded-[8px] border border-border bg-card px-4 py-2.5 text-sm leading-6 outline-none transition focus:border-primary"
             />

@@ -130,6 +130,7 @@ export function buildOpencodePaneCommand(
       `cd /d ${quoteWindowsArg(options.cwd)}`,
       `set "OPENCODE_CONFIG_DIR=${escapeWindowsEnvValue(options.runtimeDir)}"`,
       `set "OPENCODE_DB=${escapeWindowsEnvValue(options.dbPath)}"`,
+      `set "OPENCODE_DISABLE_PROJECT_CONFIG=true"`,
       `set "OPENCODE_CLIENT=agentflow-zellij"`,
       opencodeCommand,
     ].join(" && ");
@@ -162,6 +163,7 @@ export function buildOpencodePaneCommand(
     "&&",
     `export OPENCODE_CONFIG_DIR=${quotePosixArg(options.runtimeDir)}`,
     `OPENCODE_DB=${quotePosixArg(options.dbPath)}`,
+    "OPENCODE_DISABLE_PROJECT_CONFIG='true'",
     "OPENCODE_CLIENT='agentflow-zellij'",
     "&&",
     opencodeCommand,

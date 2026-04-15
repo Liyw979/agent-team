@@ -147,6 +147,79 @@ test("审视通过但没有可展示高层结果时返回简洁兜底文案", ()
   assert.equal(displayContent, "通过");
 });
 
+test("群聊保留 @Agent，但下游转发读取的用户消息会去掉寻址 @Agent", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  const orchestrator = new Orchestrator({
+    userDataPath,
+    enableEventStream: false,
+    zellijManager: {
+      isAvailable: async () => true,
+      createTaskSession: async () => "oap-project-task",
+      createPanelBindings: ({ projectId, taskId, sessionName, cwd }: {
+        projectId: string;
+        taskId: string;
+        sessionName: string;
+        cwd: string;
+      }) => [
+        {
+          id: `${taskId}:BA`,
+          taskId,
+          projectId,
+          sessionName,
+          paneId: "pane-1",
+          agentName: "BA",
+          cwd,
+          order: 0,
+        },
+      ],
+      materializePanelBindings: async () => [],
+      openTaskSession: async () => undefined,
+      deleteTaskSession: async () => undefined,
+    } as never,
+  });
+
+  const project = await orchestrator.createProject({ path: projectPath });
+  const task = await orchestrator.initializeTask({ projectId: project.project.id, title: "demo" });
+
+  const typed = orchestrator as unknown as Orchestrator & {
+    store: {
+      insertMessage: (message: {
+        id: string;
+        projectId: string;
+        taskId: string | null;
+        content: string;
+        sender: "user" | "system" | string;
+        timestamp: string;
+        meta?: Record<string, string>;
+      }) => void;
+    };
+    getLatestUserMessageContent: (taskId: string) => string;
+  };
+
+  typed.store.insertMessage({
+    id: "user-message-1",
+    projectId: project.project.id,
+    taskId: task.task.id,
+    content: "在当前项目的一个临时文件中实现一个加法工具，调用后传入a和b，返回c @BA",
+    sender: "user",
+    timestamp: new Date().toISOString(),
+    meta: {
+      scope: "task",
+      taskTitle: task.task.title,
+      targetAgentId: "BA",
+    },
+  });
+
+  const forwardedUserContent = typed.getLatestUserMessageContent(task.task.id);
+  assert.equal(forwardedUserContent.includes("@BA"), false);
+  assert.equal(forwardedUserContent.includes("返回c"), true);
+
+  const snapshot = await orchestrator.getTaskSnapshot(task.task.id);
+  const latestUserMessage = snapshot.messages.filter((message) => message.sender === "user").at(-1);
+  assert.equal(latestUserMessage?.content.includes("@BA"), true);
+});
+
 test("审视 Agent 执行中止时不会伪造成整改意见", async () => {
   const userDataPath = createTempDir();
   const projectPath = createTempDir();
@@ -291,7 +364,7 @@ test("所有 Agent 都已完成时 Task 会切到 finished 并追加结束系统
     projectPath,
     "QA.md",
     `---
-mode: subagent
+	mode: primary
 role: integration_test
 permission:
   read: allow
@@ -430,7 +503,7 @@ permission:
         message.sender === "system" &&
         message.meta?.kind === "task-completed" &&
         message.meta?.status === "finished" &&
-        message.content.includes("已结束"),
+        message.content.includes("所有Agent任务已完成"),
     ),
     true,
   );

@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
+import net from "node:net";
 import { execFile, spawn, type SpawnOptions } from "node:child_process";
 import { promisify } from "node:util";
-import { BUILD_AGENT_NAME, type TaskPanelRecord } from "@shared/types";
+import { type TaskPanelRecord } from "@shared/types";
 import { buildZellijMissingMessage } from "@shared/zellij";
 import {
   buildInlineCommand,
@@ -41,6 +42,8 @@ interface AgentTerminalSpec {
 }
 
 const HIDDEN_PANEL_AGENTS = new Set<string>();
+const OPENCODE_ATTACH_HOST = "127.0.0.1";
+const OPENCODE_ATTACH_PORT = 4096;
 
 export class ZellijManager {
   private zellijAvailable: boolean | null = null;
@@ -300,6 +303,7 @@ export class ZellijManager {
   }
 
   async openAgentTerminal(spec: AgentTerminalSpec): Promise<void> {
+    await this.waitForOpenCodeAttachReady();
     const { shellCommand } = this.buildOpencodePaneCommand(
       spec.sessionName,
       spec.cwd,
@@ -449,6 +453,7 @@ export class ZellijManager {
     agentName: string,
     opencodeSessionId: string | null,
   ): Promise<string> {
+    await this.waitForOpenCodeAttachReady();
     const { shellLaunch } = this.buildOpencodePaneCommand(
       sessionName,
       cwd,
@@ -502,6 +507,38 @@ export class ZellijManager {
 
   protected sanitizePathSegment(value: string): string {
     return value.replace(/[^a-zA-Z0-9._-]/g, "_");
+  }
+
+  protected async waitForOpenCodeAttachReady(timeoutMs = 8_000): Promise<boolean> {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      if (await this.canConnectToEndpoint(OPENCODE_ATTACH_HOST, OPENCODE_ATTACH_PORT)) {
+        return true;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    return false;
+  }
+
+  protected async canConnectToEndpoint(host: string, port: number, timeoutMs = 500): Promise<boolean> {
+    return await new Promise<boolean>((resolve) => {
+      const socket = net.createConnection({ host, port });
+      let settled = false;
+
+      const finish = (result: boolean) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        socket.destroy();
+        resolve(result);
+      };
+
+      socket.setTimeout(timeoutMs);
+      socket.once("connect", () => finish(true));
+      socket.once("error", () => finish(false));
+      socket.once("timeout", () => finish(false));
+    });
   }
 
   protected async openSessionInTerminal(sessionName: string, cwd: string): Promise<void> {
@@ -728,11 +765,11 @@ export class ZellijManager {
       return null;
     }
 
-    const columns = this.partitionAgentsForGrid(agents);
-    const columnWidths = this.distributePercentages(columns.length);
-    const body = columns
-      .map((column, index) =>
-        this.buildGridColumnKdl(sessionName, cwd, column, columnWidths[index] ?? 100),
+    const rows = this.partitionAgentsForGrid(agents);
+    const rowHeights = this.distributePercentages(rows.length);
+    const body = rows
+      .map((row, index) =>
+        this.buildGridRowKdl(sessionName, cwd, row, rowHeights[index] ?? 100),
       )
       .join("\n");
 
@@ -743,7 +780,7 @@ export class ZellijManager {
       "    pane size=1 borderless=true {",
       '      plugin location="zellij:tab-bar";',
       "    }",
-      '    pane split_direction="vertical" {',
+      '    pane split_direction="horizontal" {',
       body,
       "    }",
       "    pane size=1 borderless=true {",
@@ -754,26 +791,26 @@ export class ZellijManager {
     ].join("\n");
   }
 
-  protected buildGridColumnKdl(
+  protected buildGridRowKdl(
     sessionName: string,
     cwd: string,
     agents: AgentPaneSpec[],
-    widthPercent: number,
+    heightPercent: number,
   ): string {
-    const paneHeights = this.distributePercentages(agents.length);
+    const paneWidths = this.distributePercentages(agents.length);
     const panes = agents
       .map((agent, index) =>
         this.buildAgentPaneKdl(
           sessionName,
           cwd,
           agent,
-          agents.length > 1 ? paneHeights[index] ?? null : null,
+          agents.length > 1 ? paneWidths[index] ?? null : null,
         ),
       )
       .join("\n");
 
     return [
-      `      pane size="${widthPercent}%" split_direction="horizontal" {`,
+      `      pane size="${heightPercent}%" split_direction="vertical" {`,
       panes,
       "      }",
     ].join("\n");
@@ -783,7 +820,7 @@ export class ZellijManager {
     sessionName: string,
     cwd: string,
     agent: AgentPaneSpec,
-    heightPercent: number | null,
+    widthPercent: number | null,
   ): string {
     const { shellLaunch } = this.buildOpencodePaneCommand(
       sessionName,
@@ -791,7 +828,7 @@ export class ZellijManager {
       agent.name,
       agent.opencodeSessionId,
     );
-    const size = heightPercent ? ` size="${heightPercent}%"` : "";
+    const size = widthPercent ? ` size="${widthPercent}%"` : "";
     return [
       `      pane command=${this.toKdlString(shellLaunch.command)} name=${this.toKdlString(agent.name)}${size} {`,
       `        args ${shellLaunch.args.map((arg) => this.toKdlString(arg)).join(" ")};`,
@@ -800,33 +837,22 @@ export class ZellijManager {
   }
 
   protected partitionAgentsForGrid(agents: AgentPaneSpec[]): AgentPaneSpec[][] {
-    if (agents.length <= 1) {
-      return [agents.slice()];
+    if (agents.length <= 0) {
+      return [];
     }
 
-    const buildAgent = agents.find((agent) => agent.name === BUILD_AGENT_NAME) ?? null;
-    const remainingAgents = agents.filter((agent) => agent.name !== BUILD_AGENT_NAME);
-    const remainingColumnCount =
-      remainingAgents.length === 0 ? 0 : Math.min(2, Math.ceil(Math.sqrt(remainingAgents.length)));
-    const columns: AgentPaneSpec[][] = [];
-
-    if (buildAgent) {
-      columns.push([buildAgent]);
+    const preferredColumns = Math.min(3, agents.length);
+    const preferredRows = Math.ceil(agents.length / preferredColumns);
+    const maxRows = 2;
+    const maxColumns =
+      preferredRows <= maxRows
+        ? preferredColumns
+        : Math.ceil(agents.length / maxRows);
+    const rows: AgentPaneSpec[][] = [];
+    for (let index = 0; index < agents.length; index += maxColumns) {
+      rows.push(agents.slice(index, index + maxColumns));
     }
-
-    if (remainingColumnCount <= 0) {
-      return columns;
-    }
-
-    const remainingColumns = Array.from({ length: remainingColumnCount }, () => [] as AgentPaneSpec[]);
-    const chunkSize = Math.ceil(remainingAgents.length / remainingColumnCount);
-    for (let index = 0; index < remainingColumnCount; index += 1) {
-      const start = index * chunkSize;
-      const end = start + chunkSize;
-      remainingColumns[index] = remainingAgents.slice(start, end);
-    }
-
-    return columns.concat(remainingColumns.filter((column) => column.length > 0));
+    return rows;
   }
 
   protected toKdlString(value: string): string {

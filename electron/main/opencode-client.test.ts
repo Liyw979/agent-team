@@ -125,3 +125,62 @@ test("resolveExecutionResult 在消息已完成时不会额外等待 session idl
   assert.equal(result.finalMessage, "已完成");
   assert.ok(elapsed < 120, `resolveExecutionResult 耗时 ${elapsed}ms，说明仍然被 session idle 等待拖住了`);
 });
+
+test("配置变更触发 shutdown 时，ensureServer 会等待 shutdown 完成后再启动新服务", async () => {
+  const client = new OpenCodeClient(createTempDir()) as OpenCodeClient & {
+    serverHandle: Promise<{ process: null; port: number; mock: boolean }> | null;
+    shutdownPromise: Promise<void> | null;
+    startServer: () => Promise<{ process: null; port: number; mock: boolean }>;
+    shutdown: () => Promise<void>;
+  };
+
+  client.serverHandle = Promise.resolve({
+    process: null,
+    port: 4096,
+    mock: false,
+  });
+
+  let shutdownStartedResolve: (() => void) | null = null;
+  const shutdownStarted = new Promise<void>((resolve) => {
+    shutdownStartedResolve = resolve;
+  });
+  let shutdownReleaseResolve: (() => void) | null = null;
+  const shutdownRelease = new Promise<void>((resolve) => {
+    shutdownReleaseResolve = resolve;
+  });
+
+  let shutdownFinished = false;
+  client.shutdown = async () => {
+    shutdownStartedResolve?.();
+    await shutdownRelease;
+    client.serverHandle = null;
+    shutdownFinished = true;
+  };
+
+  let startedAfterShutdown = false;
+  client.startServer = async () => {
+    startedAfterShutdown = shutdownFinished;
+    return {
+      process: null,
+      port: 4096,
+      mock: false,
+    };
+  };
+
+  client.setInjectedConfigContent('{"agent":{}}');
+  await shutdownStarted;
+
+  let ensureResolved = false;
+  const ensurePromise = client.ensureServer().then(() => {
+    ensureResolved = true;
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(ensureResolved, false);
+
+  shutdownReleaseResolve?.();
+  await ensurePromise;
+
+  assert.equal(startedAfterShutdown, true);
+  assert.equal(client.shutdownPromise, null);
+});
