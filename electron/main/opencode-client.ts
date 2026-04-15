@@ -2,7 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { type AgentFileRecord, type TopologyRecord, isReviewAgentInTopology } from "@shared/types";
 import { buildMockAgentReply } from "./mock-agent-reply";
 import { buildSubmitMessageBody } from "./opencode-request-body";
 import { toOpenCodeAgentName } from "./opencode-agent-name";
@@ -73,12 +72,14 @@ interface SessionWaiter {
 
 export class OpenCodeClient {
   private serverHandle: Promise<ServeHandle> | null = null;
+  private shutdownPromise: Promise<void> | null = null;
   private eventPump: Promise<void> | null = null;
   private readonly port = 4096;
   private readonly runtimeDir: string;
   private readonly sessionIdleAt = new Map<string, number>();
   private readonly sessionErrors = new Map<string, string>();
   private readonly sessionWaiters = new Map<string, SessionWaiter[]>();
+  private injectedConfigContent: string | null = process.env.OPENCODE_CONFIG_CONTENT?.trim() || null;
 
   constructor(runtimeRoot?: string) {
     const baseDir = runtimeRoot ? path.resolve(runtimeRoot) : path.join(process.cwd(), ".agentflow");
@@ -87,12 +88,47 @@ export class OpenCodeClient {
   }
 
   async ensureServer(): Promise<ServeHandle> {
+    if (this.shutdownPromise) {
+      await this.shutdownPromise;
+    }
     if (this.serverHandle) {
       return this.serverHandle;
     }
 
     this.serverHandle = this.startServer();
     return this.serverHandle;
+  }
+
+  setInjectedConfigContent(content: string | null) {
+    const normalized = content?.trim();
+    const nextContent = normalized ? normalized : null;
+    if (nextContent === this.injectedConfigContent) {
+      return;
+    }
+    this.injectedConfigContent = nextContent;
+    if (this.injectedConfigContent) {
+      process.env.OPENCODE_CONFIG_CONTENT = this.injectedConfigContent;
+    } else {
+      delete process.env.OPENCODE_CONFIG_CONTENT;
+    }
+    if (this.serverHandle) {
+      void this.scheduleShutdown();
+    }
+  }
+
+  private scheduleShutdown(): Promise<void> {
+    if (this.shutdownPromise) {
+      return this.shutdownPromise;
+    }
+    const pending = this.shutdown()
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.shutdownPromise === pending) {
+          this.shutdownPromise = null;
+        }
+      });
+    this.shutdownPromise = pending;
+    return pending;
   }
 
   async createSession(projectPath: string, title: string): Promise<string> {
@@ -119,59 +155,6 @@ export class OpenCodeClient {
       server.mock = true;
       return `session-${randomUUID()}`;
     }
-  }
-
-  async reloadConfig(
-    projectPath: string,
-    agentFiles: Array<Pick<AgentFileRecord, "name">> = [],
-    topology?: Pick<TopologyRecord, "edges">,
-  ): Promise<void> {
-    const server = await this.ensureServer();
-    if (server.mock) {
-      return;
-    }
-
-    const attempts: Array<() => Promise<Response>> = [
-      () =>
-        this.request("/project/reload", {
-          method: "POST",
-          projectPath,
-        }),
-      async () => {
-        const current = await this.request("/global/config", {
-          method: "GET",
-          projectPath,
-        });
-        if (!current.ok) {
-          throw new Error(`读取 global/config 失败: ${current.status}`);
-        }
-        const config = await current.text();
-        return this.request("/global/config", {
-          method: "PATCH",
-          projectPath,
-          body: config,
-        });
-      },
-    ];
-
-    let reloaded = false;
-    for (const attempt of attempts) {
-      try {
-        const response = await attempt();
-        if (response.ok) {
-          reloaded = true;
-          break;
-        }
-      } catch {
-        continue;
-      }
-    }
-
-    if (!reloaded) {
-      throw new Error("OpenCode 配置重载失败");
-    }
-
-    await this.enforceReviewAgentPermissions(projectPath, agentFiles, topology);
   }
 
   async connectEvents(onEvent: (event: OpenCodeEvent) => void): Promise<void> {
@@ -342,6 +325,10 @@ export class OpenCodeClient {
     serverEnv.OPENCODE_CONFIG_DIR = this.runtimeDir;
     serverEnv.OPENCODE_DB = path.join(this.runtimeDir, "opencode-server.db");
     serverEnv.OPENCODE_CLIENT = "agentflow-orchestrator";
+    serverEnv.OPENCODE_DISABLE_PROJECT_CONFIG = "true";
+    if (this.injectedConfigContent) {
+      serverEnv.OPENCODE_CONFIG_CONTENT = this.injectedConfigContent;
+    }
     const childProcess = spawn(
       "opencode",
       ["serve", "--port", String(this.port), "--hostname", "127.0.0.1"],
@@ -548,7 +535,7 @@ export class OpenCodeClient {
   private async request(
     pathname: string,
     options: {
-      method: "GET" | "POST" | "PATCH";
+      method: "GET" | "POST";
       projectPath?: string;
       body?: string;
     },
@@ -566,116 +553,6 @@ export class OpenCodeClient {
       headers,
       body: options.body,
     });
-  }
-
-  private async enforceReviewAgentPermissions(
-    projectPath: string,
-    agentFiles: Array<Pick<AgentFileRecord, "name">>,
-    topology?: Pick<TopologyRecord, "edges">,
-  ): Promise<void> {
-    const reviewAgentNames = topology
-      ? [...new Set(agentFiles.map((agent) => agent.name).filter((name) => isReviewAgentInTopology(topology, name)))]
-      : [];
-    if (reviewAgentNames.length === 0) {
-      return;
-    }
-
-    const current = await this.request("/global/config", {
-      method: "GET",
-      projectPath,
-    });
-    if (!current.ok) {
-      throw new Error(`读取 global/config 失败: ${current.status}`);
-    }
-
-    const rawConfig = await current.text();
-    const normalizedRawConfig = this.normalizeRestrictedAgentConfig(rawConfig);
-    const parsed = normalizedRawConfig.trim()
-      ? (JSON.parse(normalizedRawConfig) as Record<string, unknown>)
-      : {};
-    const agentConfig =
-      parsed.agent && typeof parsed.agent === "object"
-        ? { ...(parsed.agent as Record<string, unknown>) }
-        : {};
-
-    for (const agentName of reviewAgentNames) {
-      const existing =
-        agentConfig[agentName] && typeof agentConfig[agentName] === "object"
-          ? { ...(agentConfig[agentName] as Record<string, unknown>) }
-          : {};
-      const permission =
-        existing.permission && typeof existing.permission === "object"
-          ? { ...(existing.permission as Record<string, unknown>) }
-          : {};
-      permission.write = "deny";
-      permission.edit = "deny";
-      permission.bash = "deny";
-      if (typeof permission.patch !== "string") {
-        permission.patch = "deny";
-      }
-      if (typeof permission.task !== "string") {
-        permission.task = "deny";
-      }
-      agentConfig[agentName] = {
-        ...existing,
-        permission,
-      };
-    }
-
-    parsed.agent = agentConfig;
-
-    const patched = await this.request("/global/config", {
-      method: "PATCH",
-      projectPath,
-      body: JSON.stringify(parsed),
-    });
-    if (!patched.ok) {
-      throw new Error(`写入 global/config 失败: ${patched.status}`);
-    }
-  }
-
-  private normalizeRestrictedAgentConfig(rawConfig: string): string {
-    try {
-      const parsed = JSON.parse(rawConfig) as Record<string, unknown>;
-      const agents = this.asRecord(parsed.agent);
-      let changed = false;
-
-      for (const [agentName, agentValue] of Object.entries(agents)) {
-        const agentRecord = this.asRecord(agentValue);
-        const permission = this.asRecord(agentRecord.permission);
-        const denyWrite = permission.write === "deny";
-        const denyEdit = permission.edit === "deny";
-        const denyBash = permission.bash === "deny";
-
-        if (!denyWrite || !denyEdit || !denyBash) {
-          continue;
-        }
-
-        if (typeof permission.patch !== "string") {
-          permission.patch = "deny";
-          changed = true;
-        }
-
-        if (typeof permission.task !== "string") {
-          permission.task = "deny";
-          changed = true;
-        }
-
-        agents[agentName] = {
-          ...agentRecord,
-          permission,
-        };
-      }
-
-      if (!changed) {
-        return rawConfig;
-      }
-
-      parsed.agent = agents;
-      return JSON.stringify(parsed);
-    } catch {
-      return rawConfig;
-    }
   }
 
   private async waitForSessionSettled(sessionId: string, after: number, timeoutMs: number): Promise<void> {

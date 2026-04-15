@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { ZellijManager } from "./zellij-manager";
-import { BUILD_AGENT_NAME } from "@shared/types";
 
 class StubZellijManager extends ZellijManager {
   public available = true;
@@ -165,36 +164,65 @@ test("materializePanelBindings 首次创建时返回面板绑定", async () => {
   assert.equal(bindings[0]?.agentName, "Build");
 });
 
-test("partitionAgentsForGrid 会让 Build 独占第一列", () => {
+test("partitionAgentsForGrid 会按 Agent 顺序优先横向排布（最多两排）", () => {
   const manager = new StubZellijManager();
 
-  const columns = manager.inspectPartitionAgentsForGrid([
+  const rows = manager.inspectPartitionAgentsForGrid([
     { name: "BA" },
-    { name: BUILD_AGENT_NAME },
+    { name: "Build" },
     { name: "UnitTest" },
     { name: "IntegrationTest" },
     { name: "TaskReview" },
   ]);
 
   assert.deepEqual(
-    columns.map((column) => column.map((agent) => agent.name)),
-    [[BUILD_AGENT_NAME], ["BA", "UnitTest"], ["IntegrationTest", "TaskReview"]],
+    rows.map((row) => row.map((agent) => agent.name)),
+    [["BA", "Build", "UnitTest"], ["IntegrationTest", "TaskReview"]],
   );
 });
 
-test("buildAgentGridLayout 生成的布局会让 Build 单独占一列", () => {
+test("partitionAgentsForGrid 在 Agent 数量较多时仍限制为最多两排", () => {
+  const manager = new StubZellijManager();
+
+  const rows = manager.inspectPartitionAgentsForGrid([
+    { name: "A" },
+    { name: "B" },
+    { name: "C" },
+    { name: "D" },
+    { name: "E" },
+    { name: "F" },
+    { name: "G" },
+  ]);
+
+  assert.equal(rows.length, 2);
+  assert.deepEqual(
+    rows.map((row) => row.map((agent) => agent.name)),
+    [["A", "B", "C", "D"], ["E", "F", "G"]],
+  );
+});
+
+test("buildAgentGridLayout 生成的布局会按 Agent 顺序横向优先排布", () => {
   const manager = new StubZellijManager();
 
   const layout = manager.inspectBuildAgentGridLayout("session-1", "/tmp/demo", [
     { name: "BA" },
-    { name: BUILD_AGENT_NAME },
+    { name: "Build" },
     { name: "UnitTest" },
     { name: "IntegrationTest" },
   ]);
 
   assert.ok(layout);
-  assert.match(layout ?? "", /pane size="34%" split_direction="horizontal" \{\n      pane command=.* name="Build"/);
-  assert.doesNotMatch(layout ?? "", /name="Build" size="\d+%"/);
+  assert.match(layout ?? "", /pane split_direction="horizontal" \{/);
+  assert.match(layout ?? "", /pane size="50%" split_direction="vertical" \{/);
+
+  const normalizedLayout = layout ?? "";
+  const baIndex = normalizedLayout.indexOf('name="BA" size="34%"');
+  const buildIndex = normalizedLayout.indexOf('name="Build" size="33%"');
+  const unitTestIndex = normalizedLayout.indexOf('name="UnitTest" size="33%"');
+
+  assert.ok(baIndex >= 0);
+  assert.ok(buildIndex > baIndex);
+  assert.ok(unitTestIndex > buildIndex);
 });
 
 test("deleteTaskSession 在 kill 失败时会回退到 delete-session", async () => {

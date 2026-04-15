@@ -1,5 +1,5 @@
 export function toOpenCodeAgentName(agentName: string): string {
-  if (agentName === "Build") {
+  if (agentName.trim().toLowerCase() === "build") {
     return "build";
   }
   return agentName;

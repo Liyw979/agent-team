@@ -8,7 +8,6 @@ import { buildSubmitMessageBody } from "./opencode-request-body";
 test("Build agent 完全不注入 system prompt", () => {
   const prompt = buildAgentSystemPrompt({
     name: "Build",
-    role: "implementation",
   }, false);
 
   assert.equal(prompt, "");
@@ -17,7 +16,6 @@ test("Build agent 完全不注入 system prompt", () => {
 test("存在审视边的 agent 才注入 DECISION 协议", () => {
   const prompt = buildAgentSystemPrompt({
     name: "TaskReview",
-    role: "task_review",
   }, true);
 
   assert.match(prompt, /【DECISION】检查通过/);
@@ -27,7 +25,6 @@ test("存在审视边的 agent 才注入 DECISION 协议", () => {
 test("没有审视边的 agent 不注入 system prompt", () => {
   const prompt = buildAgentSystemPrompt({
     name: "BA",
-    role: "business_analyst",
   }, false);
 
   assert.equal(prompt, "");
@@ -53,7 +50,6 @@ test("Build agent 的请求体不会携带 system 字段", () => {
     content: "请实现功能",
     system: buildAgentSystemPrompt({
       name: "Build",
-      role: "implementation",
     }, false),
   });
 
@@ -67,7 +63,6 @@ test("存在审视边的 agent 请求体继续携带 system 字段", () => {
     content: "请审视交付结果",
     system: buildAgentSystemPrompt({
       name: "TaskReview",
-      role: "task_review",
     }, true),
   });
 

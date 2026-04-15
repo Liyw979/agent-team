@@ -1,7 +1,7 @@
 import type { AgentFileRecord } from "../../shared/types";
 
 export function buildAgentSystemPrompt(
-  agent: Pick<AgentFileRecord, "name" | "role">,
+  agent: Pick<AgentFileRecord, "name">,
   reviewAgent: boolean,
 ): string {
   if (reviewAgent) {

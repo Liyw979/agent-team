@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AgentConfigModal } from "./components/AgentConfigModal";
+import { AgentConfigModal, NEW_AGENT_DRAFT_PATH } from "./components/AgentConfigModal";
 import { ChatWindow } from "./components/ChatWindow";
 import { SidebarList } from "./components/SidebarList";
 import { TopologyGraph } from "./components/TopologyGraph";
@@ -14,7 +14,7 @@ import {
 } from "./lib/task-completion-reminders";
 import { getAgentColorToken } from "./lib/agent-colors";
 import { useAgentFlowStore } from "./store/useAgentFlowStore";
-import { isBuiltinAgentPath, resolveTopologyAgentOrder } from "@shared/types";
+import { BUILD_AGENT_NAME, resolveTopologyAgentOrder } from "@shared/types";
 import type { AgentRuntimeSnapshot, MessageRecord, TaskSnapshot, TopologyRecord } from "@shared/types";
 
 interface OptimisticSubmission {
@@ -190,9 +190,6 @@ function App() {
     const orderedAgentNames = resolveTopologyAgentOrder(
       activeProject.agentFiles.map((agentFile) => ({
         name: agentFile.name,
-        mode: agentFile.mode,
-        role: agentFile.role,
-        relativePath: agentFile.relativePath,
       })),
       activeProject.topology.agentOrderIds,
     );
@@ -206,14 +203,14 @@ function App() {
           agentFile.prompt
             .split(/\n+/)
             .map((line) => line.trim())
-            .find((line) => line && !line.startsWith("你是")) ?? "点击后可查看完整 Agent 原始配置。";
+            .find((line) => line && !line.startsWith("你是")) ?? "点击后可查看完整 Agent prompt。";
         return {
           ...agentFile,
+          id: agentFile.name,
           displayName: getAgentDisplayName(agentFile.name),
           roleSummary,
           status: runtime?.status ?? "idle",
           messageCount: runtimeSnapshot?.messageCount ?? 0,
-          isBuiltin: isBuiltinAgentPath(agentFile.relativePath),
         };
       })
       .sort((left, right) => {
@@ -330,9 +327,6 @@ function App() {
     const currentOrderIds = resolveTopologyAgentOrder(
       activeProject.agentFiles.map((agent) => ({
         name: agent.name,
-        mode: agent.mode,
-        role: agent.role,
-        relativePath: agent.relativePath,
       })),
       activeProject.topology.agentOrderIds,
     );
@@ -468,9 +462,7 @@ function App() {
                       }
                       const resolvedMentionAgent =
                         mentionAgent ||
-                        (activeProject.agentFiles.some((agent) => agent.name === "Build")
-                          ? "Build"
-                          : activeProject.agentFiles[0]?.name);
+                        activeProject.agentFiles[0]?.name;
                       let optimisticId: string | null = null;
                       if (activeTask) {
                         const optimisticContent = buildUserHistoryContent(content, resolvedMentionAgent);
@@ -522,6 +514,16 @@ function App() {
                         {agentCards.length}
                       </span>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAgentConfigPath(NEW_AGENT_DRAFT_PATH);
+                        setAgentConfigOpen(true);
+                      }}
+                      className="rounded-[8px] border border-border bg-white/70 px-3 py-1.5 text-xs font-medium text-foreground/85 transition hover:border-accent"
+                    >
+                      配置 Agent
+                    </button>
                   </header>
 
                   <div className="flex flex-1 min-h-0 flex-col px-5 py-3">
@@ -579,24 +581,24 @@ function App() {
                               if (suppressNextAgentCardClickRef.current) {
                                 return;
                               }
-                              if (!agent.relativePath.startsWith("builtin://")) {
-                                setAgentConfigPath(agent.relativePath);
-                                setAgentConfigOpen(true);
+                              if (agent.name === BUILD_AGENT_NAME) {
+                                return;
                               }
+                              setAgentConfigPath(agent.name);
+                              setAgentConfigOpen(true);
                             }}
                             onKeyDown={(event) => {
                               if (event.key !== "Enter" && event.key !== " ") {
                                 return;
                               }
                               event.preventDefault();
-                              if (!agent.relativePath.startsWith("builtin://")) {
-                                setAgentConfigPath(agent.relativePath);
-                                setAgentConfigOpen(true);
+                              if (agent.name === BUILD_AGENT_NAME) {
+                                return;
                               }
+                              setAgentConfigPath(agent.name);
+                              setAgentConfigOpen(true);
                             }}
-                            className={`mb-2 flex w-full cursor-grab items-center gap-3 rounded-[8px] border px-3 py-3 text-left transition active:cursor-grabbing last:mb-0 ${
-                              agent.relativePath.startsWith("builtin://") ? "" : "hover:brightness-[0.99]"
-                            }`}
+                            className="mb-2 flex w-full cursor-grab items-center gap-3 rounded-[8px] border px-3 py-3 text-left transition hover:brightness-[0.99] active:cursor-grabbing last:mb-0"
                             style={{
                               background: agentColor.soft,
                               borderColor: isDragOver ? agentColor.solid : agentColor.border,

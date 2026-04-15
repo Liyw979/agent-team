@@ -4,15 +4,18 @@ import { fileURLToPath } from "node:url";
 import { IPC_CHANNELS } from "@shared/ipc";
 import type {
   CreateProjectPayload,
+  DeleteAgentPayload,
   DeleteTaskPayload,
   GetTaskRuntimePayload,
   OpenAgentPanePayload,
   OpenTaskSessionPayload,
   ReadAgentFilePayload,
+  SaveAgentPromptPayload,
   SubmitTaskPayload,
   UpdateTopologyPayload,
 } from "@shared/types";
 import { Orchestrator } from "./orchestrator";
+import { resolveCliUserDataPath } from "./user-data-path";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -91,7 +94,7 @@ installSafeConsoleGuards();
 
 let mainWindow: BrowserWindow | null = null;
 const orchestrator = new Orchestrator({
-  userDataPath: app.getPath("userData"),
+  userDataPath: resolveCliUserDataPath(),
 });
 
 async function createWindow() {
@@ -176,6 +179,14 @@ app.whenReady().then(async () => {
   ipcMain.handle(
     IPC_CHANNELS.readAgentFile,
     (_event, payload: ReadAgentFilePayload) => orchestrator.readAgentFile(payload),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.saveAgentPrompt,
+    (_event, payload: SaveAgentPromptPayload) => orchestrator.saveAgentPrompt(payload),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.deleteAgent,
+    (_event, payload: DeleteAgentPayload) => orchestrator.deleteAgent(payload),
   );
   ipcMain.handle(
     IPC_CHANNELS.saveTopology,

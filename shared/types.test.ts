@@ -1,77 +1,56 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createDefaultTopology, isReviewAgentInTopology, type TopologyAgentSeed } from "./types";
+import {
+  createDefaultTopology,
+  isReviewAgentInTopology,
+  type TopologyAgentSeed,
+  type TopologyRecord,
+} from "./types";
 
-test("默认拓扑只把存在 review 出边的 Agent 视为审视 Agent", () => {
+test("默认拓扑只生成首节点到次节点的 association 边", () => {
   const agents: TopologyAgentSeed[] = [
-    {
-      name: "BA",
-      relativePath: "BA.md",
-      mode: "primary",
-      role: "business_analyst",
-      tools: [],
-    },
-    {
-      name: "Build",
-      relativePath: "builtin://Build",
-      mode: "primary",
-      role: "implementation",
-      tools: [],
-    },
-    {
-      name: "UnitTest",
-      relativePath: "UnitTest.md",
-      mode: "subagent",
-      role: "unit_test",
-      tools: [],
-    },
-    {
-      name: "IntegrationTest",
-      relativePath: "IntegrationTest.md",
-      mode: "subagent",
-      role: "integration_test",
-      tools: [],
-    },
-    {
-      name: "TaskReview",
-      relativePath: "TaskReview.md",
-      mode: "subagent",
-      role: "task_review",
-      tools: [],
-    },
-    {
-      name: "CodeReview",
-      relativePath: "CodeReview.md",
-      mode: "subagent",
-      role: "code_review",
-      tools: [],
-    },
+    { name: "BA" },
+    { name: "Build" },
+    { name: "TaskReview" },
   ];
 
   const topology = createDefaultTopology("project-1", agents);
 
-  assert.equal(isReviewAgentInTopology(topology, "BA"), false);
-  assert.equal(isReviewAgentInTopology(topology, "Build"), false);
-  assert.equal(isReviewAgentInTopology(topology, "UnitTest"), true);
-  assert.equal(isReviewAgentInTopology(topology, "IntegrationTest"), true);
-  assert.equal(isReviewAgentInTopology(topology, "TaskReview"), true);
-  assert.equal(isReviewAgentInTopology(topology, "CodeReview"), true);
-
+  assert.equal(topology.startAgentId, "BA");
+  assert.deepEqual(topology.agentOrderIds, ["BA", "Build", "TaskReview"]);
+  assert.equal(topology.edges.length, 1);
+  assert.deepEqual(topology.edges[0], {
+    id: "BA__Build__association",
+    source: "BA",
+    target: "Build",
+    triggerOn: "association",
+  });
   assert.equal(
-    topology.edges.some((edge) => edge.source === "BA" && edge.target === "Build" && edge.triggerOn === "review_fail"),
+    topology.edges.some((edge) => edge.triggerOn === "review_pass" || edge.triggerOn === "review_fail"),
     false,
   );
-  assert.equal(
-    topology.edges.some((edge) => edge.source === "UnitTest" && edge.target === "TaskReview" && edge.triggerOn === "review_pass"),
-    true,
-  );
-  assert.equal(
-    topology.edges.some((edge) => edge.source === "IntegrationTest" && edge.target === "TaskReview" && edge.triggerOn === "review_pass"),
-    true,
-  );
-  assert.equal(
-    topology.edges.some((edge) => edge.source === "TaskReview" && edge.target === "Build" && edge.triggerOn === "review_fail"),
-    true,
-  );
+});
+
+test("存在 review 出边时 isReviewAgentInTopology 返回 true", () => {
+  const topology: TopologyRecord = {
+    projectId: "project-1",
+    startAgentId: "Build",
+    agentOrderIds: ["Build", "TaskReview"],
+    nodes: [
+      { id: "Build", label: "Build", kind: "agent" },
+      { id: "TaskReview", label: "TaskReview", kind: "agent" },
+    ],
+    edges: [
+      {
+        id: "TaskReview__Build__review_fail",
+        source: "TaskReview",
+        target: "Build",
+        triggerOn: "review_fail",
+      },
+    ],
+  };
+
+  assert.equal(isReviewAgentInTopology(topology, "TaskReview"), true);
+  assert.equal(isReviewAgentInTopology(topology, "Build"), false);
 });
