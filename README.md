@@ -45,7 +45,7 @@
 - 拓扑图里的 Agent 节点颜色用于表达当前运行状态，不再用颜色区分 built-in / custom；内置与本地类型信息仅在编辑面板等辅助信息里展示
 - 审查类 Agent 的“审查通过 / 审查不通过”状态会直接展示在拓扑节点顶部；审查不通过时当前 Task 会直接收口为“不通过”
 - 当某个 Task 已运行到当前节点、但拓扑里不存在可自动继续推进的下游节点时，Task 状态会切换为 `waiting`，与群聊中的“保持等待状态”系统消息保持一致
-- 当当前 Task 下的全部 Agent 都进入 `✅/已完成` 状态时，Task 会自动收口为 `finished`，并在群聊里追加一条任务已结束的系统消息；Task 内部的 Agent 运行态成功码统一为 `completed`，Task 结束时会把该 Task 下全部 Agent 一并收口到 `completed`
+- 当 Task 收口为 `finished` 时，右侧拓扑面板中的每个 Agent 节点都会统一显示为 `已完成`，不再保留 `未启动 / 运行中` 等中间状态；群聊里也会追加一条任务已结束的系统消息。Task 内部的 Agent 成功状态码统一使用 `completed`
 - 拓扑图在面板尺寸变化时会保持“Agent 在上、历史区在下、首尾节点贴近左右边界但保留少量留白、顶部预留连线通道”的布局约束，而不是把整张图简单等比缩放后居中
 - 拓扑图历史区会优先展示 Agent 最近的运行活动，并明确区分思考、普通消息、步骤与 Tool Call 参数摘要，而不只是单行运行状态
 - 右下角展示 Project 全量 Agent，以及它们在当前 Task 语境下的状态；点击 Agent 可直接编辑并保存当前 Agent 名称与 prompt
@@ -100,6 +100,16 @@ agentflow/
 npm install
 npm run electron:dev
 ```
+
+## 打包
+
+已验证可成功生成 Windows 可执行目录包的命令：
+
+```bash
+npx electron-builder --win dir --x64 --config.win.signAndEditExecutable=false
+```
+
+打包完成后，主程序位于 `dist/win-unpacked/agentflow.exe`，同时会带上 `dist/win-unpacked/resources/bin/zellij.exe`。
 
 ## CLI
 
@@ -158,7 +168,7 @@ CLI 能力分组：
 
 ## OpenCode 对齐说明
 
-- 当前实现使用单个 `opencode serve`，默认监听 `127.0.0.1:4096`
+- 当前实现使用单个 `opencode serve`；会优先尝试监听 `127.0.0.1:4096`，若端口已被非 OpenCode 进程占用，则自动切换到本机空闲端口，并让 pane attach / 健康检查跟随实际端口
 - 不同 Project 通过 `x-opencode-directory` 请求头按目录路由到各自工作区实例
 - Agent 配置会在 `opencode serve` 启动前一次性注入，且只注入当前 Project 的自定义 Agent（仅 name + prompt，权限固定 deny）
 - 默认拓扑只在首次初始化且当前还没有拓扑数据时按 Agent `role / mode / 是否内置` 自动推断；后续运行时不依赖固定名字

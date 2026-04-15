@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
@@ -74,7 +75,8 @@ export class OpenCodeClient {
   private serverHandle: Promise<ServeHandle> | null = null;
   private shutdownPromise: Promise<void> | null = null;
   private eventPump: Promise<void> | null = null;
-  private readonly port = 4096;
+  private readonly host = "127.0.0.1";
+  private readonly preferredPort = 4096;
   private readonly runtimeDir: string;
   private readonly sessionIdleAt = new Map<string, number>();
   private readonly sessionErrors = new Map<string, string>();
@@ -313,7 +315,7 @@ export class OpenCodeClient {
   }
 
   private async startServer(): Promise<ServeHandle> {
-    this.terminateStaleServeOnPort(this.port);
+    const port = await this.resolveServerPort();
 
     const serverEnv = { ...process.env };
     // Isolate the embedded runtime from parent OpenCode config injection.
@@ -331,7 +333,7 @@ export class OpenCodeClient {
     }
     const childProcess = spawn(
       "opencode",
-      ["serve", "--port", String(this.port), "--hostname", "127.0.0.1"],
+      ["serve", "--port", String(port), "--hostname", this.host],
       {
         cwd: globalThis.process.cwd(),
         env: serverEnv,
@@ -347,16 +349,21 @@ export class OpenCodeClient {
     childProcess.stderr.on("data", () => undefined);
     childProcess.stdout.on("data", () => undefined);
 
-    const healthy = await this.waitForHealthy(this.port);
+    const healthy = await this.waitForHealthy(port);
     if (!healthy) {
       mock = true;
     }
 
     return {
       process: childProcess,
-      port: this.port,
+      port,
       mock,
     };
+  }
+
+  async getAttachBaseUrl(): Promise<string> {
+    const server = await this.ensureServer();
+    return this.buildBaseUrl(server.port);
   }
 
   private terminateStaleServeOnPort(port: number) {
@@ -450,7 +457,7 @@ export class OpenCodeClient {
     server: ServeHandle,
   ): Promise<void> {
     try {
-      const response = await fetch(`http://127.0.0.1:${server.port}/global/event`);
+      const response = await fetch(`${this.buildBaseUrl(server.port)}/global/event`);
       if (!response.ok || !response.body) {
         return;
       }
@@ -540,6 +547,7 @@ export class OpenCodeClient {
       body?: string;
     },
   ): Promise<Response> {
+    const server = await this.ensureServer();
     const headers: Record<string, string> = {};
     if (options.body) {
       headers["content-type"] = "application/json";
@@ -548,7 +556,7 @@ export class OpenCodeClient {
       headers["x-opencode-directory"] = options.projectPath;
     }
 
-    return fetch(`http://127.0.0.1:${this.port}${pathname}`, {
+    return fetch(`${this.buildBaseUrl(server.port)}${pathname}`, {
       method: options.method,
       headers,
       body: options.body,
@@ -1197,7 +1205,7 @@ export class OpenCodeClient {
   private async waitForHealthy(port: number): Promise<boolean> {
     for (let attempt = 0; attempt < 15; attempt += 1) {
       try {
-        const response = await fetch(`http://127.0.0.1:${port}/global/health`);
+        const response = await fetch(`${this.buildBaseUrl(port)}/global/health`);
         if (response.ok) {
           return true;
         }
@@ -1207,6 +1215,65 @@ export class OpenCodeClient {
     }
 
     return false;
+  }
+
+  private buildBaseUrl(port: number): string {
+    return `http://${this.host}:${port}`;
+  }
+
+  private async resolveServerPort(): Promise<number> {
+    this.terminateStaleServeOnPort(this.preferredPort);
+    if (await this.canListenOnPort(this.host, this.preferredPort)) {
+      return this.preferredPort;
+    }
+    return this.reserveAvailablePort(this.host);
+  }
+
+  private async canListenOnPort(host: string, port: number): Promise<boolean> {
+    const reserved = await this.reservePort(host, port);
+    if (!reserved) {
+      return false;
+    }
+    await reserved.close();
+    return true;
+  }
+
+  private async reserveAvailablePort(host: string): Promise<number> {
+    const reserved = await this.reservePort(host, 0);
+    if (!reserved) {
+      throw new Error("无法为 OpenCode 分配可用端口。");
+    }
+    const port = reserved.port;
+    await reserved.close();
+    return port;
+  }
+
+  private async reservePort(
+    host: string,
+    port: number,
+  ): Promise<{ port: number; close: () => Promise<void> } | null> {
+    return await new Promise((resolve) => {
+      const server = net.createServer();
+      const cleanup = async () => {
+        await new Promise<void>((closeResolve) => {
+          server.close(() => closeResolve());
+        });
+      };
+      server.once("error", () => {
+        resolve(null);
+      });
+      server.listen(port, host, () => {
+        const address = server.address();
+        if (!address || typeof address === "string") {
+          void cleanup().then(() => resolve(null));
+          return;
+        }
+        resolve({
+          port: address.port,
+          close: cleanup,
+        });
+      });
+    });
   }
 
   private extractVisibleMessageText(parts: Array<Record<string, unknown>>): string {

@@ -18,6 +18,7 @@ interface OpencodePaneCommandOptions {
   agentName: string;
   opencodeSessionId: string | null;
   opencodeAgentName: string;
+  attachBaseUrl: string;
   platform?: TerminalPlatform;
 }
 
@@ -111,7 +112,7 @@ export function buildOpencodePaneCommand(
           command: "opencode",
           args: [
             "attach",
-            "http://127.0.0.1:4096",
+            options.attachBaseUrl,
             "--session",
             options.opencodeSessionId,
             "--dir",
@@ -144,7 +145,7 @@ export function buildOpencodePaneCommand(
   const opencodeCommand = options.opencodeSessionId
     ? [
         "exec opencode attach",
-        quotePosixArg("http://127.0.0.1:4096"),
+        quotePosixArg(options.attachBaseUrl),
         "--session",
         quotePosixArg(options.opencodeSessionId),
         "--dir",

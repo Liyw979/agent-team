@@ -25,6 +25,41 @@ function createClient() {
   return client;
 }
 
+test("request 会跟随当前 serverHandle 的实际端口", async () => {
+  const client = createClient() as OpenCodeClient & {
+    request: (
+      pathname: string,
+      options: {
+        method: "GET" | "POST";
+        projectPath?: string;
+        body?: string;
+      },
+    ) => Promise<Response>;
+  };
+  client.serverHandle = Promise.resolve({
+    process: null,
+    port: 43127,
+    mock: false,
+  });
+
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = "";
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    requestedUrl = String(input);
+    return new Response("", { status: 200 });
+  }) as typeof fetch;
+
+  try {
+    await client.request("/session", {
+      method: "GET",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestedUrl, "http://127.0.0.1:43127/session");
+});
+
 test("submitMessage 在空响应体时不会抛出 JSON 解析错误", async () => {
   const client = createClient();
   client.request = async () => new Response("", { status: 200 });

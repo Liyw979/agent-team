@@ -225,6 +225,17 @@ test("buildAgentGridLayout 生成的布局会按 Agent 顺序横向优先排布"
   assert.ok(unitTestIndex > buildIndex);
 });
 
+test("buildAgentGridLayout 会把当前 OpenCode attach 地址写入 pane 命令", () => {
+  const manager = new StubZellijManager();
+  manager.setOpenCodeAttachBaseUrl("http://127.0.0.1:43127");
+
+  const layout = manager.inspectBuildAgentGridLayout("session-1", "/tmp/demo", [
+    { name: "Build", opencodeSessionId: "session-123" },
+  ]);
+
+  assert.match(layout ?? "", /http:\/\/127\.0\.0\.1:43127/);
+});
+
 test("deleteTaskSession 在 kill 失败时会回退到 delete-session", async () => {
   const manager = new StubZellijManager();
   manager.failKill = true;

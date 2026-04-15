@@ -8,6 +8,7 @@ import { IPC_CHANNELS } from "@shared/ipc";
 import {
   type AgentFlowEvent,
   type AgentRuntimeSnapshot,
+  type BuiltinAgentTemplateRecord,
   BUILD_AGENT_NAME,
   createDefaultTopology,
   type AgentFileRecord,
@@ -23,7 +24,10 @@ import {
   type ProjectRecord,
   type ProjectSnapshot,
   type ReadAgentFilePayload,
+  type ReadBuiltinAgentTemplatePayload,
+  type ResetBuiltinAgentTemplatePayload,
   type SaveAgentPromptPayload,
+  type SaveBuiltinAgentTemplatePayload,
   resolveTopologyAgentOrder,
   resolveTopologyStartAgent,
   type SubmitTaskPayload,
@@ -244,6 +248,13 @@ export class Orchestrator {
     return this.customAgentConfig.getProjectAgent(project.path, payload.agentName);
   }
 
+  async readBuiltinAgentTemplate(
+    payload: ReadBuiltinAgentTemplatePayload,
+  ): Promise<BuiltinAgentTemplateRecord> {
+    const project = this.store.getProject(payload.projectId);
+    return this.customAgentConfig.getBuiltinAgentTemplate(project.path, payload.templateName);
+  }
+
   async saveAgentPrompt(payload: SaveAgentPromptPayload): Promise<ProjectSnapshot> {
     const project = this.store.getProject(payload.projectId);
     const hasTaskRecords = this.store.listTasks(project.id).length > 0;
@@ -264,6 +275,38 @@ export class Orchestrator {
       payload.prompt,
     );
     const updated = this.hydrateProject(project.id, true);
+    this.emit({
+      type: "project-updated",
+      projectId: project.id,
+      payload: updated,
+    });
+    return updated;
+  }
+
+  async saveBuiltinAgentTemplate(
+    payload: SaveBuiltinAgentTemplatePayload,
+  ): Promise<ProjectSnapshot> {
+    const project = this.store.getProject(payload.projectId);
+    this.customAgentConfig.saveBuiltinAgentTemplate(
+      project.path,
+      payload.templateName,
+      payload.prompt,
+    );
+    const updated = this.hydrateProject(project.id);
+    this.emit({
+      type: "project-updated",
+      projectId: project.id,
+      payload: updated,
+    });
+    return updated;
+  }
+
+  async resetBuiltinAgentTemplate(
+    payload: ResetBuiltinAgentTemplatePayload,
+  ): Promise<ProjectSnapshot> {
+    const project = this.store.getProject(payload.projectId);
+    this.customAgentConfig.resetBuiltinAgentTemplate(project.path, payload.templateName);
+    const updated = this.hydrateProject(project.id);
     this.emit({
       type: "project-updated",
       projectId: project.id,
@@ -391,6 +434,7 @@ export class Orchestrator {
     if (!panel || !taskAgent) {
       throw new Error(`未找到 Agent ${payload.agentName} 对应的运行信息。`);
     }
+    await this.syncOpenCodeAttachEndpoint();
     await this.zellijManager.openAgentTerminal({
       sessionName: panel.sessionName,
       cwd: panel.cwd,
@@ -1821,6 +1865,7 @@ export class Orchestrator {
     const currentTask = this.store.getTask(task.id);
     const agents = this.orderTaskAgents(task.id, this.store.listTaskAgents(task.id));
     const agentSessions = await this.ensureTaskAgentSessions(project, currentTask);
+    await this.syncOpenCodeAttachEndpoint();
     const panels = await this.zellijManager.materializePanelBindings({
       projectId: currentTask.projectId,
       taskId: currentTask.id,
@@ -1915,6 +1960,7 @@ export class Orchestrator {
           topology,
         );
         const agentSessions = await this.ensureTaskAgentSessions(project, task);
+        await this.syncOpenCodeAttachEndpoint();
         const panels = await this.zellijManager.materializePanelBindings({
           projectId: task.projectId,
           taskId: task.id,
@@ -1937,6 +1983,12 @@ export class Orchestrator {
         });
       }
     }
+  }
+
+  private async syncOpenCodeAttachEndpoint() {
+    const attachBaseUrl = await this.opencodeClient.getAttachBaseUrl();
+    this.zellijManager.setOpenCodeAttachBaseUrl(attachBaseUrl);
+    return attachBaseUrl;
   }
 
   private isReviewAgent(
@@ -2017,6 +2069,7 @@ export class Orchestrator {
   private hydrateProject(projectId: string, forceSyncTopology = false): ProjectSnapshot {
     const project = this.store.getProject(projectId);
     const agentFiles = this.listProjectAgents(project);
+    const builtinAgentTemplates = this.customAgentConfig.listBuiltinAgentTemplates(project.path);
     const topology = forceSyncTopology
       ? this.syncTopology(project, agentFiles)
       : this.ensureTopologyExists(project, agentFiles);
@@ -2028,6 +2081,7 @@ export class Orchestrator {
     return {
       project,
       agentFiles,
+      builtinAgentTemplates,
       topology,
       messages: this.store.listMessages(project.id),
       tasks: tasks.map((task) => this.hydrateTask(task.id)),

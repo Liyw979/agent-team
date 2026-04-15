@@ -39,6 +39,7 @@ test("Windows pane 启动命令使用 cmd.exe 和 Windows 环境变量语法", (
     agentName: "Build",
     opencodeSessionId: "session-123",
     opencodeAgentName: "build",
+    attachBaseUrl: "http://127.0.0.1:43127",
     platform: "win32",
   });
 
@@ -49,7 +50,7 @@ test("Windows pane 启动命令使用 cmd.exe 和 Windows 环境变量语法", (
   assert.match(command.shellCommand, /set "OPENCODE_CONFIG_DIR=C:\\work tree\\agent-team\\\.agentflow\\pane\\Build"/);
   assert.match(command.shellCommand, /set "OPENCODE_DB=C:\\work tree\\agent-team\\\.agentflow\\pane\\Build\\opencode-pane\.db"/);
   assert.match(command.shellCommand, /set "OPENCODE_CLIENT=agentflow-zellij"/);
-  assert.match(command.shellCommand, /"opencode" "attach" "http:\/\/127\.0\.0\.1:4096" "--session" "session-123" "--dir" "C:\\work tree\\agent-team"/);
+  assert.match(command.shellCommand, /"opencode" "attach" "http:\/\/127\.0\.0\.1:43127" "--session" "session-123" "--dir" "C:\\work tree\\agent-team"/);
   assert.doesNotMatch(command.shellCommand, /\/bin\/sh|mkdir -p|export /);
 });
 
@@ -61,6 +62,7 @@ test("POSIX pane 启动命令继续使用 /bin/sh 和 export", () => {
     agentName: "Build",
     opencodeSessionId: null,
     opencodeAgentName: "build",
+    attachBaseUrl: "http://127.0.0.1:43127",
     platform: "darwin",
   });
 

@@ -13,6 +13,7 @@ import { toOpenCodeAgentName } from "./opencode-agent-name";
 import { resolveZellijExecutable } from "./zellij-executable";
 
 const execFileAsync = promisify(execFile);
+const DEFAULT_OPENCODE_ATTACH_BASE_URL = "http://127.0.0.1:4096";
 
 interface ZellijPaneInfo {
   id: string;
@@ -42,11 +43,9 @@ interface AgentTerminalSpec {
 }
 
 const HIDDEN_PANEL_AGENTS = new Set<string>();
-const OPENCODE_ATTACH_HOST = "127.0.0.1";
-const OPENCODE_ATTACH_PORT = 4096;
-
 export class ZellijManager {
   private zellijAvailable: boolean | null = null;
+  private opencodeAttachBaseUrl = DEFAULT_OPENCODE_ATTACH_BASE_URL;
 
   protected getZellijCommand(): string {
     return resolveZellijExecutable().command;
@@ -83,6 +82,11 @@ export class ZellijManager {
     if (!(await this.isAvailable())) {
       throw new Error(buildZellijMissingMessage(action));
     }
+  }
+
+  setOpenCodeAttachBaseUrl(baseUrl: string) {
+    const normalized = baseUrl.trim();
+    this.opencodeAttachBaseUrl = normalized || DEFAULT_OPENCODE_ATTACH_BASE_URL;
   }
 
   async createTaskSession(projectId: string, taskId: string): Promise<string> {
@@ -490,6 +494,7 @@ export class ZellijManager {
       agentName,
       opencodeSessionId,
       opencodeAgentName: toOpenCodeAgentName(agentName),
+      attachBaseUrl: this.opencodeAttachBaseUrl,
     });
   }
 
@@ -512,7 +517,7 @@ export class ZellijManager {
   protected async waitForOpenCodeAttachReady(timeoutMs = 8_000): Promise<boolean> {
     const startedAt = Date.now();
     while (Date.now() - startedAt < timeoutMs) {
-      if (await this.canConnectToEndpoint(OPENCODE_ATTACH_HOST, OPENCODE_ATTACH_PORT)) {
+      if (await this.isOpenCodeAttachHealthy()) {
         return true;
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
@@ -520,25 +525,19 @@ export class ZellijManager {
     return false;
   }
 
-  protected async canConnectToEndpoint(host: string, port: number, timeoutMs = 500): Promise<boolean> {
-    return await new Promise<boolean>((resolve) => {
-      const socket = net.createConnection({ host, port });
-      let settled = false;
-
-      const finish = (result: boolean) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        socket.destroy();
-        resolve(result);
-      };
-
-      socket.setTimeout(timeoutMs);
-      socket.once("connect", () => finish(true));
-      socket.once("error", () => finish(false));
-      socket.once("timeout", () => finish(false));
-    });
+  protected async isOpenCodeAttachHealthy(timeoutMs = 500): Promise<boolean> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(`${this.opencodeAttachBaseUrl}/global/health`, {
+        signal: controller.signal,
+      });
+      return response.ok;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   protected async openSessionInTerminal(sessionName: string, cwd: string): Promise<void> {
