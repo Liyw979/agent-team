@@ -9,11 +9,13 @@ import {
   buildInlineCommand,
   buildOpencodePaneCommand,
 } from "@shared/terminal-commands";
+import { appendAppLog } from "./app-log";
 import { toOpenCodeAgentName } from "./opencode-agent-name";
 import { resolveZellijExecutable } from "./zellij-executable";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_OPENCODE_ATTACH_BASE_URL = "http://127.0.0.1:4096";
+type ExecFileOptions = Parameters<typeof execFile>[2];
 
 interface ZellijPaneInfo {
   id: string;
@@ -51,8 +53,14 @@ export class ZellijManager {
     return resolveZellijExecutable().command;
   }
 
-  protected execZellij(args: string[], options?: Parameters<typeof execFile>[2]) {
-    return execFileAsync(this.getZellijCommand(), args, options);
+  protected async execZellij(args: string[], options?: ExecFileOptions) {
+    const command = this.getZellijCommand();
+    try {
+      return await execFileAsync(command, args, options);
+    } catch (error) {
+      this.logCommandFailure(command, args, options, error);
+      throw error;
+    }
   }
 
   async isAvailable(): Promise<boolean> {
@@ -96,13 +104,10 @@ export class ZellijManager {
       return sessionName;
     }
 
-    try {
-      await this.execZellij(["attach", "--create-background", sessionName], {
-        timeout: 4000,
-      });
-    } catch {
-      return sessionName;
-    }
+    await this.execZellij(["attach", "--create-background", sessionName], {
+      timeout: 4000,
+    });
+    await this.waitForSessionReady(sessionName);
 
     return sessionName;
   }
@@ -131,7 +136,7 @@ export class ZellijManager {
 
     try {
       const { stdout } = await this.execZellij(["list-sessions", "--no-formatting"], {
-        timeout: 2000,
+        timeout: 5000,
       });
       return new Set(this.extractActiveSessionNames(stdout));
     } catch (error) {
@@ -363,36 +368,49 @@ export class ZellijManager {
     await this.execZellij(["attach", "--create-background", sessionName], {
       timeout: 4000,
     });
+    await this.waitForSessionReady(sessionName);
   }
 
   protected async listTerminalPanes(sessionName: string): Promise<ZellijPaneInfo[]> {
-    const { stdout } = await this.execZellij([
-      "-s",
-      sessionName,
-      "action",
-      "list-panes",
-      "-j",
-      "-a",
-      "-g",
-      "-s",
-      "-t",
-    ]);
-    const parsed = JSON.parse(stdout) as Array<Record<string, unknown>>;
-    return parsed
-      .filter((pane) => !pane.is_plugin)
-      .map((pane) => ({
-        id: `terminal_${pane.id}`,
-        title: typeof pane.title === "string" ? pane.title : `terminal_${pane.id}`,
-        isPlugin: false,
-        exited: Boolean(pane.exited),
-        isFocused: Boolean(pane.is_focused),
-        isFullscreen: Boolean(pane.is_fullscreen),
-        isFloating: Boolean(pane.is_floating),
-        x: typeof pane.pane_x === "number" ? pane.pane_x : 0,
-        y: typeof pane.pane_y === "number" ? pane.pane_y : 0,
-        rows: typeof pane.pane_rows === "number" ? pane.pane_rows : 0,
-        columns: typeof pane.pane_columns === "number" ? pane.pane_columns : 0,
-      }));
+    const loadPanes = async () => {
+      const { stdout } = await this.execZellij([
+        "-s",
+        sessionName,
+        "action",
+        "list-panes",
+        "-j",
+        "-a",
+        "-g",
+        "-s",
+        "-t",
+      ]);
+      const parsed = JSON.parse(stdout) as Array<Record<string, unknown>>;
+      return parsed
+        .filter((pane) => !pane.is_plugin)
+        .map((pane) => ({
+          id: `terminal_${pane.id}`,
+          title: typeof pane.title === "string" ? pane.title : `terminal_${pane.id}`,
+          isPlugin: false,
+          exited: Boolean(pane.exited),
+          isFocused: Boolean(pane.is_focused),
+          isFullscreen: Boolean(pane.is_fullscreen),
+          isFloating: Boolean(pane.is_floating),
+          x: typeof pane.pane_x === "number" ? pane.pane_x : 0,
+          y: typeof pane.pane_y === "number" ? pane.pane_y : 0,
+          rows: typeof pane.pane_rows === "number" ? pane.pane_rows : 0,
+          columns: typeof pane.pane_columns === "number" ? pane.pane_columns : 0,
+        }));
+    };
+
+    try {
+      return await loadPanes();
+    } catch (error) {
+      if (!this.isSessionNotFoundError(error)) {
+        throw error;
+      }
+      await this.waitForSessionReady(sessionName, 5_000);
+      return loadPanes();
+    }
   }
 
   protected async ensureSessionLayout(sessionName: string, targetPaneId?: string): Promise<void> {
@@ -607,9 +625,9 @@ export class ZellijManager {
     const startupCommand = `cd ${this.shellQuote(cwd)}; exec /bin/sh -lc ${this.shellQuote(terminalCommand)}`;
     const appleScript = [
       'tell application "Terminal"',
-      "reopen",
-      // Always create a fresh Terminal window so opening Zellij does not depend
-      // on whether Terminal was already running or what the front window is.
+      // `do script` already opens a fresh Terminal window. Calling `reopen`
+      // first leaves an extra login shell window behind when Terminal had no
+      // front window, which looks like an empty popup before Zellij attaches.
       `do script ${JSON.stringify(startupCommand)}`,
       "activate",
       "end tell",
@@ -856,6 +874,120 @@ export class ZellijManager {
 
   protected toKdlString(value: string): string {
     return JSON.stringify(value);
+  }
+
+  protected async waitForSessionReady(sessionName: string, timeoutMs = 4_000): Promise<void> {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const activeSessions = await this.listSessionNames();
+      if (activeSessions?.has(sessionName)) {
+        return;
+      }
+      if (await this.canQuerySession(sessionName)) {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error(`Zellij session 未就绪：${sessionName}`);
+  }
+
+  protected async canQuerySession(sessionName: string): Promise<boolean> {
+    try {
+      await this.execZellij([
+        "-s",
+        sessionName,
+        "action",
+        "list-panes",
+        "-j",
+        "-a",
+        "-g",
+        "-s",
+        "-t",
+      ], {
+        timeout: 3000,
+      });
+      return true;
+    } catch (error) {
+      if (this.isSessionNotFoundError(error)) {
+        return false;
+      }
+      return false;
+    }
+  }
+
+  protected isSessionNotFoundError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+      return false;
+    }
+
+    const execError = error as Error & {
+      stdout?: string;
+      stderr?: string;
+    };
+    const combined = [execError.stdout, execError.stderr, execError.message]
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      .join("\n")
+      .toLowerCase();
+
+    return combined.includes("session") && combined.includes("not found");
+  }
+
+  protected logCommandFailure(
+    command: string,
+    args: string[],
+    options: ExecFileOptions | undefined,
+    error: unknown,
+  ) {
+    const execError = error as Error & {
+      code?: number | string;
+      signal?: string;
+      stdout?: string | Buffer;
+      stderr?: string | Buffer;
+      cmd?: string;
+      killed?: boolean;
+    };
+    const stdout = this.normalizeExecOutput(execError?.stdout);
+    const stderr = this.normalizeExecOutput(execError?.stderr);
+    appendAppLog("error", "zellij.command_failed", {
+      command,
+      args,
+      renderedCommand: this.renderCommand(command, args),
+      cwd: options?.cwd ?? process.cwd(),
+      timeout: options?.timeout ?? null,
+      code: execError?.code ?? null,
+      signal: execError?.signal ?? null,
+      killed: execError?.killed ?? null,
+      message: error instanceof Error ? error.message : String(error),
+      stdout,
+      stderr,
+    });
+    console.error("[zellij] command failed", {
+      command,
+      args,
+      renderedCommand: this.renderCommand(command, args),
+      cwd: options?.cwd ?? process.cwd(),
+      timeout: options?.timeout ?? null,
+      code: execError?.code ?? null,
+      signal: execError?.signal ?? null,
+      killed: execError?.killed ?? null,
+      message: error instanceof Error ? error.message : String(error),
+      stdout,
+      stderr,
+    });
+  }
+
+  protected normalizeExecOutput(value: string | Buffer | undefined): string {
+    if (typeof value === "string") {
+      return value;
+    }
+    if (Buffer.isBuffer(value)) {
+      return value.toString("utf8");
+    }
+    return "";
+  }
+
+  protected renderCommand(command: string, args: string[]): string {
+    return [command, ...args.map((arg) => JSON.stringify(arg))].join(" ");
   }
 
   protected distributePercentages(count: number): number[] {

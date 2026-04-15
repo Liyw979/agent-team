@@ -90,6 +90,7 @@ agentflow/
 ## 存储布局
 
 - 全局 Project 注册信息位于用户数据目录下的 `projects.json`
+- 命令执行失败等诊断日志统一写入用户数据目录下的 `logs/agentflow.log`
 - 每个 Project 自己的拓扑、Task、消息、panel 绑定等数据位于 `<project>/.agentflow/state.json`
 - OpenCode runtime 和 pane runtime 也统一落到 `.agentflow/` 下，便于随 Project 一起迁移
 - CLI 不再在 `<project>/.agentflow/projects.json` 静默回退创建本地 Project registry；如果默认全局用户目录不可写，必须通过 `AGENTFLOW_USER_DATA_DIR` 显式指定另一份可写的全局 registry 目录
@@ -103,13 +104,21 @@ npm run electron:dev
 
 ## 打包
 
-已验证可成功生成 Windows 可执行目录包的命令：
+先执行 Electron 构建，确保 `out/main`、`out/preload`、`out/renderer` 都来自当前源码；不要直接拿旧的 `out/` 去跑 `electron-builder`。
+
+推荐直接使用仓库内置脚本生成 Windows `win-unpacked` 目录产物：
 
 ```bash
-npx electron-builder --win dir --x64 --config.win.signAndEditExecutable=false
+npm run dist:win
 ```
 
-打包完成后，主程序位于 `dist/win-unpacked/agentflow.exe`，同时会带上 `dist/win-unpacked/resources/bin/zellij.exe`。
+如果只想单独刷新 Electron 产物，可以执行：
+
+```bash
+npm run build
+```
+
+打包完成后，会生成 `dist/win-unpacked/` 目录；主程序位于 `dist/win-unpacked/agentflow.exe`，同时会带上 `dist/win-unpacked/resources/bin/zellij.exe`。
 
 ## CLI
 

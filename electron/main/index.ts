@@ -18,6 +18,7 @@ import type {
   UpdateTopologyPayload,
 } from "@shared/types";
 import { Orchestrator } from "./orchestrator";
+import { initAppFileLogger } from "./app-log";
 import { resolveCliUserDataPath } from "./user-data-path";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -95,9 +96,12 @@ function installSafeConsoleGuards() {
 
 installSafeConsoleGuards();
 
+const userDataPath = resolveCliUserDataPath();
+initAppFileLogger(userDataPath);
+
 let mainWindow: BrowserWindow | null = null;
 const orchestrator = new Orchestrator({
-  userDataPath: resolveCliUserDataPath(),
+  userDataPath,
 });
 
 async function createWindow() {

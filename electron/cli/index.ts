@@ -10,6 +10,7 @@ import {
   buildCliPanelFocusCommand,
 } from "@shared/terminal-commands";
 import { buildZellijMissingMessage, buildZellijMissingReminder } from "@shared/zellij";
+import { appendAppLog, initAppFileLogger } from "../main/app-log";
 import { Orchestrator } from "../main/orchestrator";
 import { resolveCliUserDataPath } from "../main/user-data-path";
 import { resolveZellijExecutable } from "../main/zellij-executable";
@@ -379,21 +380,58 @@ async function attachTaskSession(taskSnapshot: TaskSnapshot) {
 
   await new Promise<void>((resolve, reject) => {
     const resolved = resolveZellijExecutable();
-    const child = spawn(resolved.command, ["attach", sessionName, "--create"], {
+    const args = ["attach", sessionName, "--create"];
+    const child = spawn(resolved.command, args, {
       cwd: taskSnapshot.task.cwd,
       stdio: "inherit",
     });
 
     child.on("error", (error) => {
+      appendAppLog("error", "cli.zellij_attach_spawn_failed", {
+        command: resolved.command,
+        args,
+        cwd: taskSnapshot.task.cwd,
+        message: error.message,
+      });
+      console.error("[cli] zellij attach spawn failed", {
+        command: resolved.command,
+        args,
+        cwd: taskSnapshot.task.cwd,
+        message: error.message,
+      });
       reject(error);
     });
 
     child.on("exit", (code, signal) => {
       if (signal) {
+        appendAppLog("error", "cli.zellij_attach_exit_signal", {
+          command: resolved.command,
+          args,
+          cwd: taskSnapshot.task.cwd,
+          signal,
+        });
+        console.error("[cli] zellij attach exited by signal", {
+          command: resolved.command,
+          args,
+          cwd: taskSnapshot.task.cwd,
+          signal,
+        });
         reject(new Error(`zellij attach 被信号中断：${signal}`));
         return;
       }
       if ((code ?? 0) !== 0) {
+        appendAppLog("error", "cli.zellij_attach_exit_non_zero", {
+          command: resolved.command,
+          args,
+          cwd: taskSnapshot.task.cwd,
+          code: code ?? 0,
+        });
+        console.error("[cli] zellij attach exited with non-zero code", {
+          command: resolved.command,
+          args,
+          cwd: taskSnapshot.task.cwd,
+          code: code ?? 0,
+        });
         reject(new Error(`zellij attach 退出码异常：${code ?? 0}`));
         return;
       }
@@ -412,6 +450,7 @@ function printProjectSummary(project: ProjectSnapshot) {
 
 async function createCliContext(): Promise<CliContext> {
   const userDataPath = resolveCliUserDataPath();
+  initAppFileLogger(userDataPath);
   const orchestrator = new Orchestrator({
     userDataPath,
     autoOpenTaskSession: false,

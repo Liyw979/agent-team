@@ -8,8 +8,10 @@ class StubZellijManager extends ZellijManager {
   public calls: Array<{ method: string; args: unknown[] }> = [];
   public sessionNames = new Set<string>();
   public panes: Array<Record<string, unknown>> = [];
-  public listSessionsResult: string = "";
   public failKill = false;
+  public failCreate = false;
+  public failListPanesOnceWithSessionNotFound = false;
+  public failListSessions = false;
 
   async isAvailable(): Promise<boolean> {
     this.calls.push({ method: "isAvailable", args: [] });
@@ -19,12 +21,31 @@ class StubZellijManager extends ZellijManager {
   protected override async execZellij(args: string[]): Promise<{ stdout: string }> {
     this.calls.push({ method: "execZellij", args: [...args] });
     if (args[0] === "list-sessions") {
-      return { stdout: this.listSessionsResult };
+      if (this.failListSessions) {
+        throw new Error("list sessions failed");
+      }
+      return {
+        stdout: [...this.sessionNames].map((sessionName) => `${sessionName} [Created 1s ago]`).join("\n"),
+      };
+    }
+    if (args[0] === "attach" && args[1] === "--create-background") {
+      if (this.failCreate) {
+        throw new Error("create failed");
+      }
+      const sessionName = typeof args[2] === "string" ? args[2] : "";
+      if (sessionName) {
+        this.sessionNames.add(sessionName);
+      }
+      return { stdout: "" };
     }
     if (args[0] === "kill-session" && this.failKill) {
       throw new Error("kill failed");
     }
     if (args[2] === "action" && args.includes("list-panes")) {
+      if (this.failListPanesOnceWithSessionNotFound) {
+        this.failListPanesOnceWithSessionNotFound = false;
+        throw new Error(`session '${String(args[1] ?? "")}' not found`);
+      }
       return { stdout: JSON.stringify(this.panes) };
     }
     return { stdout: "terminal_1" };
@@ -116,6 +137,19 @@ class StubZellijManager extends ZellijManager {
   }
 }
 
+class CaptureMacTerminalManager extends ZellijManager {
+  public spawnCalls: Array<{ command: string; args: string[] }> = [];
+
+  async runOpenMacTerminalCommand(cwd: string, terminalCommand: string): Promise<void> {
+    await this.openMacTerminalCommand(cwd, terminalCommand);
+  }
+
+  protected override async spawnDetachedProcess(command: string, args: string[]): Promise<boolean> {
+    this.spawnCalls.push({ command, args });
+    return true;
+  }
+}
+
 test("createTaskSession 在不可用时只返回 session 名", async () => {
   const manager = new StubZellijManager();
   manager.available = false;
@@ -133,6 +167,36 @@ test("createTaskSession 在可用时会尝试创建后台 session", async () => 
 
   assert.equal(session, "oap-projec-task-1");
   assert.equal(manager.calls.some((item) => item.method === "execZellij"), true);
+  assert.equal(manager.sessionNames.has("oap-projec-task-1"), true);
+});
+
+test("createTaskSession 在 zellij 创建失败时会直接抛错，不再返回不存在的 session 名", async () => {
+  const manager = new StubZellijManager();
+  manager.failCreate = true;
+
+  await assert.rejects(
+    manager.createTaskSession("project-1", "task-1"),
+    /create failed/,
+  );
+});
+
+test("createTaskSession 在 list-sessions 不稳定时会回退到直接探测 session", async () => {
+  const manager = new StubZellijManager();
+  manager.failListSessions = true;
+
+  const session = await manager.createTaskSession("project-1", "task-1");
+
+  assert.equal(session, "oap-projec-task-1");
+  assert.equal(
+    manager.calls.some(
+      (item) =>
+        item.method === "execZellij"
+        && Array.isArray(item.args)
+        && item.args[0] === "-s"
+        && item.args[1] === "oap-projec-task-1",
+    ),
+    true,
+  );
 });
 
 test("openTaskSession 会先校验可用性再补 session 与布局", async () => {
@@ -148,9 +212,29 @@ test("openTaskSession 会先校验可用性再补 session 与布局", async () =
   ]);
 });
 
+test("openMacTerminalCommand 不会先 reopen Terminal 造成额外空窗", async () => {
+  const manager = new CaptureMacTerminalManager();
+
+  await manager.runOpenMacTerminalCommand("/tmp/demo", "zellij attach session-1 --create");
+
+  assert.equal(manager.spawnCalls.length, 1);
+  assert.equal(manager.spawnCalls[0]?.command, "osascript");
+  assert.equal(manager.spawnCalls[0]?.args.includes("reopen"), false);
+  const scriptLines = manager.spawnCalls[0]?.args.filter((arg) => arg !== "-e") ?? [];
+  assert.equal(
+    scriptLines.some((line) => line.startsWith('do script "cd ')),
+    true,
+  );
+  assert.equal(
+    scriptLines.some((line) => line.includes("zellij attach session-1 --create")),
+    true,
+  );
+});
+
 test("materializePanelBindings 首次创建时返回面板绑定", async () => {
   const manager = new StubZellijManager();
   manager.panes = [];
+  manager.sessionNames.add("session-1");
 
   const bindings = await manager.materializePanelBindings({
     projectId: "project-1",
@@ -162,6 +246,35 @@ test("materializePanelBindings 首次创建时返回面板绑定", async () => {
 
   assert.equal(bindings.length, 1);
   assert.equal(bindings[0]?.agentName, "Build");
+});
+
+test("listTerminalPanes 遇到 session not found 时会等待 session 就绪后重试", async () => {
+  const manager = new StubZellijManager();
+  manager.sessionNames.add("session-1");
+  manager.failListPanesOnceWithSessionNotFound = true;
+  manager.panes = [{
+    id: "1",
+    title: "Build",
+    is_plugin: false,
+    exited: false,
+    is_focused: true,
+    is_fullscreen: false,
+    is_floating: false,
+    pane_x: 0,
+    pane_y: 0,
+    pane_rows: 20,
+    pane_columns: 80,
+  }];
+
+  const bindings = await manager.materializePanelBindings({
+    projectId: "project-1",
+    taskId: "task-1",
+    sessionName: "session-1",
+    cwd: "/tmp/demo",
+    agents: [{ name: "Build", opencodeSessionId: null, status: "idle" }],
+  });
+
+  assert.equal(bindings[0]?.paneId, "terminal_1");
 });
 
 test("partitionAgentsForGrid 会按 Agent 顺序优先横向排布（最多两排）", () => {
