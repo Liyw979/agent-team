@@ -3,14 +3,13 @@ import net from "node:net";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { buildMockAgentReply } from "./mock-agent-reply";
 import { buildSubmitMessageBody } from "./opencode-request-body";
 import { toOpenCodeAgentName } from "./opencode-agent-name";
+import { appendAppLog } from "./app-log";
 
 interface ServeHandle {
-  process: ChildProcessWithoutNullStreams;
+  process: ChildProcessWithoutNullStreams | null;
   port: number;
-  mock: boolean;
 }
 
 interface OpenCodeEvent {
@@ -133,7 +132,12 @@ export class OpenCodeClient {
       return state.serverHandle;
     }
 
-    state.serverHandle = this.startServer(state.projectPath);
+    state.serverHandle = this.startServer(state.projectPath).catch((error) => {
+      if (state.serverHandle) {
+        state.serverHandle = null;
+      }
+      throw error;
+    });
     return state.serverHandle;
   }
 
@@ -167,35 +171,39 @@ export class OpenCodeClient {
   }
 
   async createSession(projectPath: string, title: string): Promise<string> {
-    const server = await this.ensureServer(projectPath);
-    if (server.mock) {
-      return `session-${randomUUID()}`;
-    }
+    const response = await this.request("/session", {
+      method: "POST",
+      projectPath,
+      body: JSON.stringify({ title }),
+    });
 
-    try {
-      const response = await this.request("/session", {
-        method: "POST",
+    if (!response.ok) {
+      appendAppLog("error", "opencode.create_session_failed", {
         projectPath,
-        body: JSON.stringify({ title }),
+        title,
+        status: response.status,
+        statusText: response.statusText,
       });
-
-      if (!response.ok) {
-        server.mock = true;
-        return `session-${randomUUID()}`;
-      }
-
-      const data = (await this.readJsonResponse(response)) as { id?: string } | null;
-      return data?.id ?? `session-${randomUUID()}`;
-    } catch {
-      server.mock = true;
-      return `session-${randomUUID()}`;
+      throw new Error(`OpenCode 创建 session 失败: ${response.status}`);
     }
+
+    const data = (await this.readJsonResponse(response)) as { id?: string } | null;
+    if (typeof data?.id === "string" && data.id.trim()) {
+      return data.id;
+    }
+
+    appendAppLog("error", "opencode.create_session_invalid_response", {
+      projectPath,
+      title,
+      status: response.status,
+    });
+    throw new Error("OpenCode 创建 session 响应缺少有效的 session id");
   }
 
   async connectEvents(projectPath: string, onEvent: (event: OpenCodeEvent) => void): Promise<void> {
     const state = this.getProjectServerState(projectPath);
     const server = await this.ensureServer(projectPath);
-    if (server.mock || state.eventPump) {
+    if (state.eventPump) {
       return;
     }
 
@@ -208,15 +216,7 @@ export class OpenCodeClient {
     sessionId: string,
     payload: SubmitMessagePayload,
   ): Promise<OpenCodeNormalizedMessage> {
-    const server = await this.ensureServer(projectPath);
     const opencodeAgent = toOpenCodeAgentName(payload.agent);
-
-    if (server.mock) {
-      return this.createMockMessage(projectPath, sessionId, {
-        ...payload,
-        agent: opencodeAgent,
-      });
-    }
 
     const body = buildSubmitMessageBody({
       agent: opencodeAgent,
@@ -248,18 +248,6 @@ export class OpenCodeClient {
     sessionId: string,
     submitted: OpenCodeNormalizedMessage,
   ): Promise<OpenCodeExecutionResult> {
-    const server = await this.ensureServer(projectPath);
-    if (server.mock) {
-      return {
-        status: submitted.error ? "error" : "completed",
-        finalMessage: submitted.content,
-        fallbackMessage: submitted.content.trim() || null,
-        messageId: submitted.id,
-        timestamp: submitted.completedAt ?? submitted.timestamp,
-        rawMessage: submitted,
-      };
-    }
-
     const submittedAt = Date.parse(submitted.timestamp) || Date.now();
     const messageCompletionPromise = this.waitForMessageCompletion(
       projectPath,
@@ -301,18 +289,6 @@ export class OpenCodeClient {
     projectPath: string,
     sessionId: string,
   ): Promise<OpenCodeSessionRuntime> {
-    const server = await this.ensureServer(projectPath);
-    if (server.mock) {
-      return {
-        sessionId,
-        messageCount: 0,
-        updatedAt: null,
-        headline: null,
-        activeToolNames: [],
-        activities: [],
-      };
-    }
-
     const list = await this.listSessionMessages(projectPath, sessionId, MAX_RUNTIME_MESSAGES);
     if (list.length === 0) {
       return {
@@ -381,7 +357,7 @@ export class OpenCodeClient {
   }
 
   private async terminateServeHandle(server: ServeHandle): Promise<void> {
-    if (server.mock || !server.process) {
+    if (!server.process) {
       return;
     }
 
@@ -518,6 +494,7 @@ export class OpenCodeClient {
   private async startServer(projectPath: string): Promise<ServeHandle> {
     const state = this.getProjectServerState(projectPath);
     const port = await this.resolveServerPort();
+    const baseUrl = this.buildBaseUrl(port);
 
     const serverEnv = { ...process.env };
     // Isolate the embedded runtime from parent OpenCode config injection.
@@ -533,9 +510,30 @@ export class OpenCodeClient {
     if (state.injectedConfigContent) {
       serverEnv.OPENCODE_CONFIG_CONTENT = state.injectedConfigContent;
     }
+    appendAppLog("info", "opencode.serve_starting", {
+      projectPath: state.projectPath,
+      runtimeDir: state.runtimeDir,
+      port,
+      baseUrl,
+    });
+    const launchArgs = ["serve", "--port", String(port), "--hostname", this.host];
+    const spawnSpec = process.platform === "win32"
+      ? {
+          command: "cmd.exe",
+          args: [
+            "/d",
+            "/s",
+            "/c",
+            ["opencode", ...launchArgs].join(" "),
+          ],
+        }
+      : {
+          command: "opencode",
+          args: launchArgs,
+        };
     const childProcess = spawn(
-      "opencode",
-      ["serve", "--port", String(port), "--hostname", this.host],
+      spawnSpec.command,
+      spawnSpec.args,
       {
         cwd: state.projectPath,
         env: serverEnv,
@@ -543,23 +541,52 @@ export class OpenCodeClient {
       },
     );
 
-    let mock = false;
-    childProcess.on("error", () => {
-      mock = true;
+    let spawnError: Error | null = null;
+    const stdoutChunks: string[] = [];
+    const stderrChunks: string[] = [];
+    childProcess.on("error", (error) => {
+      spawnError = error;
     });
 
-    childProcess.stderr.on("data", () => undefined);
-    childProcess.stdout.on("data", () => undefined);
+    childProcess.stderr.on("data", (chunk) => {
+      stderrChunks.push(this.normalizeProcessOutput(chunk));
+    });
+    childProcess.stdout.on("data", (chunk) => {
+      stdoutChunks.push(this.normalizeProcessOutput(chunk));
+    });
 
     const healthy = await this.waitForHealthy(port);
-    if (!healthy) {
-      mock = true;
+    if (spawnError || !healthy) {
+      const message = spawnError
+        ? `OpenCode serve 启动失败: ${spawnError.message}`
+        : `OpenCode serve 健康检查失败: ${baseUrl}/global/health 未在预期时间内返回成功`;
+      await this.killChildProcessTree(childProcess).catch(() => undefined);
+      appendAppLog("error", "opencode.serve_start_failed", {
+        projectPath: state.projectPath,
+        runtimeDir: state.runtimeDir,
+        port,
+        baseUrl,
+        command: spawnSpec.command,
+        args: spawnSpec.args,
+        message,
+        stdout: this.truncateLogPayload(stdoutChunks.join("")),
+        stderr: this.truncateLogPayload(stderrChunks.join("")),
+      });
+      throw new Error(message);
     }
+
+    appendAppLog("info", "opencode.serve_started", {
+      projectPath: state.projectPath,
+      runtimeDir: state.runtimeDir,
+      port,
+      baseUrl,
+      command: spawnSpec.command,
+      args: spawnSpec.args,
+    });
 
     return {
       process: childProcess,
       port,
-      mock,
     };
   }
 
@@ -763,11 +790,22 @@ export class OpenCodeClient {
       headers["x-opencode-directory"] = options.projectPath;
     }
 
-    return fetch(`${this.buildBaseUrl(server.port)}${pathname}`, {
-      method: options.method,
-      headers,
-      body: options.body,
-    });
+    const url = `${this.buildBaseUrl(server.port)}${pathname}`;
+    try {
+      return await fetch(url, {
+        method: options.method,
+        headers,
+        body: options.body,
+      });
+    } catch (error) {
+      appendAppLog("error", "opencode.request_failed", {
+        projectPath,
+        method: options.method,
+        url,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   }
 
   private async waitForSessionSettled(sessionId: string, after: number, timeoutMs: number): Promise<void> {
@@ -893,25 +931,6 @@ export class OpenCodeClient {
 
     const raw = await this.readJsonResponse(response);
     return Array.isArray(raw) ? raw : [];
-  }
-
-  private createMockMessage(
-    projectPath: string,
-    _sessionId: string,
-    payload: SubmitMessagePayload,
-  ): OpenCodeNormalizedMessage {
-    const body = this.buildMockReply(payload.agent, payload.content);
-    return {
-      id: randomUUID(),
-      content: body,
-      sender: payload.agent,
-      timestamp: new Date().toISOString(),
-      completedAt: new Date().toISOString(),
-      error: null,
-      raw: {
-        projectPath,
-      },
-    };
   }
 
   private createPendingMessage(sender: string): OpenCodeNormalizedMessage {
@@ -1402,10 +1421,6 @@ export class OpenCodeClient {
     return null;
   }
 
-  private buildMockReply(agent: string, content: string): string {
-    return buildMockAgentReply(agent, content);
-  }
-
   private async waitForHealthy(port: number): Promise<boolean> {
     for (let attempt = 0; attempt < 15; attempt += 1) {
       try {
@@ -1423,6 +1438,17 @@ export class OpenCodeClient {
 
   private buildBaseUrl(port: number): string {
     return `http://${this.host}:${port}`;
+  }
+
+  private truncateLogPayload(value: string, maxLength = 4000): string {
+    if (value.length <= maxLength) {
+      return value;
+    }
+    return `${value.slice(0, maxLength)}...(truncated)`;
+  }
+
+  private normalizeProcessOutput(value: string | Buffer): string {
+    return typeof value === "string" ? value : value.toString("utf8");
   }
 
   private async resolveServerPort(): Promise<number> {

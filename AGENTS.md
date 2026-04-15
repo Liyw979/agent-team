@@ -59,7 +59,7 @@
 - `Build` 这类继续复用 OpenCode 内置 prompt 的 Agent 不会出现在 `OPENCODE_CONFIG_CONTENT` 中；若当前 Project 只有这类 Agent，则不会额外生成注入内容。
 - 不同 Project 的请求会继续携带 `x-opencode-directory` 请求头，保持会话与工作区目录一致。
 - Session 创建对齐官方 `POST /session`；消息发送对齐官方 `POST /session/:id/message`，请求体使用 `parts` 数组。
-- 若本机未安装或无法连接 `opencode serve`，系统会退化为 mock 模式响应。
+- 若本机未安装或无法连接 `opencode serve`，系统会直接报错并写入日志，不再退化为 mock 响应。
 
 ### 3.2 Task 初始化与状态流转
 
@@ -114,13 +114,13 @@
 - 右下角团队成员面板中，每个 Agent 名称旁都会提供“打开 Pane”按钮；点击后会优先补齐当前 Task 的 pane 绑定，并直接打开该 Agent 自己的 OpenCode attach 独立终端窗口，而不是带出整个 Zellij session 网格。
 - Zellij pane 顺序只跟随前端拓扑 / 团队成员区里用户拖拽后保存的 Agent 排序，不再根据运行态动态重排。
 - 全新 Task 首次初始化且当前还没有托管 pane 时，Zellij 会优先按“先横向后换行”的 tiled grid 创建初始 pane 布局，并限制最多两排；内部 pane 会按当前保存的 Agent 顺序排布。
-- 左侧 Task 列表会定期与 Zellij session 状态同步；如果对应 session 已被外部删除，或只剩 `EXITED - attach to resurrect` 这类非活跃残留，关联 Task 会自动从列表中移除。
+- 左侧 Task 列表会定期与 Zellij session 状态同步；如果对应 session 已被外部删除，或只剩 `EXITED - attach to resurrect` 这类非活跃残留，只有已经结束的 Task 才会自动从列表中移除；`pending / running / waiting` 等未结束 Task 会保留，避免正在运行的任务被误删。
 - 左侧 Project 卡片支持右键删除 Project；删除时会同时清理该 Project 的 Task 记录、`.agentflow/` 运行态数据、用户目录里的自定义 Agent 配置，以及相关 Zellij session / `opencode serve`，但不会删除项目源码目录。
 - 左侧 Task 列表支持右键删除 Task；删除时会同时清理该 Task 对应的 Zellij session。
 - 运行中的 Agent 会通过 OpenCode HTTP session 消息接口轮询实时工具调用与摘要，并显示在拓扑图节点内。
 - Zellij pane 内部启动命令会按平台生成：macOS / Linux 使用 `/bin/sh`，Windows 使用 `cmd.exe`，不再把 POSIX shell 语法直接下发到 Windows pane。
 - macOS / Linux 仍要求本机可执行 `zellij`；Windows 会优先使用打包产物内的 `resources/bin/zellij.exe`，开发期回退到项目内置的 `download/zellij.exe`；只有这两个位置都缺失时才会追加系统提醒。
-- macOS 下会固定新开独立 Terminal 窗口后再 attach；Windows 下会尽量把新拉起的终端窗口自动切到全屏。
+- macOS 下会固定新开独立 Terminal 窗口后再 attach；Windows 下会以普通窗口的最大化状态打开新拉起的终端，不再自动切到全屏。
 - 如果当前环境缺少可用的 `zellij`，GUI 和 CLI 会给出显式提醒；Task 群聊也会追加系统消息说明当前不会创建真实 Zellij pane。
 
 ## 4. CLI 约定

@@ -45,9 +45,14 @@ interface AgentTerminalSpec {
 }
 
 const HIDDEN_PANEL_AGENTS = new Set<string>();
+const WINDOWS_BOOTSTRAP_PANE_NAME = "__agentflow_bootstrap__";
 export class ZellijManager {
   private zellijAvailable: boolean | null = null;
   private opencodeAttachBaseUrl = DEFAULT_OPENCODE_ATTACH_BASE_URL;
+
+  protected getHostPlatform(): NodeJS.Platform {
+    return process.platform;
+  }
 
   protected getZellijCommand(): string {
     return resolveZellijExecutable().command;
@@ -104,10 +109,7 @@ export class ZellijManager {
       return sessionName;
     }
 
-    await this.execZellij(["attach", "--create-background", sessionName], {
-      timeout: 4000,
-    });
-    await this.waitForSessionReady(sessionName);
+    await this.startBackgroundSession(sessionName);
 
     return sessionName;
   }
@@ -203,6 +205,8 @@ export class ZellijManager {
       if (applied) {
         refreshedPanes = await this.listTerminalPanes(options.sessionName);
       } else {
+        await this.ensureSessionActive(options.sessionName).catch(() => undefined);
+        refreshedPanes = await this.listTerminalPanes(options.sessionName).catch(() => []);
         const orderedForCreation = this.getLayoutCreationOrder(visibleAgents);
         for (const agent of orderedForCreation) {
           const agentName = agent.name;
@@ -212,7 +216,7 @@ export class ZellijManager {
             if (stalePane) {
               await this.closePane(options.sessionName, stalePane.id).catch(() => undefined);
             }
-            const paneId = await this.runAgentPane(
+            const paneId = await this.runAgentPaneWithRecovery(
               options.sessionName,
               options.cwd,
               agentName,
@@ -238,7 +242,7 @@ export class ZellijManager {
           if (stalePane) {
             await this.closePane(options.sessionName, stalePane.id).catch(() => undefined);
           }
-          const paneId = await this.runAgentPane(
+          const paneId = await this.runAgentPaneWithRecovery(
             options.sessionName,
             options.cwd,
             agentName,
@@ -365,10 +369,60 @@ export class ZellijManager {
       return;
     }
 
-    await this.execZellij(["attach", "--create-background", sessionName], {
-      timeout: 4000,
-    });
+    await this.startBackgroundSession(sessionName);
+  }
+
+  protected usesDetachedBackgroundSession(): boolean {
+    return this.getHostPlatform() === "win32";
+  }
+
+  protected async startBackgroundSession(sessionName: string): Promise<void> {
+    if (!this.usesDetachedBackgroundSession()) {
+      await this.execZellij(["attach", "--create-background", sessionName], {
+        timeout: 4000,
+      });
+      await this.waitForSessionReady(sessionName);
+      return;
+    }
+
+    const spawned = await this.spawnDetachedProcess(
+      this.getZellijCommand(),
+      ["attach", "--create-background", sessionName],
+      {
+        cwd: process.cwd(),
+        windowsHide: true,
+      },
+    );
+    if (!spawned) {
+      throw new Error(`Failed to start detached Zellij session: ${sessionName}`);
+    }
+
+    await this.waitForSessionReady(sessionName, 2_000);
+    await this.runWindowsBootstrapPane(sessionName);
     await this.waitForSessionReady(sessionName);
+  }
+
+  protected async runWindowsBootstrapPane(sessionName: string): Promise<void> {
+    await this.execZellij([
+      "-s",
+      sessionName,
+      "run",
+      "--name",
+      WINDOWS_BOOTSTRAP_PANE_NAME,
+      "--cwd",
+      process.cwd(),
+      "--",
+      "powershell.exe",
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      "while ($true) { Start-Sleep -Seconds 3600 }",
+    ], {
+      timeout: 5000,
+    });
   }
 
   protected async listTerminalPanes(sessionName: string): Promise<ZellijPaneInfo[]> {
@@ -384,7 +438,7 @@ export class ZellijManager {
         "-s",
         "-t",
       ]);
-      const parsed = JSON.parse(stdout) as Array<Record<string, unknown>>;
+      const parsed = this.parseListPanesOutput(sessionName, stdout);
       return parsed
         .filter((pane) => !pane.is_plugin)
         .map((pane) => ({
@@ -494,7 +548,31 @@ export class ZellijManager {
       shellLaunch.command,
       ...shellLaunch.args,
     ]);
-    return stdout.trim() || `terminal_${agentName}`;
+    return this.parseRunPaneOutput(sessionName, agentName, stdout);
+  }
+
+  protected async runAgentPaneWithRecovery(
+    sessionName: string,
+    cwd: string,
+    agentName: string,
+    opencodeSessionId: string | null,
+  ): Promise<string> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        return await this.runAgentPane(sessionName, cwd, agentName, opencodeSessionId);
+      } catch (error) {
+        lastError = error;
+        if (attempt === 0 && this.isSessionNotFoundError(error)) {
+          await this.ensureSessionActive(sessionName);
+          await this.waitForSessionReady(sessionName, 5_000);
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
   }
 
   protected buildOpencodePaneCommand(
@@ -567,15 +645,15 @@ export class ZellijManager {
   }
 
   protected async openCommandInTerminal(cwd: string, terminalCommand: string): Promise<void> {
-    if (process.platform === "darwin") {
+    if (this.getHostPlatform() === "darwin") {
       await this.openMacTerminalCommand(cwd, terminalCommand);
       return;
     }
 
-    if (process.platform === "win32") {
+    if (this.getHostPlatform() === "win32") {
       const openedWithWindowsTerminal = await this.spawnDetachedProcess(
         "wt",
-        ["--fullscreen", "new-window", "--startingDirectory", cwd, "cmd.exe", "/k", terminalCommand],
+        this.buildWindowsTerminalArgs(cwd, terminalCommand),
         { cwd, windowsHide: false },
       );
       if (openedWithWindowsTerminal) {
@@ -587,7 +665,15 @@ export class ZellijManager {
         return;
       }
 
-      await this.spawnDetachedProcess("cmd.exe", ["/k", terminalCommand], {
+      await this.spawnDetachedProcess("cmd.exe", [
+        "/c",
+        "start",
+        "\"\"",
+        "/max",
+        "cmd.exe",
+        "/k",
+        terminalCommand,
+      ], {
         cwd,
         windowsHide: false,
       });
@@ -619,6 +705,20 @@ export class ZellijManager {
         return;
       }
     }
+  }
+
+  protected buildWindowsTerminalArgs(cwd: string, terminalCommand: string): string[] {
+    return [
+      "--maximized",
+      "-w",
+      "-1",
+      "new-tab",
+      "-d",
+      cwd,
+      "cmd.exe",
+      "/k",
+      terminalCommand,
+    ];
   }
 
   protected async openMacTerminalCommand(cwd: string, terminalCommand: string) {
@@ -687,12 +787,9 @@ export class ZellijManager {
       .join(", ");
     const powerShellScript = [
       "Add-Type -AssemblyName Microsoft.VisualBasic",
-      "Add-Type -AssemblyName System.Windows.Forms",
-      `$proc = Start-Process -FilePath 'cmd.exe' -WorkingDirectory '${this.escapePowerShellSingleQuotedString(cwd)}' -ArgumentList @(${argumentList}) -PassThru`,
+      `$proc = Start-Process -FilePath 'cmd.exe' -WorkingDirectory '${this.escapePowerShellSingleQuotedString(cwd)}' -ArgumentList @(${argumentList}) -WindowStyle Maximized -PassThru`,
       "Start-Sleep -Milliseconds 450",
       "try { [Microsoft.VisualBasic.Interaction]::AppActivate($proc.Id) } catch { }",
-      "Start-Sleep -Milliseconds 120",
-      "try { [System.Windows.Forms.SendKeys]::SendWait('{F11}') } catch { }",
     ].join("; ");
 
     return this.spawnDetachedProcess(
@@ -879,10 +976,6 @@ export class ZellijManager {
   protected async waitForSessionReady(sessionName: string, timeoutMs = 4_000): Promise<void> {
     const startedAt = Date.now();
     while (Date.now() - startedAt < timeoutMs) {
-      const activeSessions = await this.listSessionNames();
-      if (activeSessions?.has(sessionName)) {
-        return;
-      }
       if (await this.canQuerySession(sessionName)) {
         return;
       }
@@ -893,7 +986,7 @@ export class ZellijManager {
 
   protected async canQuerySession(sessionName: string): Promise<boolean> {
     try {
-      await this.execZellij([
+      const { stdout } = await this.execZellij([
         "-s",
         sessionName,
         "action",
@@ -906,6 +999,7 @@ export class ZellijManager {
       ], {
         timeout: 3000,
       });
+      this.parseListPanesOutput(sessionName, stdout, { logInvalidJson: false });
       return true;
     } catch (error) {
       if (this.isSessionNotFoundError(error)) {
@@ -924,12 +1018,19 @@ export class ZellijManager {
       stdout?: string;
       stderr?: string;
     };
-    const combined = [execError.stdout, execError.stderr, execError.message]
+    const outputs = [execError.stdout, execError.stderr, execError.message]
       .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-      .join("\n")
-      .toLowerCase();
+      .map((value) => this.stripAnsi(value));
+    if (outputs.some((value) => this.extractSessionListingNames(value).length > 0)) {
+      return true;
+    }
+    const combined = outputs.join("\n").toLowerCase();
 
-    return combined.includes("session") && combined.includes("not found");
+    return (
+      (combined.includes("session") && combined.includes("not found"))
+      || combined.includes("there is no active session")
+      || combined.includes("the following sessions are active")
+    );
   }
 
   protected logCommandFailure(
@@ -998,5 +1099,107 @@ export class ZellijManager {
     const base = Math.floor(100 / count);
     const remainder = 100 % count;
     return Array.from({ length: count }, (_, index) => base + (index < remainder ? 1 : 0));
+  }
+
+  protected parseListPanesOutput(
+    sessionName: string,
+    stdout: string,
+    options: { logInvalidJson?: boolean } = {},
+  ): Array<Record<string, unknown>> {
+    const trimmed = stdout.trim();
+    const ansiStripped = this.stripAnsi(trimmed);
+
+    for (const candidate of [trimmed, ansiStripped]) {
+      if (!candidate) {
+        continue;
+      }
+      try {
+        const parsed = JSON.parse(candidate) as unknown;
+        return Array.isArray(parsed) ? (parsed as Array<Record<string, unknown>>) : [];
+      } catch {
+        // Try the next representation.
+      }
+    }
+
+    if (options.logInvalidJson !== false) {
+      appendAppLog("error", "zellij.list_panes_invalid_json", {
+        sessionName,
+        stdout: this.truncateLogPayload(trimmed),
+        ansiStripped: this.truncateLogPayload(ansiStripped),
+      });
+    }
+    throw new Error(ansiStripped || trimmed || `Zellij list-panes 返回空输出: ${sessionName}`);
+  }
+
+  protected parseRunPaneOutput(sessionName: string, agentName: string, stdout: string): string {
+    const trimmed = stdout.trim();
+    const ansiStripped = this.stripAnsi(trimmed);
+    const lines = ansiStripped
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    if (lines.length === 0) {
+      return `terminal_${agentName}`;
+    }
+
+    if (lines.length === 1) {
+      const onlyLine = lines[0] ?? "";
+      if (/^terminal_\d+$/i.test(onlyLine)) {
+        return onlyLine;
+      }
+      if (/^\d+$/.test(onlyLine)) {
+        return `terminal_${onlyLine}`;
+      }
+    }
+
+    appendAppLog("error", "zellij.run_invalid_output", {
+      sessionName,
+      agentName,
+      stdout: this.truncateLogPayload(trimmed),
+      ansiStripped: this.truncateLogPayload(ansiStripped),
+    });
+    throw new Error(ansiStripped || trimmed || `Zellij run returned invalid pane id: ${agentName}`);
+  }
+
+  protected extractSessionListingNames(output: string): string[] {
+    const lines = this.stripAnsi(output)
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    if (lines.length === 0) {
+      return [];
+    }
+
+    const sessionNames: string[] = [];
+    for (const line of lines) {
+      const lowerLine = line.toLowerCase();
+      if (
+        (lowerLine.startsWith("session '") && lowerLine.includes("not found"))
+        || lowerLine === "the following sessions are active:"
+      ) {
+        continue;
+      }
+
+      const match = line.match(/^([A-Za-z0-9._-]+)(?:\s+\[Created\b.*)?(?:\s+\(EXITED\b.*\))?$/);
+      if (!match) {
+        return [];
+      }
+      sessionNames.push(match[1] ?? "");
+    }
+
+    return sessionNames.filter(Boolean);
+  }
+
+  protected stripAnsi(value: string): string {
+    return value.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "");
+  }
+
+  protected truncateLogPayload(value: string, maxLength = 4000): string {
+    if (value.length <= maxLength) {
+      return value;
+    }
+    return `${value.slice(0, maxLength)}...(truncated)`;
   }
 }

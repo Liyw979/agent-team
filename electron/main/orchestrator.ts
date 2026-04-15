@@ -2233,7 +2233,12 @@ export class Orchestrator {
     for (const project of this.store.listProjects()) {
       const staleTaskIds = this.store
         .listTasks(project.id)
-        .filter((task) => task.zellijSessionId && !liveSessions.has(task.zellijSessionId))
+        .filter(
+          (task) =>
+            task.zellijSessionId
+            && !liveSessions.has(task.zellijSessionId)
+            && (task.status === "finished" || task.status === "failed"),
+        )
         .map((task) => task.id);
 
       for (const taskId of staleTaskIds) {

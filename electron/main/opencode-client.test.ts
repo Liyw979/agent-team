@@ -15,7 +15,7 @@ function createClient(projectPath = createTempDir()) {
     servers: Map<string, {
       projectPath: string;
       runtimeDir: string;
-      serverHandle: Promise<{ process: null; port: number; mock: boolean }> | null;
+      serverHandle: Promise<{ process: null; port: number }> | null;
       shutdownPromise: Promise<void> | null;
       eventPump: Promise<void> | null;
       injectedConfigContent: string | null;
@@ -31,7 +31,6 @@ function createClient(projectPath = createTempDir()) {
     serverHandle: Promise.resolve({
       process: null,
       port: 4096,
-      mock: false,
     }),
     shutdownPromise: null,
     eventPump: null,
@@ -49,7 +48,7 @@ test("request 会跟随当前 serverHandle 的实际端口", async () => {
     servers: Map<string, {
       projectPath: string;
       runtimeDir: string;
-      serverHandle: Promise<{ process: null; port: number; mock: boolean }> | null;
+      serverHandle: Promise<{ process: null; port: number }> | null;
       shutdownPromise: Promise<void> | null;
       eventPump: Promise<void> | null;
       injectedConfigContent: string | null;
@@ -68,7 +67,6 @@ test("request 会跟随当前 serverHandle 的实际端口", async () => {
   state.serverHandle = Promise.resolve({
     process: null,
     port: 43127,
-    mock: false,
   });
 
   const originalFetch = globalThis.fetch;
@@ -104,13 +102,14 @@ test("submitMessage 在空响应体时不会抛出 JSON 解析错误", async () 
   assert.equal(message.sender, "BA");
 });
 
-test("createSession 在空响应体时回退到本地 session id", async () => {
+test("createSession throws when the response is missing a session id", async () => {
   const { client, projectPath } = createClient();
   client.request = async () => new Response("", { status: 200 });
 
-  const sessionId = await client.createSession(projectPath, "demo");
-
-  assert.match(sessionId, /^session-/);
+  await assert.rejects(
+    client.createSession(projectPath, "demo"),
+    /session id/,
+  );
 });
 
 test("消息查询接口空响应体时返回空结果而不是抛错", async () => {
@@ -198,12 +197,12 @@ test("配置变更触发 shutdown 时，ensureServer 会等待 shutdown 完成�
     servers: Map<string, {
       projectPath: string;
       runtimeDir: string;
-      serverHandle: Promise<{ process: null; port: number; mock: boolean }> | null;
+      serverHandle: Promise<{ process: null; port: number }> | null;
       shutdownPromise: Promise<void> | null;
       eventPump: Promise<void> | null;
       injectedConfigContent: string | null;
     }>;
-    startServer: (projectPath: string) => Promise<{ process: null; port: number; mock: boolean }>;
+    startServer: (projectPath: string) => Promise<{ process: null; port: number }>;
     shutdown: (projectPath?: string) => Promise<void>;
   };
   const normalizedProjectPath = path.resolve(projectPath);
@@ -213,7 +212,6 @@ test("配置变更触发 shutdown 时，ensureServer 会等待 shutdown 完成�
     serverHandle: Promise.resolve({
       process: null,
       port: 4096,
-      mock: false,
     }),
     shutdownPromise: null,
     eventPump: null,
@@ -247,7 +245,6 @@ test("配置变更触发 shutdown 时，ensureServer 会等待 shutdown 完成�
     return {
       process: null,
       port: 4096,
-      mock: false,
     };
   };
 
@@ -271,7 +268,7 @@ test("配置变更触发 shutdown 时，ensureServer 会等待 shutdown 完成�
 
 test("不同 Project 会使用各自独立的 serve 端口", async () => {
   const client = new OpenCodeClient(createTempDir()) as OpenCodeClient & {
-    startServer: (projectPath: string) => Promise<{ process: null; port: number; mock: boolean }>;
+    startServer: (projectPath: string) => Promise<{ process: null; port: number }>;
     request: (
       pathname: string,
       options: {
@@ -291,7 +288,6 @@ test("不同 Project 会使用各自独立的 serve 端口", async () => {
   client.startServer = async (projectPath) => ({
     process: null,
     port: portByProject.get(path.resolve(projectPath)) ?? 4096,
-    mock: false,
   });
 
   const originalFetch = globalThis.fetch;
