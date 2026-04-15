@@ -88,6 +88,14 @@ function normalizeProjectSnapshot(snapshot: ProjectSnapshot): ProjectSnapshot {
   };
 }
 
+function shouldPreserveNewTaskSelection(
+  selectedProjectId: string | null,
+  nextProject: ProjectSnapshot | undefined,
+  selectedTaskId: string | null,
+): boolean {
+  return selectedTaskId === null && nextProject?.project.id === selectedProjectId;
+}
+
 export const useAgentFlowStore = create<AgentFlowState>((set) => ({
   projects: [],
   selectedProjectId: null,
@@ -98,9 +106,14 @@ export const useAgentFlowStore = create<AgentFlowState>((set) => ({
       const normalized = projects.map(normalizeProjectSnapshot);
       const selectedProject =
         normalized.find((project) => project.project.id === state.selectedProjectId) ?? normalized[0];
-      const selectedTask =
-        selectedProject?.tasks.find((task) => task.task.id === state.selectedTaskId) ??
-        selectedProject?.tasks[0];
+      const selectedTask = shouldPreserveNewTaskSelection(
+        state.selectedProjectId,
+        selectedProject,
+        state.selectedTaskId,
+      )
+        ? null
+        : selectedProject?.tasks.find((task) => task.task.id === state.selectedTaskId) ??
+          selectedProject?.tasks[0];
       const selectedAgent =
         selectedTask?.agents.find((agent) => agent.name === state.selectedAgentId)?.name ??
         selectedTask?.agents[0]?.name ??
@@ -164,10 +177,17 @@ export const useAgentFlowStore = create<AgentFlowState>((set) => ({
           };
         }
 
+        const preserveNewTaskSelection = shouldPreserveNewTaskSelection(
+          state.selectedProjectId,
+          project,
+          state.selectedTaskId,
+        );
         const selectedTaskStillExists = project.tasks.some((task) => task.task.id === state.selectedTaskId);
-        const nextSelectedTaskId = selectedTaskStillExists
-          ? state.selectedTaskId
-          : project.tasks[0]?.task.id ?? null;
+        const nextSelectedTaskId = preserveNewTaskSelection
+          ? null
+          : selectedTaskStillExists
+            ? state.selectedTaskId
+            : project.tasks[0]?.task.id ?? null;
         const nextTask = project.tasks.find((task) => task.task.id === nextSelectedTaskId);
         const nextSelectedAgentId =
           nextTask?.agents.find((agent) => agent.name === state.selectedAgentId)?.name ??
