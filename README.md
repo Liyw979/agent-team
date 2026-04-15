@@ -50,7 +50,7 @@
 - 拓扑图历史区会优先展示 Agent 最近的运行活动，并明确区分思考、普通消息、步骤与 Tool Call 参数摘要，而不只是单行运行状态
 - 右下角展示 Project 全量 Agent，以及它们在当前 Task 语境下的状态；点击 Agent 可直接编辑并保存当前 Agent 名称与 prompt
 - Agent 来自用户目录中的自定义配置（`$AGENTFLOW_USER_DATA_DIR/custom-agents.json`）；同一份配置里还会保存当前 Project 的“内置模板 prompt 覆盖”。内置模板默认仍是可选项，不会自动写入当前 Project，可先单独编辑可编辑模板的 prompt，再按需写入为 Agent，而且模板修改只影响当前 Project，不影响新项目默认值。内置模板阶段统一不能选择“设为可写 Agent”。Build 也作为默认模板提供，但它使用 OpenCode 自带 prompt，只负责选择是否加入当前 Project，并支持像其他已写入 Agent 一样删除。当前 Project 可以从已写入的 Agent 中指定 1 个作为可写 Agent，也可以不指定；但只要当前 Project 已写入 Build，Build 就会固定为唯一可写 Agent。一旦当前 Project 出现 Task 启动记录，Agent 与内置模板配置都会被锁定，不允许继续修改
-- 启动 OpenCode 时会把当前 Project 的 Agent 配置整体注入到 `OPENCODE_CONFIG_CONTENT` 中；Build 与其他 Agent 的可用工具范围会按上述规则统一生效
+- 启动 OpenCode 时只会把当前 Project 中需要自定义注入的 Agent 配置写入 `OPENCODE_CONFIG_CONTENT`；像 Build 这类继续复用 OpenCode 内置 prompt 的 Agent 不会单独生成注入项。其他已写入 Agent 的可用工具范围会按上述规则生效
 - 当前处于项目开发初期，不要求兼容历史数据；如果现有 Project 状态、拓扑或运行数据与当前实现不一致，优先直接修正当前数据与实现，不额外为旧数据添加兼容分支
 - 默认拓扑只在首次初始化且当前无拓扑数据时按当前 Agent 列表自动推断
 - Project 是全局注册信息；拓扑、Task、消息、panel 绑定等运行数据都保存在各自 Project 目录下的 `.agentflow/`
@@ -179,7 +179,7 @@ CLI 能力分组：
 
 - 当前实现为每个 Project 启动独立的 `opencode serve`；实例会优先尝试监听 `127.0.0.1:4096`，若该端口已被占用，则自动切换到本机空闲端口，并让该 Project 的 pane attach / 健康检查跟随各自实际端口
 - 不同 Project 的请求仍会携带 `x-opencode-directory` 请求头，保持会话与工作区目录一致
-- Agent 配置会在各自 Project 的 `opencode serve` 启动前一次性注入；系统会先全局注入 `write / edit / bash / task / patch: deny`，再按当前 Project 的 Agent 列表逐个注入。普通已写入 Agent 会按 `name + prompt` 注入，Build 即使已写入 Project 也继续复用 OpenCode 内置 `build` agent、不注入自定义 prompt；若当前 Project 已写入 Build，则总是只对 Build 恢复默认工具权限，否则才对当前选中的唯一可写 Agent 恢复默认工具权限。未写入的内置模板只用于 UI 里按需创建 Agent，不会直接注入运行时
+- Agent 配置会在各自 Project 的 `opencode serve` 启动前一次性注入；只有当前 Project 中真正需要自定义 prompt / permission 的 Agent 才会写入 `OPENCODE_CONFIG_CONTENT`。普通已写入 Agent 会按 `name + prompt` 注入，并带上对应工具权限；Build 即使已写入 Project 也继续复用 OpenCode 内置 `build` agent，不注入自定义 prompt，也不会出现在 `OPENCODE_CONFIG_CONTENT` 中。若当前 Project 只有这类复用 OpenCode 内置 prompt 的 Agent，则不会额外生成 `OPENCODE_CONFIG_CONTENT`。未写入的内置模板只用于 UI 里按需创建 Agent，不会直接注入运行时
 - 默认拓扑只在首次初始化且当前还没有拓扑数据时按 Agent `role / mode / 是否内置` 自动推断；后续运行时不依赖固定名字
 - OpenCode 配置只在启动 `opencode serve` 时通过 `OPENCODE_CONFIG_CONTENT` 注入；运行过程中不再做配置 Reload
 - `task init` 会先创建 Task，并完成该 Task 下全部 Agent 的 OpenCode session 与 Zellij pane 初始化；GUI 群聊会优先推荐并默认选中当前列表第一个 Agent

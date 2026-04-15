@@ -512,39 +512,35 @@ export class CustomAgentConfigService {
     this.writeRegistry(registry);
   }
 
-  buildInjectedConfigContent(projectPath: string): string {
+  buildInjectedConfigContent(projectPath: string): string | null {
     const userConfig = this.ensureUserConfig(projectPath);
     const agents = Object.fromEntries(
-      Object.entries(userConfig.agents).map(([name, entry]) => {
+      Object.entries(userConfig.agents).flatMap(([name, entry]) => {
         const agentKey = toOpenCodeAgentName(name);
-        const permission = entry.writable ? this.writablePermission : this.deniedPermission;
         if (usesOpenCodeBuiltinPrompt(name)) {
-          return [
+          return [];
+        }
+
+        const permission = entry.writable ? this.writablePermission : this.deniedPermission;
+
+        return [
+          [
             agentKey,
             {
               mode: "primary",
+              prompt: entry.prompt ?? "",
               permission,
             },
-          ];
-        }
-
-        return [
-          agentKey,
-          {
-            mode: "primary",
-            prompt: entry.prompt ?? "",
-            permission,
-          },
+          ],
         ];
       }),
     );
 
-    const content: Record<string, unknown> = {
-      permission: this.deniedPermission,
-      agent: agents,
-    };
+    if (Object.keys(agents).length === 0) {
+      return null;
+    }
 
-    return JSON.stringify(content);
+    return JSON.stringify({ agent: agents });
   }
 
 }
