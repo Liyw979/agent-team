@@ -19,7 +19,6 @@
 - 左侧 Project 卡片支持右键删除 Project；删除时会同时清理该 Project 的 Task 记录、`.agentflow/` 运行态数据、用户目录里的自定义 Agent 配置，以及相关 Zellij session / OpenCode serve，但不会删除项目源码目录
 - 左侧 Task 列表支持右键删除 Task；删除时会同时清理该 Task 对应的 Zellij session
 - 左侧 Task 列表会定期与 Zellij session 状态同步；如果对应 session 已被外部删除，或只剩 `EXITED - attach to resurrect` 这类非活跃残留，关联 Task 会自动从列表中移除
-- 后台 Task 整体完成后，左侧 Task 列表会为未查看的已完成项显示提醒，并在对应 Project 卡片上汇总提醒数量；点开该 Task 后提醒会自动消除
 - 每个 Task 对应独立 Zellij session，并为当前 Project 的全部 Agent 建立 `panel <-> agent` 运行时映射
 - 支持先单独执行 Task 初始化：先把当前 Project 的全部 Agent 会话与 Zellij pane 启动完成；GUI 输入框会立刻弹出候选 Agent，并默认选中当前列表第一个 Agent
 - 全新 Task 初始化 Zellij pane 时，会优先按“先横向后换行”的 tiled grid 摆放，并限制最多两排；pane 顺序直接使用当前前端拖拽后保存的 Agent 排序

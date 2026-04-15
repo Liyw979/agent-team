@@ -7,8 +7,6 @@ interface SidebarListProps {
   projects: ProjectSnapshot[];
   selectedProjectId: string | null;
   selectedTaskId: string | null;
-  taskCompletionReminderIds: ReadonlySet<string>;
-  projectCompletionReminderCounts: ReadonlyMap<string, number>;
   onSelectProject: (projectId: string) => void;
   onSelectTask: (projectId: string, taskId: string | null) => void;
   onDeleteProject: (projectId: string) => Promise<void>;
@@ -63,8 +61,6 @@ export function SidebarList({
   projects,
   selectedProjectId,
   selectedTaskId,
-  taskCompletionReminderIds,
-  projectCompletionReminderCounts,
   onSelectProject,
   onSelectTask,
   onDeleteProject,
@@ -116,8 +112,6 @@ export function SidebarList({
       <div className="space-y-4 overflow-y-auto pr-1">
         {projects.map((snapshot) => {
           const activeProject = snapshot.project.id === selectedProjectId;
-          const completionReminderCount =
-            projectCompletionReminderCounts.get(snapshot.project.id) ?? 0;
           return (
             <section
               key={snapshot.project.id}
@@ -145,23 +139,11 @@ export function SidebarList({
                 onClick={() => onSelectProject(snapshot.project.id)}
                 className="w-full text-left"
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="font-semibold text-foreground">{snapshot.project.name}</p>
-                    <p className="mt-1 truncate text-xs text-muted-foreground">
-                      {snapshot.project.path}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 flex-col items-end gap-1.5">
-                    <span className="rounded-[6px] bg-primary/10 px-2.5 py-1 text-[11px] text-primary">
-                      {snapshot.tasks.length} Tasks
-                    </span>
-                    {completionReminderCount > 0 ? (
-                      <span className="rounded-[6px] bg-[#fff1e4] px-2.5 py-1 text-[11px] font-semibold text-[#a44b1d]">
-                        {completionReminderCount} 个完成提醒
-                      </span>
-                    ) : null}
-                  </div>
+                <div className="min-w-0">
+                  <p className="font-semibold text-foreground">{snapshot.project.name}</p>
+                  <p className="mt-1 truncate text-xs text-muted-foreground">
+                    {snapshot.project.path}
+                  </p>
                 </div>
               </button>
 
@@ -182,7 +164,6 @@ export function SidebarList({
                 {snapshot.tasks.map((task) => {
                   const activeTask =
                     activeProject && selectedTaskId !== null && task.task.id === selectedTaskId;
-                  const hasCompletionReminder = taskCompletionReminderIds.has(task.task.id);
                   return (
                     <button
                       key={task.task.id}
@@ -222,19 +203,6 @@ export function SidebarList({
                           </p>
                         </div>
                         <div className="flex shrink-0 flex-col items-end gap-1.5">
-                          {hasCompletionReminder ? (
-                            <span
-                              className={cn(
-                                "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold",
-                                activeTask
-                                  ? "bg-white/18 text-primary-foreground"
-                                  : "bg-[#fff1e4] text-[#a44b1d]",
-                              )}
-                            >
-                              <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
-                              已完成
-                            </span>
-                          ) : null}
                           <span
                             className={cn(
                               "rounded-[6px] px-2.5 py-1 text-[11px] font-medium",
