@@ -201,7 +201,7 @@ function getEdgeTriggerDescription(triggerOn: TopologyEdge["triggerOn"]) {
     case "review_pass":
       return "当前 Agent 给出审查通过结论时，才会传递到这个下游 Agent。";
     case "review_fail":
-      return "当前 Agent 在末尾追加 `回应：...` 尾段时，才会传递到这个下游 Agent。";
+      return "当前 Agent 明确给出需要继续回应的结论时，才会传递到这个下游 Agent。";
     default:
       return "";
   }
@@ -1788,7 +1788,7 @@ export function TopologyGraph({
               <p className="font-semibold text-primary">关系类型</p>
               <p className="mt-1">传递：上游 Agent 正常完成本轮任务后，直接传递到下游。</p>
               <p className="mt-1">审视通过：上游 Agent 给出审查通过结论后，才传递到下游。</p>
-              <p className="mt-1">审视不通过：上游 Agent 在末尾追加 `回应：...` 尾段后，才传递到下游。</p>
+              <p className="mt-1">审视不通过：上游 Agent 明确要求继续回应当前内容后，才传递到下游。</p>
             </div>
 
             <div className="mt-5 space-y-2">

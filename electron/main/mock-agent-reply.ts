@@ -1,10 +1,14 @@
+import { formatReviewResponseBlock } from "../../shared/review-response";
+
 export function buildMockAgentReply(agent: string, content: string): string {
   const cleaned = content
     .replace(/\bSESSION_REF:\s*.+$/gim, "")
     .replace(/在你完成本轮所有工作后[\s\S]*$/m, "")
     .trim();
   const revisionFeedback =
-    "回应：我不同意直接进入下一阶段，因为当前结论缺少关键证据，且“已完成验证”的说法与现有上下文不一致。请说明验证依据，并解释为何可以得出当前结论。";
+    formatReviewResponseBlock(
+      "我不同意直接进入下一阶段，因为当前结论缺少关键证据，且“已完成验证”的说法与现有上下文不一致。请说明验证依据，并解释为何可以得出当前结论。",
+    );
   const reviewPassed = "";
   const completed = "";
 

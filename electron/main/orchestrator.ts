@@ -44,6 +44,10 @@ import {
   formatRevisionRequestContent,
   parseTargetAgentIds,
 } from "@shared/chat-message-format";
+import {
+  extractTrailingReviewResponseBlock,
+  formatReviewResponseBlock,
+} from "@shared/review-response";
 import { buildZellijMissingReminder } from "@shared/zellij";
 import { CustomAgentConfigService } from "./custom-agent-config";
 import { buildAgentSystemPrompt } from "./agent-system-prompt";
@@ -1247,7 +1251,7 @@ export class Orchestrator {
 
     const opinion = parsedReview.opinion?.trim()
       || "请直接回应当前内容，给出你的判断、补充、澄清、反驳或修改方案。";
-    const reviewContent = `回应：\n${opinion}`.trim();
+    const reviewContent = formatReviewResponseBlock(opinion);
     const initialUserContent = this.getInitialUserMessageContent(taskId);
     const userMessage = initialUserContent && !this.contentContainsNormalized(reviewContent, initialUserContent)
       ? initialUserContent
@@ -1256,7 +1260,7 @@ export class Orchestrator {
     const gitDiffSummary = await this.buildProjectGitDiffSummary(currentTask.cwd);
 
     for (const targetName of reviewTargets) {
-      const remediationBody = `审视不通过，请回应以下内容。\n\n回应：\n${opinion}`;
+      const remediationBody = `审视不通过，请回应以下内容。\n\n${formatReviewResponseBlock(opinion)}`;
       const remediationMessage: MessageRecord = {
         id: randomUUID(),
         projectId: project.id,
@@ -1591,7 +1595,7 @@ export class Orchestrator {
   }
 
   private parseReview(content: string, reviewAgent: boolean): ParsedReview {
-    const responseMatch = this.extractTrailingResponseBlock(content);
+    const responseMatch = extractTrailingReviewResponseBlock(content);
     if (!responseMatch) {
       return {
         cleanContent: this.stripStructuredSignals(content),
@@ -1606,26 +1610,6 @@ export class Orchestrator {
       decision: "needs_revision",
       opinion: responseMatch.response,
       rawDecisionBlock: responseMatch.rawBlock,
-    };
-  }
-
-  private extractTrailingResponseBlock(content: string): {
-    body: string;
-    response: string;
-    rawBlock: string;
-  } | null {
-    const pattern = /(^|\n)回应[:：]\s*([\s\S]*)$/u;
-    const match = pattern.exec(content.trim());
-    const response = match?.[2]?.trim();
-    if (!response) {
-      return null;
-    }
-
-    const startIndex = match.index + (match[1]?.length ?? 0);
-    return {
-      body: content.slice(0, startIndex).trim(),
-      response,
-      rawBlock: content.slice(startIndex).trim(),
     };
   }
 
@@ -1807,7 +1791,7 @@ export class Orchestrator {
 
     const opinion = parsedReview.opinion?.trim();
     if (opinion) {
-      return `回应：\n${opinion}`;
+      return formatReviewResponseBlock(opinion);
     }
 
     if (parsedReview.decision === "needs_revision") {

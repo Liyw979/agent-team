@@ -5,6 +5,11 @@ import {
   formatRevisionRequestContent,
   parseTargetAgentIds,
 } from "@shared/chat-message-format";
+import {
+  extractLastReviewResponse,
+  formatReviewResponseBlock,
+  stripLeadingReviewResponseLabel,
+} from "@shared/review-response";
 
 export interface ChatMessageItem {
   id: string;
@@ -38,25 +43,12 @@ function stripTrailingMentions(content: string): string {
 }
 
 function stripRevisionFeedbackLabel(content: string): string {
-  return content.replace(/^回应[:：]\s*/u, "").trim();
+  return stripLeadingReviewResponseLabel(content);
 }
 
 function getRevisionRequestFeedback(content: string): string {
   const normalized = stripTrailingMentions(content);
-  const marker = /回应[:：]/gu;
-  let lastMatch: RegExpExecArray | null = null;
-  let match: RegExpExecArray | null = marker.exec(normalized);
-
-  while (match) {
-    lastMatch = match;
-    match = marker.exec(normalized);
-  }
-
-  if (!lastMatch) {
-    return "";
-  }
-
-  return normalized.slice(lastMatch.index + lastMatch[0].length).trim();
+  return extractLastReviewResponse(normalized);
 }
 
 function hasMeaningfulText(value: string): boolean {
@@ -125,7 +117,7 @@ function buildMergedRevisionRequestContent(previous: ChatMessageItem, current: M
   }
 
   return formatRevisionRequestContent(
-    `${summary}\n\n回应：\n${feedback}`,
+    `${summary}\n\n${formatReviewResponseBlock(feedback)}`,
     current.meta?.targetAgentId,
   );
 }

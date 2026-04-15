@@ -15,6 +15,7 @@ async function addBuiltinAgents(
   orchestrator: Orchestrator,
   projectId: string,
   agentNames: string[],
+  writableAgentName?: string | null,
 ) {
   let latestProject = await orchestrator.getProjectSnapshot(projectId);
   for (const agentName of agentNames) {
@@ -25,6 +26,7 @@ async function addBuiltinAgents(
       currentAgentName: "",
       nextAgentName: agentName,
       prompt: template.prompt,
+      isWritable: writableAgentName === agentName,
     });
   }
   return latestProject;
@@ -35,12 +37,14 @@ async function addCustomAgent(
   projectId: string,
   agentName: string,
   prompt: string,
+  isWritable = false,
 ) {
   return orchestrator.saveAgentPrompt({
     projectId,
     currentAgentName: "",
     nextAgentName: agentName,
     prompt,
+    isWritable,
   });
 }
 
@@ -208,7 +212,7 @@ test("Build 作为内置模板可按需写入 Project，并可像其他 Agent �
   };
   assert.equal(
     typed.customAgentConfig.buildInjectedConfigContent(projectPath),
-    "{\"agent\":{}}",
+    "{\"permission\":{\"write\":\"deny\",\"edit\":\"deny\",\"bash\":\"deny\",\"task\":\"deny\",\"patch\":\"deny\"},\"agent\":{\"build\":{\"mode\":\"primary\",\"permission\":{\"write\":\"deny\",\"edit\":\"deny\",\"bash\":\"deny\",\"task\":\"deny\",\"patch\":\"deny\"}}}}",
   );
 
   const withoutBuild = await orchestrator.deleteAgent({
@@ -281,10 +285,70 @@ test("为不同 Project 初始化 Task 时会切换 OpenCode 注入配置", asyn
   await orchestrator.initializeTask({ projectId: projectA.project.id, title: "project-a" });
 
   assert.equal(injectedConfigs.length >= 2, true);
-  assert.equal(injectedConfigs.includes("{\"agent\":{}}"), true);
+  assert.equal(
+    injectedConfigs.includes(
+      "{\"permission\":{\"write\":\"deny\",\"edit\":\"deny\",\"bash\":\"deny\",\"task\":\"deny\",\"patch\":\"deny\"},\"agent\":{\"build\":{\"mode\":\"primary\",\"permission\":{\"write\":\"deny\",\"edit\":\"deny\",\"bash\":\"deny\",\"task\":\"deny\",\"patch\":\"deny\"}}}}",
+    ),
+    true,
+  );
   assert.equal(
     injectedConfigs.at(-1),
-    "{\"agent\":{\"BA\":{\"mode\":\"primary\",\"prompt\":\"你是 BA。\\n只做需求分析。\",\"permission\":{\"write\":\"deny\",\"edit\":\"deny\",\"bash\":\"deny\",\"task\":\"deny\",\"patch\":\"deny\"}}}}",
+    "{\"permission\":{\"write\":\"deny\",\"edit\":\"deny\",\"bash\":\"deny\",\"task\":\"deny\",\"patch\":\"deny\"},\"agent\":{\"BA\":{\"mode\":\"primary\",\"prompt\":\"你是 BA。\\n只做需求分析。\",\"permission\":{\"write\":\"deny\",\"edit\":\"deny\",\"bash\":\"deny\",\"task\":\"deny\",\"patch\":\"deny\"}}}}",
+  );
+});
+
+test("可以不配置可写 Agent，此时所有 Agent 都注入 deny 权限", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  const orchestrator = new Orchestrator({
+    userDataPath,
+    enableEventStream: false,
+  });
+
+  const project = await orchestrator.createProject({ path: projectPath });
+  await addCustomAgent(orchestrator, project.project.id, "BA", "你是 BA。");
+
+  const typed = orchestrator as unknown as Orchestrator & {
+    customAgentConfig: {
+      buildInjectedConfigContent: (projectPath: string) => string;
+    };
+  };
+
+  assert.equal(
+    typed.customAgentConfig.buildInjectedConfigContent(projectPath),
+    "{\"permission\":{\"write\":\"deny\",\"edit\":\"deny\",\"bash\":\"deny\",\"task\":\"deny\",\"patch\":\"deny\"},\"agent\":{\"BA\":{\"mode\":\"primary\",\"prompt\":\"你是 BA。\",\"permission\":{\"write\":\"deny\",\"edit\":\"deny\",\"bash\":\"deny\",\"task\":\"deny\",\"patch\":\"deny\"}}}}",
+  );
+});
+
+test("把自定义 Agent 设为可写时会自动取消其他 Agent 的可写标记", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  const orchestrator = new Orchestrator({
+    userDataPath,
+    enableEventStream: false,
+  });
+
+  let project = await orchestrator.createProject({ path: projectPath });
+  project = await addBuiltinAgents(orchestrator, project.project.id, ["Build"], "Build");
+  project = await addCustomAgent(orchestrator, project.project.id, "BA", "你是 BA。", true);
+
+  assert.deepEqual(
+    project.agentFiles.map((agent) => [agent.name, agent.isWritable === true]),
+    [
+      ["Build", false],
+      ["BA", true],
+    ],
+  );
+
+  const typed = orchestrator as unknown as Orchestrator & {
+    customAgentConfig: {
+      buildInjectedConfigContent: (projectPath: string) => string;
+    };
+  };
+
+  assert.equal(
+    typed.customAgentConfig.buildInjectedConfigContent(projectPath),
+    "{\"permission\":{\"write\":\"deny\",\"edit\":\"deny\",\"bash\":\"deny\",\"task\":\"deny\",\"patch\":\"deny\"},\"agent\":{\"build\":{\"mode\":\"primary\",\"permission\":{\"write\":\"deny\",\"edit\":\"deny\",\"bash\":\"deny\",\"task\":\"deny\",\"patch\":\"deny\"}},\"BA\":{\"mode\":\"primary\",\"prompt\":\"你是 BA。\",\"permission\":{\"write\":\"ask\",\"edit\":\"ask\",\"bash\":\"ask\",\"task\":\"ask\",\"patch\":\"ask\"}}}}",
   );
 });
 
@@ -730,7 +794,7 @@ test("审视 Agent 执行中止时不会伪造成整改意见", async () => {
   );
   assert.equal(
     snapshot.messages.some(
-      (message) => message.content.includes("回应：\nAborted"),
+      (message) => message.content.includes("<revision_request> Aborted"),
     ),
     false,
   );
