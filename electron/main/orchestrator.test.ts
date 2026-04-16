@@ -30,11 +30,23 @@ function stubOpenCodeSessions(orchestrator: Orchestrator) {
   const typed = orchestrator as unknown as Orchestrator & {
     opencodeClient: {
       createSession: (projectPath: string, title: string) => Promise<string>;
+      getAttachBaseUrl: (projectPath: string) => Promise<string>;
       reloadConfig: () => Promise<void>;
     };
   };
   typed.opencodeClient.createSession = async (_projectPath, title) => `session:${title}`;
+  typed.opencodeClient.getAttachBaseUrl = async () => "http://127.0.0.1:4096";
   typed.opencodeClient.reloadConfig = async () => undefined;
+  return typed;
+}
+
+function stubOpenCodeAttachBaseUrl(orchestrator: Orchestrator) {
+  const typed = orchestrator as unknown as Orchestrator & {
+    opencodeClient: {
+      getAttachBaseUrl: (projectPath: string) => Promise<string>;
+    };
+  };
+  typed.opencodeClient.getAttachBaseUrl = async () => "http://127.0.0.1:4096";
   return typed;
 }
 
@@ -158,6 +170,24 @@ async function waitForTaskSnapshot(
     `Task ${taskId} did not reach the expected state in ${timeoutMs}ms. `
       + `Latest status=${latestSnapshot.task.status}, messageCount=${latestSnapshot.messages.length}.`,
   );
+}
+
+async function waitForValue<T>(
+  read: () => T | Promise<T>,
+  predicate: (value: T) => boolean,
+  timeoutMs = 1000,
+): Promise<T> {
+  const startedAt = Date.now();
+  let latestValue = await read();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (predicate(latestValue)) {
+      return latestValue;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    latestValue = await read();
+  }
+
+  throw new Error(`Value did not satisfy the predicate in ${timeoutMs}ms.`);
 }
 
 test("task init 会写入 Zellij session 信息并补齐运行态", async () => {
@@ -313,6 +343,7 @@ test("OpenCode 事件会触发 runtime-updated 前端事件", async () => {
   const orchestrator = createTestOrchestrator({
     userDataPath,
     enableEventStream: true,
+    runtimeRefreshDebounceMs: 1,
   });
   const sentEvents: unknown[] = [];
   orchestrator.attachWindow({
@@ -342,19 +373,22 @@ test("OpenCode 事件会触发 runtime-updated 前端事件", async () => {
       sessionID: "session-build-1",
     },
   });
-  await new Promise((resolve) => setTimeout(resolve, 220));
-
-  const runtimeUpdatedEvent = sentEvents.find(
-    (event) =>
-      typeof event === "object" &&
-      event !== null &&
-      "type" in event &&
-      (event as { type?: string }).type === "runtime-updated",
+  const runtimeUpdatedEvent = await waitForValue(
+    async () =>
+      sentEvents.find(
+        (event) =>
+          typeof event === "object" &&
+          event !== null &&
+          "type" in event &&
+          (event as { type?: string }).type === "runtime-updated",
+      ),
+    (event) => event !== undefined,
+    500,
   ) as {
     type: string;
     projectId: string;
     payload?: { sessionId?: string | null };
-  } | undefined;
+  };
 
   assert.notEqual(runtimeUpdatedEvent, undefined);
   assert.equal(runtimeUpdatedEvent?.projectId, project.project.id);
@@ -730,6 +764,7 @@ test("只有第一次 Agent 间传递会携带 [Initial Task]", async () => {
       }>;
     };
   };
+  stubOpenCodeAttachBaseUrl(orchestrator);
 
   const promptByAgent = new Map<string, string[]>();
   const recordPrompt = (agent: string, content: string) => {
@@ -841,6 +876,7 @@ test("审查回流再次派发时不会重复携带 [Initial Task]", async () =>
       }>;
     };
   };
+  stubOpenCodeAttachBaseUrl(orchestrator);
 
   const promptByAgent = new Map<string, string[]>();
   const recordPrompt = (agent: string, content: string) => {
@@ -969,6 +1005,7 @@ test("审查 Agent 的结构化 prompt 不会混入 Project Git Diff Summary", a
     };
     buildProjectGitDiffSummary: (cwd: string) => Promise<string>;
   };
+  stubOpenCodeAttachBaseUrl(orchestrator);
 
   const completedResponse = (agent: string, count: number, content: string) => ({
     status: "completed" as const,
@@ -1098,6 +1135,7 @@ test("Build 不会在首轮 reviewer 批次未收齐前提前进入下一轮修�
       }>;
     };
   };
+  stubOpenCodeAttachBaseUrl(orchestrator);
 
   const completedResponse = (agent: string, count: number, content: string) => ({
     status: "completed" as const,
@@ -1185,7 +1223,6 @@ test("Build 不会在首轮 reviewer 批次未收齐前提前进入下一轮修�
     submittedTask.task.id,
     () => taskReviewStarted,
   );
-  await new Promise((resolve) => setTimeout(resolve, 30));
 
   assert.equal(buildRunCount, 1);
   assert.equal(codeReviewStarted, false);
@@ -1557,6 +1594,7 @@ test("Task 进入 finished 状态时会统一把所有 Agent 节点显示为已�
       ) => void;
     };
   };
+  stubOpenCodeAttachBaseUrl(orchestrator);
 
   typed.opencodeClient.createSession = async (_projectPath, title) => `session:${title}`;
   typed.opencodeClient.reloadConfig = async () => undefined;

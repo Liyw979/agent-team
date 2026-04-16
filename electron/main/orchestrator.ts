@@ -80,6 +80,7 @@ interface OrchestratorOptions {
   userDataPath: string;
   autoOpenTaskSession?: boolean;
   enableEventStream?: boolean;
+  runtimeRefreshDebounceMs?: number;
   zellijManager?: ZellijManager;
 }
 
@@ -154,6 +155,7 @@ export class Orchestrator {
   private readonly connectedEventProjects = new Set<string>();
   private readonly pendingRuntimeRefreshProjects = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly pendingEventReconnects = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly runtimeRefreshDebounceMs: number;
   private window: BrowserWindow | null = null;
 
   constructor(options: OrchestratorOptions) {
@@ -163,6 +165,7 @@ export class Orchestrator {
     this.opencodeRunner = new OpenCodeRunner(this.opencodeClient);
     this.autoOpenTaskSession = options.autoOpenTaskSession ?? false;
     this.enableEventStream = options.enableEventStream ?? true;
+    this.runtimeRefreshDebounceMs = options.runtimeRefreshDebounceMs ?? 120;
     this.zellijManager = options.zellijManager ?? new ZellijManager();
   }
 
@@ -2336,7 +2339,7 @@ export class Orchestrator {
           timestamp: new Date().toISOString(),
         },
       });
-    }, 120);
+    }, this.runtimeRefreshDebounceMs);
     this.pendingRuntimeRefreshProjects.set(project.id, timer);
   }
 
