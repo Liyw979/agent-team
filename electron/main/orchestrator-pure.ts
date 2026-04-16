@@ -1,24 +1,47 @@
 import { parseTargetAgentIds } from "@shared/chat-message-format";
+import type { AgentStatus } from "@shared/types";
 import type { MessageRecord, TaskAgentRecord, TaskRecord, TopologyRecord } from "@shared/types";
 
 type MinimalMessage = Pick<MessageRecord, "sender" | "content" | "meta">;
 type MinimalAgent = Pick<TaskAgentRecord, "name" | "status" | "runCount">;
 
-export type FailedReviewContinuationInput = {
+export type RevisionRequestContinuationInput = {
   continuation: {
     pendingTargets: string[];
     repairReviewerAgentId: string | null;
     redispatchTargets: string[];
   } | null;
-  hasFallbackFailedReviewer: boolean;
+  hasDirectRevisionRequestTarget: boolean;
 };
 
-export type FailedReviewContinuationAction =
+export type RevisionRequestContinuationAction =
   | "ignore"
   | "wait_pending_reviewers"
   | "trigger_repair_review"
   | "redispatch_reviewers"
   | "trigger_fallback_review";
+
+export function shouldStopTaskForUnhandledRevisionRequest(input: {
+  completeTaskOnFinish: boolean;
+  continuationAction: RevisionRequestContinuationAction;
+}): boolean {
+  if (!input.completeTaskOnFinish) {
+    return false;
+  }
+
+  return input.continuationAction === "ignore";
+}
+
+export function resolveAgentStatusFromReview(input: {
+  reviewDecision: "pass" | "needs_revision" | "unknown";
+  reviewAgent: boolean;
+}): AgentStatus {
+  if (input.reviewDecision === "needs_revision") {
+    return input.reviewAgent ? "needs_revision" : "failed";
+  }
+
+  return "completed";
+}
 
 export function extractMention(content: string): string | undefined {
   const match = content.match(/@([^\s]+)/u);
@@ -206,9 +229,9 @@ export function shouldFinishTaskFromPersistedState(input: {
   return true;
 }
 
-export function resolveFailedReviewContinuationAction(
-  input: FailedReviewContinuationInput,
-): FailedReviewContinuationAction {
+export function resolveRevisionRequestContinuationAction(
+  input: RevisionRequestContinuationInput,
+): RevisionRequestContinuationAction {
   if (!input.continuation) {
     return "ignore";
   }

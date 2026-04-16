@@ -13,7 +13,9 @@ import {
   buildDownstreamForwardedContextFromMessages,
   buildUserHistoryContent,
   getInitialUserMessageContent,
-  resolveFailedReviewContinuationAction,
+  resolveAgentStatusFromReview,
+  resolveRevisionRequestContinuationAction,
+  shouldStopTaskForUnhandledRevisionRequest,
   shouldFinishTaskFromPersistedState,
 } from "./orchestrator-pure";
 
@@ -196,10 +198,28 @@ test("最新一条仍是用户 @Agent 追问时，持久化补偿逻辑不会提
 });
 
 test("过期 reviewer 回复不应被当成有效回流继续触发修复", () => {
-  const action = resolveFailedReviewContinuationAction({
+  const action = resolveRevisionRequestContinuationAction({
     continuation: null,
-    hasFallbackFailedReviewer: true,
+    hasDirectRevisionRequestTarget: true,
   });
 
   assert.equal(action, "ignore");
+});
+
+test("reviewer 已经形成有效回流动作时，不应直接结束 Task", () => {
+  const shouldStopTask = shouldStopTaskForUnhandledRevisionRequest({
+    completeTaskOnFinish: true,
+    continuationAction: "trigger_repair_review",
+  });
+
+  assert.equal(shouldStopTask, false);
+});
+
+test("reviewer 给出需要修复时应标记为 needs_revision 而不是 failed", () => {
+  const status = resolveAgentStatusFromReview({
+    reviewDecision: "needs_revision",
+    reviewAgent: true,
+  });
+
+  assert.equal(status, "needs_revision");
 });

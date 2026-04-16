@@ -71,7 +71,9 @@ import {
   contentContainsNormalized as contentContainsNormalizedPure,
   extractMention as extractMentionPure,
   getInitialUserMessageContent as getInitialUserMessageContentPure,
-  resolveFailedReviewContinuationAction,
+  resolveAgentStatusFromReview,
+  resolveRevisionRequestContinuationAction,
+  shouldStopTaskForUnhandledRevisionRequest,
   shouldFinishTaskFromPersistedState as shouldFinishTaskFromPersistedStatePure,
   stripTargetMention as stripTargetMentionPure,
 } from "./orchestrator-pure";
@@ -117,7 +119,7 @@ interface TaskRuntimeState {
     agentMessage?: string;
     gitDiffSummary?: string;
   }>;
-  pendingFailedReviewsByAgent: Map<string, ParsedReview>;
+  pendingRevisionRequestsByAgent: Map<string, ParsedReview>;
 }
 
 type AgentExecutionPrompt =
@@ -683,7 +685,7 @@ export class Orchestrator {
       hasForwardedInitialTask: false,
       queuedPromptsByAgent: new Map(),
       associationBatchPromptBySource: new Map(),
-      pendingFailedReviewsByAgent: new Map(),
+      pendingRevisionRequestsByAgent: new Map(),
     });
 
     const snapshot = this.hydrateTask(taskId);
@@ -922,7 +924,10 @@ export class Orchestrator {
         parsedReview.decision === "needs_revision"
           ? this.getOutgoingEdges(topology, agentName, "review_fail")
           : [];
-      const agentStatus = parsedReview.decision === "needs_revision" ? "failed" : "completed";
+      const agentStatus = resolveAgentStatusFromReview({
+        reviewDecision: parsedReview.decision,
+        reviewAgent,
+      });
       this.store.updateTaskAgentStatus(task.id, agentName, agentStatus);
       const scheduler = this.createScheduler(task.id, topology);
       const batchContinuation = scheduler.recordAssociationBatchResponse(
@@ -930,30 +935,30 @@ export class Orchestrator {
         parsedReview.decision === "needs_revision" ? "fail" : "pass",
         this.buildSchedulerAgentStates(task.id),
       );
-      const failedReviewAction =
+      const revisionRequestAction =
         parsedReview.decision === "needs_revision"
-          ? resolveFailedReviewContinuationAction({
+          ? resolveRevisionRequestContinuationAction({
               continuation: batchContinuation,
-              hasFallbackFailedReviewer: reviewFailureTargets.length > 0,
+              hasDirectRevisionRequestTarget: reviewFailureTargets.length > 0,
             })
           : "ignore";
       if (
         parsedReview.decision === "needs_revision"
         && reviewFailureTargets.length > 0
-        && failedReviewAction !== "ignore"
+        && revisionRequestAction !== "ignore"
       ) {
-        runtime.pendingFailedReviewsByAgent.set(agentName, parsedReview);
+        runtime.pendingRevisionRequestsByAgent.set(agentName, parsedReview);
       }
       if (behavior.updateTaskStatusOnStart ?? true) {
         this.updateTaskStatusIfActive(
           task.id,
-          agentStatus === "failed" && reviewFailureTargets.length > 0
+          parsedReview.decision === "needs_revision" && reviewFailureTargets.length > 0
             ? (batchContinuation?.pendingTargets.length ?? 0) > 0
               ? "running"
               : "needs_revision"
             : agentStatus === "failed" && directTargets.length > 0 && !reviewAgent
               ? "running"
-              : agentStatus === "failed"
+            : agentStatus === "failed"
               ? "failed"
               : "running",
           null,
@@ -989,7 +994,28 @@ export class Orchestrator {
 
       const signal = this.parseSignal(response.finalMessage);
       if (parsedReview.decision === "needs_revision") {
-        if (behavior.completeTaskOnFinish ?? true) {
+        const batchTriggered = await this.continueAfterAssociationBatchResponse(
+          project,
+          task.id,
+          batchContinuation,
+          reviewFailureTargets.length > 0
+            ? {
+                agent: { name: agentName },
+                review: parsedReview,
+              }
+            : undefined,
+        );
+        const hasOtherRunningAgents = [...runtime.runningAgents].some((runningAgent) => runningAgent !== agentName);
+        const hasQueuedAgents = runtime.queuedAgents.size > 0;
+        if (
+          shouldStopTaskForUnhandledRevisionRequest({
+            completeTaskOnFinish: behavior.completeTaskOnFinish ?? true,
+            continuationAction: revisionRequestAction,
+          })
+          && !hasOtherRunningAgents
+          && !hasQueuedAgents
+          && batchTriggered === 0
+        ) {
           await this.completeTask(task.id, "failed");
         }
         this.emit({
@@ -1377,7 +1403,7 @@ export class Orchestrator {
     project: ProjectRecord,
     taskId: string,
     continuation: SchedulerBatchContinuation | null,
-    fallbackFailedReviewer?: {
+    directRevisionRequestSource?: {
       agent: Pick<AgentFileRecord, "name">;
       review: ParsedReview;
     },
@@ -1386,9 +1412,9 @@ export class Orchestrator {
       return 0;
     }
 
-    const action = resolveFailedReviewContinuationAction({
+    const action = resolveRevisionRequestContinuationAction({
       continuation,
-      hasFallbackFailedReviewer: Boolean(fallbackFailedReviewer),
+      hasDirectRevisionRequestTarget: Boolean(directRevisionRequestSource),
     });
 
     if (action === "wait_pending_reviewers" || action === "ignore") {
@@ -1397,11 +1423,11 @@ export class Orchestrator {
 
     if (action === "trigger_repair_review" && continuation?.repairReviewerAgentId) {
       const runtime = this.getRuntime(taskId);
-      const storedReview = runtime.pendingFailedReviewsByAgent.get(continuation.repairReviewerAgentId);
+      const storedReview = runtime.pendingRevisionRequestsByAgent.get(continuation.repairReviewerAgentId);
       if (!storedReview) {
         return 0;
       }
-      runtime.pendingFailedReviewsByAgent.delete(continuation.repairReviewerAgentId);
+      runtime.pendingRevisionRequestsByAgent.delete(continuation.repairReviewerAgentId);
       return this.triggerReviewDownstream(
         project,
         taskId,
@@ -1425,12 +1451,12 @@ export class Orchestrator {
       );
     }
 
-    if (action === "trigger_fallback_review" && fallbackFailedReviewer) {
+    if (action === "trigger_fallback_review" && directRevisionRequestSource) {
       return this.triggerReviewDownstream(
         project,
         taskId,
-        fallbackFailedReviewer.agent,
-        fallbackFailedReviewer.review,
+        directRevisionRequestSource.agent,
+        directRevisionRequestSource.review,
       );
     }
 
@@ -2238,7 +2264,7 @@ export class Orchestrator {
         hasForwardedInitialTask: false,
         queuedPromptsByAgent: new Map(),
         associationBatchPromptBySource: new Map(),
-        pendingFailedReviewsByAgent: new Map(),
+        pendingRevisionRequestsByAgent: new Map(),
       };
       this.taskRuntime.set(taskId, runtime);
     }
