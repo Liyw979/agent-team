@@ -44,7 +44,6 @@ import {
 import {
   formatAgentDispatchContent,
   formatRevisionRequestContent,
-  parseTargetAgentIds,
 } from "@shared/chat-message-format";
 import {
   extractTrailingReviewResponseBlock,
@@ -64,6 +63,15 @@ import {
   type SchedulerBatchContinuation,
   type SchedulerDispatchPlan,
 } from "./orchestrator-scheduler";
+import {
+  buildDownstreamForwardedContextFromMessages,
+  buildUserHistoryContent as buildUserHistoryContentPure,
+  contentContainsNormalized as contentContainsNormalizedPure,
+  extractMention as extractMentionPure,
+  getInitialUserMessageContent as getInitialUserMessageContentPure,
+  shouldFinishTaskFromPersistedState as shouldFinishTaskFromPersistedStatePure,
+  stripTargetMention as stripTargetMentionPure,
+} from "./orchestrator-pure";
 
 const execFileAsync = promisify(execFile);
 
@@ -440,7 +448,7 @@ export class Orchestrator {
     this.syncTopology(project, agentFiles);
     const mentionName =
       payload.mentionAgent ||
-      this.extractMention(payload.content) ||
+      extractMentionPure(payload.content) ||
       agentFiles[0]?.name;
     if (!mentionName) {
       throw new Error("当前没有可用的目标 Agent。");
@@ -714,7 +722,7 @@ export class Orchestrator {
       payload: message,
     });
 
-    const forwardedContent = this.stripTargetMention(content, targetAgent.name);
+    const forwardedContent = stripTargetMentionPure(content, targetAgent.name);
     const runPromise = this.dispatchAgentRun(project, task.id, targetAgent.name, {
       mode: "raw",
       from: "User",
@@ -754,7 +762,7 @@ export class Orchestrator {
     content: string,
     targetAgentId: string,
   ): MessageRecord {
-    const normalizedContent = this.buildUserHistoryContent(content, targetAgentId);
+    const normalizedContent = buildUserHistoryContentPure(content, targetAgentId);
     return {
       id: randomUUID(),
       projectId,
@@ -768,47 +776,6 @@ export class Orchestrator {
         targetAgentId,
       },
     };
-  }
-
-  private buildUserHistoryContent(content: string, targetAgentId: string): string {
-    const trimmed = content.trim();
-    if (!trimmed) {
-      return `@${targetAgentId}`;
-    }
-    if (this.extractMention(trimmed)) {
-      return content;
-    }
-    return `@${targetAgentId} ${trimmed}`;
-  }
-
-  private getInitialUserMessageContent(taskId: string): string {
-    const task = this.store.getTask(taskId);
-    const messages = this.store.listMessages(task.projectId, taskId);
-    for (let index = 0; index < messages.length; index += 1) {
-      const message = messages[index];
-      if (message?.sender === "user") {
-        const rawContent = message.content.trim();
-        const targetAgentName = message.meta?.targetAgentId?.trim();
-        if (!targetAgentName) {
-          return rawContent;
-        }
-        return this.stripTargetMention(rawContent, targetAgentName);
-      }
-    }
-    return "";
-  }
-
-  private contentContainsNormalized(content: string, candidate: string): boolean {
-    const normalizedContent = this.normalizeContentForDedup(content);
-    const normalizedCandidate = this.normalizeContentForDedup(candidate);
-    if (!normalizedContent || !normalizedCandidate) {
-      return false;
-    }
-    return normalizedContent.includes(normalizedCandidate);
-  }
-
-  private normalizeContentForDedup(value: string): string {
-    return value.replace(/\s+/g, " ").trim().toLowerCase();
   }
 
   private syncTaskAgents(task: TaskRecord, agentFiles: AgentFileRecord[]) {
@@ -1192,7 +1159,11 @@ export class Orchestrator {
     const currentTask = this.store.getTask(taskId);
     const gitDiffSummary = await this.buildProjectGitDiffSummary(currentTask.cwd);
     const includeInitialTask = this.consumeInitialTaskForwardingAllowance(taskId);
-    const forwardedContext = this.buildDownstreamForwardedContext(taskId, sourceContent, includeInitialTask);
+    const forwardedContext = buildDownstreamForwardedContextFromMessages(
+      this.store.listMessages(currentTask.projectId, taskId),
+      sourceContent,
+      includeInitialTask,
+    );
 
     const runtime = this.getRuntime(taskId);
     runtime.associationBatchPromptBySource.set(sourceAgentId, {
@@ -1252,7 +1223,11 @@ export class Orchestrator {
       const currentTask = this.store.getTask(taskId);
       const gitDiffSummary = await this.buildProjectGitDiffSummary(currentTask.cwd);
       const includeInitialTask = this.consumeInitialTaskForwardingAllowance(taskId);
-      const forwardedContext = this.buildDownstreamForwardedContext(taskId, plan.sourceContent, includeInitialTask);
+      const forwardedContext = buildDownstreamForwardedContextFromMessages(
+        this.store.listMessages(currentTask.projectId, taskId),
+        plan.sourceContent,
+        includeInitialTask,
+      );
 
       await Promise.all(
         plan.readyTargets.map(async (targetName) => {
@@ -1293,14 +1268,15 @@ export class Orchestrator {
     const opinion = parsedReview.opinion?.trim()
       || "请直接回应当前内容，给出你的判断、补充、澄清、反驳或修改方案。";
     const reviewContent = opinion;
-    const initialUserContent = this.getInitialUserMessageContent(taskId);
+    const currentTask = this.store.getTask(taskId);
+    const taskMessages = this.store.listMessages(currentTask.projectId, taskId);
+    const initialUserContent = getInitialUserMessageContentPure(taskMessages);
     const includeInitialTask = this.consumeInitialTaskForwardingAllowance(taskId);
     const userMessage = includeInitialTask
       && initialUserContent
-      && !this.contentContainsNormalized(reviewContent, initialUserContent)
+      && !contentContainsNormalizedPure(reviewContent, initialUserContent)
       ? initialUserContent
       : undefined;
-    const currentTask = this.store.getTask(taskId);
     const gitDiffSummary = await this.buildProjectGitDiffSummary(currentTask.cwd);
 
     for (const targetName of reviewTargets) {
@@ -1517,44 +1493,6 @@ export class Orchestrator {
     this.createScheduler(taskId, topology).invalidateDownstreamTriggerSignatures(agentName);
   }
 
-  private getPersistedCompletionSeedAgentNames(taskId: string): string[] {
-    const task = this.store.getTask(taskId);
-    const topology = this.store.getTopology(task.projectId);
-    const validNames = new Set(topology.nodes.map((node) => node.id));
-    const seeds = new Set<string>();
-
-    for (const agent of this.store.listTaskAgents(taskId)) {
-      if (agent.status !== "idle" || agent.runCount > 0) {
-        seeds.add(agent.name);
-      }
-    }
-
-    for (const message of this.store.listMessages(task.projectId, taskId)) {
-      const targetAgentId = message.meta?.targetAgentId;
-      if (message.sender === "user" && typeof targetAgentId === "string" && targetAgentId.trim()) {
-        seeds.add(targetAgentId.trim());
-      }
-      if (message.meta?.kind === "agent-dispatch") {
-        for (const targetName of parseTargetAgentIds(message.meta.targetAgentIds)) {
-          seeds.add(targetName);
-        }
-      }
-      if (message.meta?.kind === "revision-request" && typeof targetAgentId === "string" && targetAgentId.trim()) {
-        seeds.add(targetAgentId.trim());
-      }
-    }
-
-    if (seeds.size === 0 && topology.startAgentId) {
-      seeds.add(topology.startAgentId);
-    }
-
-    return [...seeds].filter((name) => validNames.has(name));
-  }
-
-  private getPersistedParticipatingAgentNames(taskId: string): Set<string> {
-    return new Set(this.getPersistedCompletionSeedAgentNames(taskId));
-  }
-
   private haveAllTaskAgentsCompleted(taskId: string): boolean {
     const agents = this.store.listTaskAgents(taskId);
     return agents.length > 0 && agents.every((agent) => agent.status === "completed");
@@ -1578,82 +1516,14 @@ export class Orchestrator {
     await this.completeTask(taskId, "finished");
   }
 
-  private shouldFinishTaskFromPersistedState(taskId: string): boolean {
-    const task = this.store.getTask(taskId);
-    if (task.status !== "running" && task.status !== "waiting") {
-      return false;
-    }
-
-    const messages = this.store.listMessages(task.projectId, taskId);
-    const latestMessage = messages.at(-1);
-    if (latestMessage?.sender === "user") {
-      return false;
-    }
-
-    const topology = this.store.getTopology(task.projectId);
-    const agents = this.store.listTaskAgents(taskId);
-    if (agents.some((agent) => agent.status === "running")) {
-      return false;
-    }
-
-    const participatingAgents = this.getPersistedParticipatingAgentNames(taskId);
-    if (participatingAgents.size === 0) {
-      return false;
-    }
-
-    const participatingSucceeded = agents
-      .filter((agent) => participatingAgents.has(agent.name))
-      .every((agent) => agent.status === "completed");
-    if (!participatingSucceeded) {
-      return false;
-    }
-
-    const reachableFromParticipating = this.collectReachableTopologyNodes(topology, participatingAgents);
-    for (const agent of agents) {
-      if (agent.status !== "idle" || participatingAgents.has(agent.name)) {
-        continue;
-      }
-      if (!reachableFromParticipating.has(agent.name)) {
-        continue;
-      }
-
-      const reachableFromIdle = this.collectReachableTopologyNodes(topology, [agent.name]);
-      const reconnectsToParticipating = [...participatingAgents].some(
-        (participant) => participant !== agent.name && reachableFromIdle.has(participant),
-      );
-      if (!reconnectsToParticipating) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  private collectReachableTopologyNodes(
-    topology: TopologyRecord,
-    startNames: Iterable<string>,
-  ): Set<string> {
-    const queue = [...startNames];
-    const visited = new Set<string>();
-
-    while (queue.length > 0) {
-      const current = queue.shift();
-      if (!current || visited.has(current)) {
-        continue;
-      }
-      visited.add(current);
-      for (const edge of topology.edges) {
-        if (edge.source === current && !visited.has(edge.target)) {
-          queue.push(edge.target);
-        }
-      }
-    }
-
-    return visited;
-  }
-
   private async reconcilePersistedTaskStatus(taskId: string) {
-    if (!this.shouldFinishTaskFromPersistedState(taskId)) {
+    const task = this.store.getTask(taskId);
+    if (!shouldFinishTaskFromPersistedStatePure({
+      taskStatus: task.status,
+      topology: this.store.getTopology(task.projectId),
+      agents: this.store.listTaskAgents(taskId),
+      messages: this.store.listMessages(task.projectId, taskId),
+    })) {
       return;
     }
 
@@ -1849,24 +1719,6 @@ export class Orchestrator {
     ];
 
     return candidates.find((item) => item.length > 0) ?? "";
-  }
-
-  private buildDownstreamForwardedContext(
-    taskId: string,
-    sourceContent: string,
-    includeInitialTask = true,
-  ): { userMessage?: string; agentMessage: string } {
-    const initialUserContent = this.getInitialUserMessageContent(taskId);
-    const latestSourceContent = sourceContent.trim();
-    return {
-      userMessage:
-        includeInitialTask
-        && initialUserContent
-        && !this.contentContainsNormalized(latestSourceContent, initialUserContent)
-          ? initialUserContent
-          : undefined,
-      agentMessage: latestSourceContent || "（该上游 Agent 未返回可继续流转的正文。）",
-    };
   }
 
   private consumeInitialTaskForwardingAllowance(taskId: string): boolean {
@@ -2146,47 +1998,6 @@ export class Orchestrator {
       project.path,
       this.customAgentConfig.buildInjectedConfigContent(project.path),
     );
-  }
-
-  private extractMention(content: string): string | undefined {
-    const match = content.match(/@([^\s]+)/);
-    return match?.[1];
-  }
-
-  private stripLeadingTargetMention(content: string, targetAgentName: string): string {
-    const trimmed = content.trim();
-    if (!trimmed) {
-      return "";
-    }
-
-    const mentionToken = `@${targetAgentName}`;
-    if (!trimmed.startsWith(mentionToken)) {
-      return trimmed;
-    }
-
-    const nextChar = trimmed.charAt(mentionToken.length);
-    if (nextChar && !/\s/u.test(nextChar)) {
-      return trimmed;
-    }
-
-    const stripped = trimmed.slice(mentionToken.length).trimStart();
-    return stripped || trimmed;
-  }
-
-  private stripTargetMention(content: string, targetAgentName: string): string {
-    const trimmed = this.stripLeadingTargetMention(content, targetAgentName);
-    if (!trimmed) {
-      return "";
-    }
-
-    const mentionToken = `@${targetAgentName}`;
-    const trailingPattern = new RegExp(`(?:^|\\s)${this.escapeRegExp(mentionToken)}\\s*$`, "u");
-    const strippedTrailing = trimmed.replace(trailingPattern, "").trimEnd();
-    return strippedTrailing || trimmed;
-  }
-
-  private escapeRegExp(value: string): string {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
   private findAgentFile(agentFiles: AgentFileRecord[], name: string | undefined): AgentFileRecord | undefined {
