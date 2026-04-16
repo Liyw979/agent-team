@@ -4,6 +4,22 @@ import type { MessageRecord, TaskAgentRecord, TaskRecord, TopologyRecord } from 
 type MinimalMessage = Pick<MessageRecord, "sender" | "content" | "meta">;
 type MinimalAgent = Pick<TaskAgentRecord, "name" | "status" | "runCount">;
 
+export type FailedReviewContinuationInput = {
+  continuation: {
+    pendingTargets: string[];
+    repairReviewerAgentId: string | null;
+    redispatchTargets: string[];
+  } | null;
+  hasFallbackFailedReviewer: boolean;
+};
+
+export type FailedReviewContinuationAction =
+  | "ignore"
+  | "wait_pending_reviewers"
+  | "trigger_repair_review"
+  | "redispatch_reviewers"
+  | "trigger_fallback_review";
+
 export function extractMention(content: string): string | undefined {
   const match = content.match(/@([^\s]+)/u);
   return match?.[1];
@@ -188,6 +204,28 @@ export function shouldFinishTaskFromPersistedState(input: {
   }
 
   return true;
+}
+
+export function resolveFailedReviewContinuationAction(
+  input: FailedReviewContinuationInput,
+): FailedReviewContinuationAction {
+  if (!input.continuation) {
+    return "ignore";
+  }
+
+  if (input.continuation.pendingTargets.length > 0) {
+    return "wait_pending_reviewers";
+  }
+
+  if (input.continuation.repairReviewerAgentId) {
+    return "trigger_repair_review";
+  }
+
+  if (input.continuation.redispatchTargets.length > 0) {
+    return "redispatch_reviewers";
+  }
+
+  return "ignore";
 }
 
 function stripLeadingTargetMention(content: string, targetAgentName: string): string {

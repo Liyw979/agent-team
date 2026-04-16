@@ -13,6 +13,7 @@ import {
   buildDownstreamForwardedContextFromMessages,
   buildUserHistoryContent,
   getInitialUserMessageContent,
+  resolveFailedReviewContinuationAction,
   shouldFinishTaskFromPersistedState,
 } from "./orchestrator-pure";
 
@@ -192,4 +193,13 @@ test("最新一条仍是用户 @Agent 追问时，持久化补偿逻辑不会提
   });
 
   assert.equal(shouldFinish, false);
+});
+
+test("过期 reviewer 回复不应被当成有效回流继续触发修复", () => {
+  const action = resolveFailedReviewContinuationAction({
+    continuation: null,
+    hasFallbackFailedReviewer: true,
+  });
+
+  assert.equal(action, "ignore");
 });
