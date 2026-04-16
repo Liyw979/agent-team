@@ -1440,6 +1440,71 @@ test("旧运行数据里悬空 idle Agent 不会阻止 Task 自动结束", async
   );
 });
 
+test("最新一条仍是用户 @Agent 追问时，持久化补偿逻辑不会提前把 Task 判 finished", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  const orchestrator = createTestOrchestrator({
+    userDataPath,
+    enableEventStream: false,
+    zellijManager: {
+      isAvailable: async () => true,
+      createTaskSession: async () => "oap-project-task",
+      createPanelBindings: () => [],
+      materializePanelBindings: async () => [],
+      openTaskSession: async () => undefined,
+      deleteTaskSession: async () => undefined,
+      setOpenCodeAttachBaseUrl: () => undefined,
+    } as never,
+  });
+
+  const typed = orchestrator as unknown as Orchestrator & {
+    store: {
+      updateTaskStatus: (taskId: string, status: "running" | "finished" | "waiting" | "failed", completedAt: string | null) => void;
+      updateTaskAgentStatus: (taskId: string, agentName: string, status: "idle" | "completed" | "failed" | "running" | "needs_revision") => void;
+      insertMessage: (record: MessageRecord) => void;
+    };
+    opencodeClient: {
+      createSession: (projectPath: string, title: string) => Promise<string>;
+      reloadConfig: () => Promise<void>;
+    };
+  };
+  typed.opencodeClient.createSession = async (_projectPath, title) => `session:${title}`;
+  typed.opencodeClient.reloadConfig = async () => undefined;
+
+  let project = await orchestrator.createProject({ path: projectPath });
+  project = await addBuiltinAgents(orchestrator, project.project.id, ["UnitTest"]);
+  const task = await orchestrator.initializeTask({ projectId: project.project.id, title: "demo" });
+
+  typed.store.updateTaskStatus(task.task.id, "running", null);
+  typed.store.updateTaskAgentStatus(task.task.id, "UnitTest", "completed");
+  typed.store.insertMessage({
+    id: "user-follow-up",
+    projectId: project.project.id,
+    taskId: task.task.id,
+    sender: "user",
+    content: "@UnitTest 你的指责呢",
+    timestamp: "2099-04-16T07:37:07.938Z",
+    meta: {
+      scope: "task",
+      taskTitle: task.task.title,
+      targetAgentId: "UnitTest",
+    },
+  });
+
+  const snapshot = await orchestrator.getTaskSnapshot(task.task.id);
+  assert.equal(snapshot.task.status, "running");
+  assert.equal(snapshot.messages.at(-1)?.sender, "user");
+  assert.equal(
+    snapshot.messages.some(
+      (message) =>
+        message.sender === "system" &&
+        message.meta?.kind === "task-completed" &&
+        message.timestamp > "2099-04-16T07:37:07.938Z",
+    ),
+    false,
+  );
+});
+
 test("bootstrap does not delete unfinished tasks when zellij sessions are missing", async () => {
   const userDataPath = createTempDir();
   const projectPath = createTempDir();

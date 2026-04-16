@@ -5,7 +5,11 @@ import type { MessageRecord } from "@shared/types";
 
 import { mergeTaskChatMessages } from "../../src/lib/chat-messages";
 import { formatRevisionRequestContent } from "../../shared/chat-message-format";
-import { REVIEW_RESPONSE_LABEL, formatReviewResponseBlock } from "../../shared/review-response";
+import {
+  REVIEW_RESPONSE_END_LABEL,
+  REVIEW_RESPONSE_LABEL,
+  formatReviewResponseBlock,
+} from "../../shared/review-response";
 
 function createMessage(overrides: Partial<MessageRecord>): MessageRecord {
   return {
@@ -20,7 +24,9 @@ function createMessage(overrides: Partial<MessageRecord>): MessageRecord {
 }
 
 test("合并回应消息时只保留一份回应与一份 mention", () => {
-  const summary = `${REVIEW_RESPONSE_LABEL} 暂无进一步结论，因为尚未完成润色工作。请先完成需求润色，然后再回应实现是否成立。`;
+  const summary =
+    `${REVIEW_RESPONSE_LABEL}暂无进一步结论，因为尚未完成润色工作。请先完成需求润色，然后再回应实现是否成立。`
+    + REVIEW_RESPONSE_END_LABEL;
   const remediationMessage = formatRevisionRequestContent(
     `审视不通过，请回应以下内容。\n\n${formatReviewResponseBlock("暂无进一步结论，因为尚未完成润色工作。请先完成需求润色，然后再回应实现是否成立。")}`,
     "Build",

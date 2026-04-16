@@ -674,6 +674,9 @@ export class Orchestrator {
     if (task.projectId !== project.id) {
       throw new Error("Task 不属于当前 Project");
     }
+    if (isTerminalTaskStatus(task.status)) {
+      this.store.updateTaskStatus(task.id, "running", null);
+    }
 
     this.syncTaskAgents(task, agentFiles);
     const targetAgent = this.findAgentFile(agentFiles, mentionAgent);
@@ -1551,6 +1554,12 @@ export class Orchestrator {
   private shouldFinishTaskFromPersistedState(taskId: string): boolean {
     const task = this.store.getTask(taskId);
     if (task.status !== "running" && task.status !== "waiting") {
+      return false;
+    }
+
+    const messages = this.store.listMessages(task.projectId, taskId);
+    const latestMessage = messages.at(-1);
+    if (latestMessage?.sender === "user") {
       return false;
     }
 

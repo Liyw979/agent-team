@@ -1,16 +1,20 @@
 export const REVIEW_RESPONSE_LABEL = "<revision_request>";
+export const REVIEW_RESPONSE_END_LABEL = "</revision_request>";
 
 export function formatReviewResponseBlock(content: string): string {
   const normalized = content.trim();
-  return normalized ? `${REVIEW_RESPONSE_LABEL} ${normalized}` : REVIEW_RESPONSE_LABEL;
+  return `${REVIEW_RESPONSE_LABEL}${normalized}${REVIEW_RESPONSE_END_LABEL}`;
 }
 
 export function stripLeadingReviewResponseLabel(content: string): string {
-  return content.replace(/^<revision_request>\s*/u, "").trim();
+  return content
+    .replace(/^<revision_request>\s*/u, "")
+    .replace(/\s*<\/revision_request>\s*$/u, "")
+    .trim();
 }
 
 export function extractLastReviewResponse(content: string): string {
-  const marker = /<revision_request>/gu;
+  const marker = /<revision_request>([\s\S]*?)<\/revision_request>/gu;
   let lastMatch: RegExpExecArray | null = null;
   let match: RegExpExecArray | null = marker.exec(content);
 
@@ -23,7 +27,7 @@ export function extractLastReviewResponse(content: string): string {
     return "";
   }
 
-  return content.slice(lastMatch.index + lastMatch[0].length).trim();
+  return (lastMatch[1] ?? "").trim();
 }
 
 export function extractTrailingReviewResponseBlock(content: string): {
@@ -32,16 +36,26 @@ export function extractTrailingReviewResponseBlock(content: string): {
   rawBlock: string;
 } | null {
   const trimmed = content.trim();
-  const match = /(^|\n)<revision_request>\s*([\s\S]*)$/u.exec(trimmed);
-  const response = match?.[2]?.trim();
-  if (!response) {
+  const pattern = /<revision_request>([\s\S]*?)<\/revision_request>/gu;
+  let lastMatch: RegExpExecArray | null = null;
+  let match: RegExpExecArray | null = pattern.exec(trimmed);
+
+  while (match) {
+    lastMatch = match;
+    match = pattern.exec(trimmed);
+  }
+
+  if (!lastMatch || typeof lastMatch.index !== "number") {
     return null;
   }
 
-  const startIndex = match.index + (match[1]?.length ?? 0);
+  const rawBlock = lastMatch[0].trim();
+  const response = (lastMatch[1] ?? "").trim();
+  const markerIndex = lastMatch.index;
+
   return {
-    body: trimmed.slice(0, startIndex).trim(),
+    body: trimmed.slice(0, markerIndex).trim(),
     response,
-    rawBlock: trimmed.slice(startIndex).trim(),
+    rawBlock,
   };
 }
