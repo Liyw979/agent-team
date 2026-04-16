@@ -70,6 +70,7 @@ import {
   contentContainsNormalized as contentContainsNormalizedPure,
   extractMention as extractMentionPure,
   getInitialUserMessageContent as getInitialUserMessageContentPure,
+  resolveFailedReviewContinuationAction,
   shouldFinishTaskFromPersistedState as shouldFinishTaskFromPersistedStatePure,
   stripTargetMention as stripTargetMentionPure,
 } from "./orchestrator-pure";
@@ -924,7 +925,18 @@ export class Orchestrator {
         parsedReview.decision === "needs_revision" ? "fail" : "pass",
         this.buildSchedulerAgentStates(task.id),
       );
-      if (parsedReview.decision === "needs_revision" && reviewFailureTargets.length > 0) {
+      const failedReviewAction =
+        parsedReview.decision === "needs_revision"
+          ? resolveFailedReviewContinuationAction({
+              continuation: batchContinuation,
+              hasFallbackFailedReviewer: reviewFailureTargets.length > 0,
+            })
+          : "ignore";
+      if (
+        parsedReview.decision === "needs_revision"
+        && reviewFailureTargets.length > 0
+        && failedReviewAction !== "ignore"
+      ) {
         runtime.pendingFailedReviewsByAgent.set(agentName, parsedReview);
       }
       if (behavior.updateTaskStatusOnStart ?? true) {
@@ -1376,23 +1388,16 @@ export class Orchestrator {
       review: ParsedReview;
     },
   ): Promise<number> {
-    if (!continuation) {
-      if (!fallbackFailedReviewer) {
-        return 0;
-      }
-      return this.triggerReviewDownstream(
-        project,
-        taskId,
-        fallbackFailedReviewer.agent,
-        fallbackFailedReviewer.review,
-      );
-    }
+    const action = resolveFailedReviewContinuationAction({
+      continuation,
+      hasFallbackFailedReviewer: Boolean(fallbackFailedReviewer),
+    });
 
-    if (continuation.pendingTargets.length > 0) {
+    if (action === "wait_pending_reviewers" || action === "ignore") {
       return 0;
     }
 
-    if (continuation.repairReviewerAgentId) {
+    if (action === "trigger_repair_review" && continuation?.repairReviewerAgentId) {
       const runtime = this.getRuntime(taskId);
       const storedReview = runtime.pendingFailedReviewsByAgent.get(continuation.repairReviewerAgentId);
       if (!storedReview) {
@@ -1407,7 +1412,7 @@ export class Orchestrator {
       );
     }
 
-    if (continuation.redispatchTargets.length > 0) {
+    if (action === "redispatch_reviewers" && continuation && continuation.redispatchTargets.length > 0) {
       return this.triggerAssociationDownstream(
         project,
         taskId,
@@ -1419,6 +1424,15 @@ export class Orchestrator {
           advanceSourceRevision: false,
           suppressSourceContentInDispatchMessage: true,
         },
+      );
+    }
+
+    if (action === "trigger_fallback_review" && fallbackFailedReviewer) {
+      return this.triggerReviewDownstream(
+        project,
+        taskId,
+        fallbackFailedReviewer.agent,
+        fallbackFailedReviewer.review,
       );
     }
 
