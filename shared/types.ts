@@ -181,6 +181,10 @@ export interface SubmitTaskPayload {
   mentionAgent?: string;
 }
 
+export interface CopyToClipboardPayload {
+  text: string;
+}
+
 export interface InitializeTaskPayload {
   projectId: string;
   title?: string;

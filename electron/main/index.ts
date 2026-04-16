@@ -1,8 +1,9 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { IPC_CHANNELS } from "@shared/ipc";
 import type {
+  CopyToClipboardPayload,
   CreateProjectPayload,
   DeleteProjectPayload,
   DeleteAgentPayload,
@@ -172,6 +173,9 @@ app.whenReady().then(async () => {
     IPC_CHANNELS.submitTask,
     (_event, payload: SubmitTaskPayload) => orchestrator.submitTask(payload),
   );
+  ipcMain.handle(IPC_CHANNELS.copyToClipboard, (_event, payload: CopyToClipboardPayload) => {
+    clipboard.writeText(payload.text);
+  });
   ipcMain.handle(
     IPC_CHANNELS.deleteProject,
     (_event, payload: DeleteProjectPayload) => orchestrator.deleteProject(payload),

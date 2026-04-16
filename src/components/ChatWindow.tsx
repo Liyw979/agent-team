@@ -5,6 +5,7 @@ import { getAgentColorToken } from "@/lib/agent-colors";
 import { mergeTaskChatMessages, type ChatMessageItem } from "@/lib/chat-messages";
 import { getMentionContext, getMentionOptions, type MentionContext } from "@/lib/chat-mentions";
 import { getPanelHeaderActionButtonClass } from "@/lib/panel-header-action-button";
+import { formatChatTranscript, getChatSenderLabel } from "@/lib/chat-transcript";
 
 interface ChatWindowProps {
   project: ProjectSnapshot | undefined;
@@ -21,15 +22,6 @@ const MENTION_MENU_HEADER_HEIGHT = 28;
 const MENTION_MENU_VERTICAL_PADDING = 16;
 const MENTION_MENU_GAP = 12;
 const MENTION_MENU_VIEWPORT_MARGIN = 12;
-const SYSTEM_SENDER_LABEL = "Ocustrater";
-
-function getAgentDisplayName(name: string) {
-  if (name === "system") {
-    return SYSTEM_SENDER_LABEL;
-  }
-  return name;
-}
-
 function getCaretCoordinates(textarea: HTMLTextAreaElement, position: number) {
   const div = document.createElement("div");
   const style = window.getComputedStyle(textarea);
@@ -114,7 +106,7 @@ function MessageBubble({
   const hasRevisionRequest = message.kinds.includes("revision-request");
   const hasTopologyBlocked = message.kinds.includes("topology-blocked");
   const agentColor = isAgent ? getAgentColorToken(message.sender) : null;
-  const senderLabel = isUser ? null : getAgentDisplayName(message.sender);
+  const senderLabel = isUser ? null : getChatSenderLabel(message.sender);
   const bubbleStyle =
     isAgent && agentColor
       ? {
@@ -207,17 +199,20 @@ export function ChatWindow({
   const [activeIndex, setActiveIndex] = useState(0);
   const [menuPosition, setMenuPosition] = useState({ left: 24, top: 12 });
   const [submitting, setSubmitting] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const composerRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messageViewportRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
+  const copyResetTimerRef = useRef<number | null>(null);
   const mentionQuery = mentionContext?.query ?? null;
 
   useEffect(() => {
     if (task) {
       setDraft("");
       setMentionContext(null);
+      setCopySuccess(false);
       setSubmitError(null);
       shouldStickToBottomRef.current = true;
       return;
@@ -241,6 +236,14 @@ export function ChatWindow({
     const defaultIndex = defaultAgentName ? mentionOptions.indexOf(defaultAgentName) : -1;
     setActiveIndex(defaultIndex >= 0 ? defaultIndex : 0);
   }, [defaultAgentName, mentionOptions]);
+
+  useEffect(() => {
+    return () => {
+      if (copyResetTimerRef.current !== null) {
+        window.clearTimeout(copyResetTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const viewport = messageViewportRef.current;
@@ -376,6 +379,32 @@ export function ChatWindow({
     }
   }
 
+  async function handleCopyTranscript() {
+    if (messages.length === 0) {
+      return;
+    }
+
+    setSubmitError(null);
+
+    try {
+      await window.agentFlow.copyToClipboard({
+        text: formatChatTranscript(messages),
+      });
+      setCopySuccess(true);
+
+      if (copyResetTimerRef.current !== null) {
+        window.clearTimeout(copyResetTimerRef.current);
+      }
+      copyResetTimerRef.current = window.setTimeout(() => {
+        setCopySuccess(false);
+        copyResetTimerRef.current = null;
+      }, 1600);
+    } catch (error) {
+      setCopySuccess(false);
+      setSubmitError(error instanceof Error ? error.message : "复制对话记录失败，请稍后重试。");
+    }
+  }
+
   return (
     <section className="PANEL-surface flex h-full min-h-0 flex-col rounded-[10px]">
       <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border/60 px-5">
@@ -386,15 +415,29 @@ export function ChatWindow({
           </span>
         </div>
         {task ? (
-          <button
-            type="button"
-            onClick={() => {
-              void handleOpenTaskSession();
-            }}
-            className={getPanelHeaderActionButtonClass("no-drag")}
-          >
-            打开 Zellij
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={messages.length === 0}
+              onClick={() => {
+                void handleCopyTranscript();
+              }}
+              className={getPanelHeaderActionButtonClass(
+                "no-drag disabled:cursor-not-allowed disabled:opacity-50",
+              )}
+            >
+              {copySuccess ? "已复制记录" : "复制对话记录"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void handleOpenTaskSession();
+              }}
+              className={getPanelHeaderActionButtonClass("no-drag")}
+            >
+              打开 Zellij
+            </button>
+          </div>
         ) : null}
       </header>
 

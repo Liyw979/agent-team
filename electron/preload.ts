@@ -3,6 +3,7 @@ import type {
   AgentRuntimeSnapshot,
   BuiltinAgentTemplateRecord,
   AgentFlowEvent,
+  CopyToClipboardPayload,
   CreateProjectPayload,
   DeleteProjectPayload,
   DeleteAgentPayload,
@@ -29,6 +30,8 @@ const api = {
   pickProjectPath: (): Promise<string | null> => ipcRenderer.invoke(IPC_CHANNELS.pickProjectPath),
   submitTask: (payload: SubmitTaskPayload): Promise<TaskSnapshot> =>
     ipcRenderer.invoke(IPC_CHANNELS.submitTask, payload),
+  copyToClipboard: (payload: CopyToClipboardPayload): Promise<void> =>
+    ipcRenderer.invoke(IPC_CHANNELS.copyToClipboard, payload),
   deleteProject: (payload: DeleteProjectPayload): Promise<ProjectSnapshot[]> =>
     ipcRenderer.invoke(IPC_CHANNELS.deleteProject, payload),
   deleteTask: (payload: DeleteTaskPayload): Promise<ProjectSnapshot> =>

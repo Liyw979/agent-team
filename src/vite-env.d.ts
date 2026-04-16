@@ -5,6 +5,7 @@ import type {
   AgentRuntimeSnapshot,
   BuiltinAgentTemplateRecord,
   AgentFlowEvent,
+  CopyToClipboardPayload,
   CreateProjectPayload,
   DeleteProjectPayload,
   DeleteAgentPayload,
@@ -29,6 +30,7 @@ declare global {
       createProject: (payload: CreateProjectPayload) => Promise<ProjectSnapshot>;
       pickProjectPath: () => Promise<string | null>;
       submitTask: (payload: SubmitTaskPayload) => Promise<TaskSnapshot>;
+      copyToClipboard: (payload: CopyToClipboardPayload) => Promise<void>;
       deleteProject: (payload: DeleteProjectPayload) => Promise<ProjectSnapshot[]>;
       deleteTask: (payload: DeleteTaskPayload) => Promise<ProjectSnapshot>;
       openTaskSession: (payload: OpenTaskSessionPayload) => Promise<void>;
