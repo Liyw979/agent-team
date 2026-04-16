@@ -1126,6 +1126,183 @@ test("审查 Agent 的结构化 prompt 不会混入 Project Git Diff Summary", a
   assert.equal(promptByAgent.get("Ops")?.length, 1);
 });
 
+test("修复首个失败 reviewer 后，Build 下一轮不会立刻全量重派全部 reviewer", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  const orchestrator = createTestOrchestrator({
+    userDataPath,
+    enableEventStream: false,
+    zellijManager: {
+      isAvailable: async () => true,
+      createTaskSession: async () => "oap-project-task",
+      createPanelBindings: () => [],
+      materializePanelBindings: async () => [],
+      openTaskSession: async () => undefined,
+      deleteTaskSession: async () => undefined,
+      setOpenCodeAttachBaseUrl: () => undefined,
+    } as never,
+  });
+
+  const typed = orchestrator as unknown as Orchestrator & {
+    opencodeClient: {
+      createSession: (projectPath: string, title: string) => Promise<string>;
+      reloadConfig: () => Promise<void>;
+    };
+    opencodeRunner: {
+      run: (payload: { agent: string; content: string }) => Promise<{
+        status: "completed";
+        finalMessage: string;
+        fallbackMessage: null;
+        messageId: string;
+        timestamp: string;
+        rawMessage: {
+          content: string;
+          error: null;
+        };
+      }>;
+    };
+  };
+  stubOpenCodeAttachBaseUrl(orchestrator);
+
+  const completedResponse = (agent: string, count: number, content: string) => ({
+    status: "completed" as const,
+    finalMessage: content,
+    fallbackMessage: null,
+    messageId: `message:${agent}:${count}`,
+    timestamp: `2026-04-16T00:01:${String(count).padStart(2, "0")}.000Z`,
+    rawMessage: {
+      content,
+      error: null,
+    },
+  });
+
+  let buildRunCount = 0;
+  let unitTestRunCount = 0;
+  let taskReviewRunCount = 0;
+  let codeReviewRunCount = 0;
+  let releaseUnitTestSecondRun: (() => void) | null = null;
+  let releaseTaskReviewSecondRun: (() => void) | null = null;
+  let releaseCodeReviewSecondRun: (() => void) | null = null;
+  const unitTestSecondRunGate = new Promise<void>((resolve) => {
+    releaseUnitTestSecondRun = resolve;
+  });
+  const taskReviewSecondRunGate = new Promise<void>((resolve) => {
+    releaseTaskReviewSecondRun = resolve;
+  });
+  const codeReviewSecondRunGate = new Promise<void>((resolve) => {
+    releaseCodeReviewSecondRun = resolve;
+  });
+
+  typed.opencodeClient.createSession = async (_projectPath, title) => `session:${title}`;
+  typed.opencodeClient.reloadConfig = async () => undefined;
+  typed.opencodeRunner.run = async ({ agent }) => {
+    if (agent === "Build") {
+      buildRunCount += 1;
+      return buildRunCount === 1
+        ? completedResponse(agent, buildRunCount, "Build 第 1 轮实现完成。")
+        : completedResponse(agent, buildRunCount, "Build 已修复 UnitTest 的问题。");
+    }
+    if (agent === "UnitTest") {
+      unitTestRunCount += 1;
+      if (unitTestRunCount === 1) {
+        return completedResponse(
+          agent,
+          unitTestRunCount,
+          "UnitTest 第 1 轮未通过。\n\n<revision_request>请修复 UnitTest 第 1 轮问题。</revision_request>",
+        );
+      }
+      await unitTestSecondRunGate;
+      return completedResponse(agent, unitTestRunCount, "UnitTest: ok");
+    }
+    if (agent === "TaskReview") {
+      taskReviewRunCount += 1;
+      if (taskReviewRunCount === 1) {
+        return completedResponse(
+          agent,
+          taskReviewRunCount,
+          "TaskReview 第 1 轮未通过。\n\n<revision_request>请修复 TaskReview 第 1 轮问题。</revision_request>",
+        );
+      }
+      await taskReviewSecondRunGate;
+      return completedResponse(agent, taskReviewRunCount, "TaskReview: ok");
+    }
+    codeReviewRunCount += 1;
+    if (codeReviewRunCount === 1) {
+      return completedResponse(
+        agent,
+        codeReviewRunCount,
+        "CodeReview 第 1 轮未通过。\n\n<revision_request>请修复 CodeReview 第 1 轮问题。</revision_request>",
+      );
+    }
+    await codeReviewSecondRunGate;
+    return completedResponse(agent, codeReviewRunCount, "CodeReview: ok");
+  };
+
+  let project = await orchestrator.createProject({ path: projectPath });
+  project = await addBuiltinAgents(
+    orchestrator,
+    project.project.id,
+    ["Build", "UnitTest", "TaskReview", "CodeReview"],
+  );
+  await orchestrator.saveTopology({
+    projectId: project.project.id,
+    topology: {
+      ...project.topology,
+      startAgentId: "Build",
+      nodes: ["Build", "UnitTest", "TaskReview", "CodeReview"],
+      edges: [
+        { source: "Build", target: "UnitTest", triggerOn: "association" },
+        { source: "Build", target: "TaskReview", triggerOn: "association" },
+        { source: "Build", target: "CodeReview", triggerOn: "association" },
+        { source: "UnitTest", target: "Build", triggerOn: "review_fail" },
+        { source: "TaskReview", target: "Build", triggerOn: "review_fail" },
+        { source: "CodeReview", target: "Build", triggerOn: "review_fail" },
+      ],
+    },
+  });
+
+  const submittedTask = await orchestrator.submitTask({
+    projectId: project.project.id,
+    content: "@Build 请完成这个需求。",
+  });
+
+  try {
+    await waitForValue(
+      () => ({
+        buildRunCount,
+        unitTestRunCount,
+        taskReviewRunCount,
+        codeReviewRunCount,
+      }),
+      (counts) => counts.buildRunCount === 2 && counts.unitTestRunCount >= 2,
+      5000,
+    );
+
+    assert.equal(buildRunCount, 2);
+    assert.equal(unitTestRunCount, 2);
+    assert.equal(
+      taskReviewRunCount,
+      1,
+      "Build 修完 UnitTest 后，不应该立刻把 TaskReview 拉进第 2 轮",
+    );
+    assert.equal(
+      codeReviewRunCount,
+      1,
+      "Build 修完 UnitTest 后，不应该立刻把 CodeReview 拉进第 2 轮",
+    );
+  } finally {
+    releaseUnitTestSecondRun?.();
+    releaseTaskReviewSecondRun?.();
+    releaseCodeReviewSecondRun?.();
+    await waitForTaskSnapshot(
+      orchestrator,
+      submittedTask.task.id,
+      (snapshot) => isTerminalTaskStatus(snapshot.task.status),
+      5000,
+    ).catch(() => undefined);
+  }
+});
+
 test("审查 Agent 返回 revision_request 后会在其余 reviewer 收齐后回流到 Build", async () => {
   const userDataPath = createTempDir();
   const projectPath = createTempDir();

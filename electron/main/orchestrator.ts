@@ -120,6 +120,7 @@ interface TaskRuntimeState {
     gitDiffSummary?: string;
   }>;
   pendingRevisionRequestsByAgent: Map<string, ParsedReview>;
+  pendingAssociationRepairTargetsBySource: Map<string, string[]>;
 }
 
 type AgentExecutionPrompt =
@@ -686,6 +687,7 @@ export class Orchestrator {
       queuedPromptsByAgent: new Map(),
       associationBatchPromptBySource: new Map(),
       pendingRevisionRequestsByAgent: new Map(),
+      pendingAssociationRepairTargetsBySource: new Map(),
     });
 
     const snapshot = this.hydrateTask(taskId);
@@ -1157,14 +1159,25 @@ export class Orchestrator {
   ): Promise<number> {
     const topology = this.store.getTopology(project.id);
     const scheduler = this.createScheduler(taskId, topology);
+    const runtime = this.getRuntime(taskId);
+    const pendingRepairTargets = runtime.pendingAssociationRepairTargetsBySource.get(sourceAgentId);
+    const restrictTargets = pendingRepairTargets
+      ? new Set(pendingRepairTargets)
+      : options.restrictTargets;
     const plan = scheduler.planAssociationDispatch(
       sourceAgentId,
       sourceContent,
       this.buildSchedulerAgentStates(taskId),
-      options,
+      {
+        ...options,
+        restrictTargets,
+      },
     );
     if (!plan) {
       return 0;
+    }
+    if (pendingRepairTargets) {
+      runtime.pendingAssociationRepairTargetsBySource.delete(sourceAgentId);
     }
 
     if (!this.shouldSuppressDuplicateDispatchMessage(project.id, taskId, sourceAgentId, plan.triggerTargets)) {
@@ -1201,7 +1214,6 @@ export class Orchestrator {
       includeInitialTask,
     );
 
-    const runtime = this.getRuntime(taskId);
     runtime.associationBatchPromptBySource.set(sourceAgentId, {
       userMessage: forwardedContext.userMessage,
       agentMessage: forwardedContext.agentMessage,
@@ -1427,6 +1439,10 @@ export class Orchestrator {
       if (!storedReview) {
         return 0;
       }
+      runtime.pendingAssociationRepairTargetsBySource.set(
+        continuation.sourceAgentId,
+        [continuation.repairReviewerAgentId],
+      );
       runtime.pendingRevisionRequestsByAgent.delete(continuation.repairReviewerAgentId);
       return this.triggerReviewDownstream(
         project,
@@ -2265,6 +2281,7 @@ export class Orchestrator {
         queuedPromptsByAgent: new Map(),
         associationBatchPromptBySource: new Map(),
         pendingRevisionRequestsByAgent: new Map(),
+        pendingAssociationRepairTargetsBySource: new Map(),
       };
       this.taskRuntime.set(taskId, runtime);
     }
