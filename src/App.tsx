@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AgentConfigModal, NEW_AGENT_DRAFT_PATH } from "./components/AgentConfigModal";
 import { ChatWindow } from "./components/ChatWindow";
 import { SidebarList } from "./components/SidebarList";
@@ -56,6 +56,19 @@ function getAgentMetricLabel(messageCount: number) {
   return `消息 · ${messageCount}`;
 }
 
+export function getOpenAgentTerminalButtonLabel(isOpeningTerminal: boolean) {
+  return isOpeningTerminal ? "打开中..." : "打开终端";
+}
+
+export function getOpenAgentTerminalButtonTitle(
+  agentDisplayName: string,
+  canOpenTerminal: boolean,
+) {
+  return canOpenTerminal
+    ? `打开 ${agentDisplayName} 对应的 OpenCode 独立终端窗口`
+    : "请先选择一个 Task";
+}
+
 function App() {
   const {
     projects,
@@ -77,8 +90,8 @@ function App() {
   const [runtimeRefreshToken, setRuntimeRefreshToken] = useState(0);
   const [draggingAgentId, setDraggingAgentId] = useState<string | null>(null);
   const [dragOverAgentId, setDragOverAgentId] = useState<string | null>(null);
-  const [openingAgentPaneId, setOpeningAgentPaneId] = useState<string | null>(null);
-  const [agentPaneActionError, setAgentPaneActionError] = useState<string | null>(null);
+  const [openingAgentTerminalId, setOpeningAgentTerminalId] = useState<string | null>(null);
+  const [agentTerminalActionError, setAgentTerminalActionError] = useState<string | null>(null);
   const suppressNextAgentCardClickRef = useRef(false);
   const runtimeEventContextRef = useRef<{
     projects: ProjectSnapshot[];
@@ -248,8 +261,8 @@ function App() {
   useEffect(() => {
     setDraggingAgentId(null);
     setDragOverAgentId(null);
-    setOpeningAgentPaneId(null);
-    setAgentPaneActionError(null);
+    setOpeningAgentTerminalId(null);
+    setAgentTerminalActionError(null);
   }, [activeProject?.project.id, activeTaskView?.task.id]);
 
   const panelMappings = activeTaskView?.panels ?? [];
@@ -369,25 +382,25 @@ function App() {
     }, 0);
   }
 
-  async function handleOpenAgentPane(agentName: string) {
-    if (!activeProject || !activeTaskView || openingAgentPaneId === agentName) {
+  async function handleOpenAgentTerminal(agentName: string) {
+    if (!activeProject || !activeTaskView || openingAgentTerminalId === agentName) {
       return;
     }
 
-    setOpeningAgentPaneId(agentName);
-    setAgentPaneActionError(null);
+    setOpeningAgentTerminalId(agentName);
+    setAgentTerminalActionError(null);
     try {
-      await window.agentFlow.openAgentPane({
+      await window.agentFlow.openAgentTerminal({
         projectId: activeProject.project.id,
         taskId: activeTaskView.task.id,
         agentName,
       });
     } catch (error) {
-      setAgentPaneActionError(
-        error instanceof Error ? error.message : `打开 ${agentName} 对应 pane 失败，请稍后重试。`,
+      setAgentTerminalActionError(
+        error instanceof Error ? error.message : `打开 ${agentName} 对应终端失败，请稍后重试。`,
       );
     } finally {
-      setOpeningAgentPaneId((current) => (current === agentName ? null : current));
+      setOpeningAgentTerminalId((current) => (current === agentName ? null : current));
     }
   }
 
@@ -539,9 +552,9 @@ function App() {
                             : "当前还没有 panel 绑定记录"}
                         </span>
                       </div>
-                      {agentPaneActionError ? (
+                      {agentTerminalActionError ? (
                         <div className="rounded-[8px] border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-700">
-                          {agentPaneActionError}
+                          {agentTerminalActionError}
                         </div>
                       ) : null}
                     </div>
@@ -552,8 +565,8 @@ function App() {
                         const agentColor = getAgentColorToken(agent.name);
                         const isDragging = draggingAgentId === agent.name;
                         const isDragOver = dragOverAgentId === agent.name && draggingAgentId !== agent.name;
-                        const isOpeningPane = openingAgentPaneId === agent.name;
-                        const canOpenPane = Boolean(activeTaskView);
+                        const isOpeningTerminal = openingAgentTerminalId === agent.name;
+                        const canOpenTerminal = Boolean(activeTaskView);
                         return (
                           <div
                             key={agent.id}
@@ -652,22 +665,18 @@ function App() {
                                   <button
                                     type="button"
                                     draggable={false}
-                                    disabled={!canOpenPane || isOpeningPane}
-                                    title={
-                                      canOpenPane
-                                        ? `打开 ${agent.displayName} 对应的 OpenCode 窗口`
-                                        : "请先选择一个 Task"
-                                    }
+                                    disabled={!canOpenTerminal || isOpeningTerminal}
+                                    title={getOpenAgentTerminalButtonTitle(agent.displayName, canOpenTerminal)}
                                     onPointerDown={(event) => {
                                       event.stopPropagation();
                                     }}
                                     onClick={(event) => {
                                       event.stopPropagation();
-                                      void handleOpenAgentPane(agent.name);
+                                      void handleOpenAgentTerminal(agent.name);
                                     }}
                                     className="no-drag inline-flex items-center justify-center rounded-[6px] border border-border/70 bg-card/90 px-2.5 py-1 text-[11px] font-medium text-foreground/75 shadow-sm transition hover:border-primary disabled:cursor-not-allowed disabled:hover:border-border/70 disabled:opacity-45"
                                   >
-                                    {isOpeningPane ? "打开中..." : "打开 Pane"}
+                                    {getOpenAgentTerminalButtonLabel(isOpeningTerminal)}
                                   </button>
                                 </div>
                               </div>

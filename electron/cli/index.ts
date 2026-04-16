@@ -112,7 +112,7 @@ function createTopologyEdgeId(source: string, target: string, triggerOn: Topolog
   return `${source}__${target}__${triggerOn}`;
 }
 
-function buildOpenPanelCommand(panel: TaskPanelRecord) {
+function buildOpenAgentTerminalCommand(panel: TaskPanelRecord) {
   return buildCliPanelFocusCommand(panel.taskId, panel.agentName);
 }
 
@@ -241,7 +241,7 @@ function printPanelOpenCommand(taskSnapshot: TaskSnapshot, agentName: string) {
     return;
   }
 
-  process.stdout.write(`${buildOpenPanelCommand(panel)}\n`);
+  process.stdout.write(`${buildOpenAgentTerminalCommand(panel)}\n`);
 }
 
 function padRight(value: string, width: number) {
@@ -329,7 +329,7 @@ function buildTaskInterface(taskSnapshot: TaskSnapshot) {
     taskSnapshot.panels.length > 0
       ? taskSnapshot.panels.flatMap((panel) => [
           truncate(`${panel.agentName} | ${panel.paneId}`, leftWidth - 4),
-          ...wrapText(`open: ${buildOpenPanelCommand(panel)}`, leftWidth - 4),
+          ...wrapText(`open: ${buildOpenAgentTerminalCommand(panel)}`, leftWidth - 4),
         ])
       : taskSnapshot.task.zellijSessionId
         ? wrapText(`open: ${buildAttachSessionCommand(taskSnapshot.task.zellijSessionId)}`, leftWidth - 4)
@@ -541,7 +541,7 @@ function buildTaskDebugInfo(taskSnapshot: TaskSnapshot) {
       sessionName: panel.sessionName,
       paneId: panel.paneId,
       cwd: panel.cwd,
-      openCommand: buildOpenPanelCommand(panel),
+      openCommand: buildOpenAgentTerminalCommand(panel),
     })),
     messages: taskSnapshot.messages,
   };
@@ -582,7 +582,7 @@ function printTaskDebugInfo(taskSnapshot: TaskSnapshot, full = false) {
   printSection("Chat Transcript");
   printChatTranscript(debugInfo.chatTranscript);
 
-  printSection("Panel Open Commands");
+  printSection("Agent Terminal Open Commands");
   if (debugInfo.panels.length > 0) {
     for (const panel of debugInfo.panels) {
       process.stdout.write(`- ${panel.agentName}: ${panel.openCommand}\n`);
@@ -840,7 +840,7 @@ async function handleTasks(context: CliContext, parsed: ParsedArgv) {
       process.stdout.write(
         `- ${panel.agentName} | session=${panel.sessionName} | pane=${panel.paneId} | cwd=${panel.cwd}\n`,
       );
-      process.stdout.write(`  open: ${buildOpenPanelCommand(panel)}\n`);
+      process.stdout.write(`  open: ${buildOpenAgentTerminalCommand(panel)}\n`);
     }
     return;
   }
@@ -1077,12 +1077,12 @@ async function handlePanels(context: CliContext, parsed: ParsedArgv) {
     const taskId = parsed.positionals[2] ?? "";
     const agentName = parsed.positionals[3] ?? "";
     findTaskOrThrow(project, taskId);
-    await context.orchestrator.focusAgentPANEL({
+    await context.orchestrator.openAgentTerminal({
       projectId: project.project.id,
       taskId,
       agentName,
     });
-    process.stdout.write(`已请求打开 ${agentName} 对应的 panel。\n`);
+    process.stdout.write(`已请求打开 ${agentName} 对应的 OpenCode 独立终端。\n`);
     return;
   }
 

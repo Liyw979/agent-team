@@ -112,7 +112,7 @@
 
 - GUI 聊天区标题栏支持直接打开当前 Task 对应的 Zellij session；打开前会先补齐当前 Task 的全部 Agent pane。
 - GUI 聊天区里的 `Task Started` 系统消息会附带当前 Task 的 `Zellij Session` 名称与可直接执行的 attach 调试命令，方便 debug 当前会话。
-- 右下角团队成员面板中，每个 Agent 名称旁都会提供“打开 Pane”按钮；点击后会优先补齐当前 Task 的 pane 绑定，并直接打开该 Agent 自己的 OpenCode attach 独立终端窗口，而不是带出整个 Zellij session 网格。
+- 右下角团队成员面板中，每个 Agent 名称旁都会提供“打开终端”按钮；点击后会优先补齐当前 Task 的 pane 绑定，并直接打开该 Agent 自己的 OpenCode attach 独立终端窗口，而不是带出整个 Zellij session 网格。
 - Zellij pane 顺序只跟随前端拓扑 / 团队成员区里用户拖拽后保存的 Agent 排序，不再根据运行态动态重排。
 - 全新 Task 首次初始化且当前还没有托管 pane 时，Zellij 会优先按“先横向后换行”的 tiled grid 创建初始 pane 布局，并限制最多两排；内部 pane 会按当前保存的 Agent 顺序排布。
 - 左侧 Task 列表会定期与 Zellij session 状态同步；如果对应 session 已被外部删除，或只剩 `EXITED - attach to resurrect` 这类非活跃残留，只有已经结束的 Task 才会自动从列表中移除；`pending / running / waiting` 等未结束 Task 会保留，避免正在运行的任务被误删。

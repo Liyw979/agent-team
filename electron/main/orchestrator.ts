@@ -20,7 +20,7 @@ import {
   type InitializeTaskPayload,
   getProjectNameFromPath,
   type MessageRecord,
-  type OpenAgentPanePayload,
+  type OpenAgentTerminalPayload,
   type OpenTaskSessionPayload,
   type ProjectRecord,
   type ProjectSnapshot,
@@ -456,7 +456,7 @@ export class Orchestrator {
     });
   }
 
-  async focusAgentPANEL(payload: OpenAgentPanePayload) {
+  async openAgentTerminal(payload: OpenAgentTerminalPayload) {
     const project = this.store.getProject(payload.projectId);
     const task = this.store.getTask(payload.taskId);
     if (task.projectId !== project.id) {

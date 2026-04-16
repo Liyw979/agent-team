@@ -328,10 +328,6 @@ export class ZellijManager {
     ]).catch(() => undefined);
   }
 
-  async focusAgentPANEL(panel: TaskPanelRecord): Promise<void> {
-    throw new Error("focusAgentPANEL 需要携带 Agent OpenCode session 信息，请改用 openAgentTerminal");
-  }
-
   async openAgentTerminal(spec: AgentTerminalSpec): Promise<void> {
     await this.waitForOpenCodeAttachReady();
     const { shellCommand } = this.buildOpencodePaneCommand(
@@ -522,7 +518,7 @@ export class ZellijManager {
       return false;
     }
 
-    const launcherPath = path.join(
+    const launcherPath = this.joinPlatformPath(
       this.ensurePaneRuntimeDir(cwd, sessionName, agentName),
       "launch-pane.cmd",
     );
@@ -638,7 +634,7 @@ export class ZellijManager {
   }
 
   protected ensurePaneRuntimeDir(cwd: string, sessionName: string, agentName: string): string {
-    const runtimeDir = path.join(
+    const runtimeDir = this.joinPlatformPath(
       cwd,
       ".agentflow",
       "opencode-pane-runtime",
@@ -654,7 +650,7 @@ export class ZellijManager {
   }
 
   protected ensureWindowsPaneLauncher(runtimeDir: string, shellCommand: string): string {
-    const launcherPath = path.join(runtimeDir, "launch-pane.cmd");
+    const launcherPath = this.joinPlatformPath(runtimeDir, "launch-pane.cmd");
     const normalizedContent = shellCommand.startsWith("@echo off")
       ? `${shellCommand}\r\n`
       : ["@echo off", shellCommand, ""].join("\r\n");
@@ -664,6 +660,12 @@ export class ZellijManager {
       "utf8",
     );
     return launcherPath;
+  }
+
+  protected joinPlatformPath(...segments: string[]): string {
+    return this.getHostPlatform() === "win32"
+      ? path.win32.join(...segments)
+      : path.join(...segments);
   }
 
   protected async waitForOpenCodeAttachReady(timeoutMs = 8_000): Promise<boolean> {

@@ -8,7 +8,7 @@ import type {
   DeleteAgentPayload,
   DeleteTaskPayload,
   GetTaskRuntimePayload,
-  OpenAgentPanePayload,
+  OpenAgentTerminalPayload,
   OpenTaskSessionPayload,
   ProjectSnapshot,
   ReadAgentFilePayload,
@@ -33,8 +33,8 @@ const api = {
     ipcRenderer.invoke(IPC_CHANNELS.deleteProject, payload),
   deleteTask: (payload: DeleteTaskPayload): Promise<ProjectSnapshot> =>
     ipcRenderer.invoke(IPC_CHANNELS.deleteTask, payload),
-  openAgentPane: (payload: OpenAgentPanePayload): Promise<void> =>
-    ipcRenderer.invoke(IPC_CHANNELS.openAgentPane, payload),
+  openAgentTerminal: (payload: OpenAgentTerminalPayload): Promise<void> =>
+    ipcRenderer.invoke(IPC_CHANNELS.openAgentTerminal, payload),
   openTaskSession: (payload: OpenTaskSessionPayload): Promise<void> =>
     ipcRenderer.invoke(IPC_CHANNELS.openTaskSession, payload),
   readAgentFile: (payload: ReadAgentFilePayload) =>

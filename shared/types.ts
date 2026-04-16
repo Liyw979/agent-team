@@ -242,7 +242,7 @@ export interface OpenTaskSessionPayload {
   taskId: string;
 }
 
-export interface OpenAgentPanePayload {
+export interface OpenAgentTerminalPayload {
   projectId: string;
   taskId: string;
   agentName: string;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ProjectSnapshot } from "@shared/types";
 import { cn } from "@/lib/utils";
