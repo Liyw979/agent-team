@@ -232,6 +232,10 @@ npm run build
 npm run dist:win
 ```
 
+交付前检查：
+
+- 每次交付前必须在仓库根目录运行 `npm test`，并以测试通过作为交付前置条件。
+
 打包注意事项：
 
 - Windows 打包前必须先刷新当前源码对应的 Electron 产物，禁止直接复用旧 `out/`。
