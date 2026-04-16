@@ -20,7 +20,10 @@ test("Review agents keep the response contract in the system prompt", () => {
 
   assert.match(prompt, /`\[From BA Agent\]`/);
   assert.doesNotMatch(prompt, /\[@/);
-  assert.match(prompt, /<revision_request>/);
+  assert.match(
+    prompt,
+    new RegExp(REVIEW_RESPONSE_LABEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+  );
 });
 
 test("Non-review agents do not inject a system prompt", () => {

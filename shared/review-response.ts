@@ -1,5 +1,6 @@
 export const REVIEW_RESPONSE_LABEL = "<revision_request>";
 export const REVIEW_RESPONSE_END_LABEL = "</revision_request>";
+const REVIEW_RESPONSE_TAG_PATTERN = /<\/?revision_request>/gu;
 
 export function formatReviewResponseBlock(content: string): string {
   const normalized = content.trim();
@@ -7,27 +8,11 @@ export function formatReviewResponseBlock(content: string): string {
 }
 
 export function stripLeadingReviewResponseLabel(content: string): string {
-  return content
-    .replace(/^<revision_request>\s*/u, "")
-    .replace(/\s*<\/revision_request>\s*$/u, "")
-    .trim();
+  return content.replace(REVIEW_RESPONSE_TAG_PATTERN, "").trim();
 }
 
 export function extractLastReviewResponse(content: string): string {
-  const marker = /<revision_request>([\s\S]*?)<\/revision_request>/gu;
-  let lastMatch: RegExpExecArray | null = null;
-  let match: RegExpExecArray | null = marker.exec(content);
-
-  while (match) {
-    lastMatch = match;
-    match = marker.exec(content);
-  }
-
-  if (!lastMatch) {
-    return "";
-  }
-
-  return (lastMatch[1] ?? "").trim();
+  return extractTrailingReviewResponseBlock(content)?.response ?? "";
 }
 
 export function extractTrailingReviewResponseBlock(content: string): {
@@ -46,7 +31,22 @@ export function extractTrailingReviewResponseBlock(content: string): {
   }
 
   if (!lastMatch || typeof lastMatch.index !== "number") {
-    return null;
+    const markerIndex = trimmed.lastIndexOf(REVIEW_RESPONSE_LABEL);
+    if (markerIndex < 0) {
+      return null;
+    }
+
+    const rawBlock = trimmed.slice(markerIndex).trim();
+    const response = stripLeadingReviewResponseLabel(rawBlock);
+    if (!response) {
+      return null;
+    }
+
+    return {
+      body: trimmed.slice(0, markerIndex).trim(),
+      response,
+      rawBlock,
+    };
   }
 
   const rawBlock = lastMatch[0].trim();
@@ -58,4 +58,18 @@ export function extractTrailingReviewResponseBlock(content: string): {
     response,
     rawBlock,
   };
+}
+
+export function stripReviewResponseMarkup(content: string): string {
+  const trimmed = content.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const parsed = extractTrailingReviewResponseBlock(trimmed);
+  if (!parsed) {
+    return stripLeadingReviewResponseLabel(trimmed);
+  }
+
+  return [parsed.body, parsed.response].filter(Boolean).join("\n\n").trim();
 }

@@ -1101,6 +1101,37 @@ test("审视通过但没有可展示结果正文时返回简洁兜底文案", ()
   assert.equal(displayContent, "通过");
 });
 
+test("审视不通过且只返回 revision_request 标签时，群聊展示会去掉标签", () => {
+  const orchestrator = createTestOrchestrator({
+    userDataPath: createTempDir(),
+    enableEventStream: false,
+  });
+
+  const displayContent = (
+    orchestrator as unknown as {
+      createDisplayContent: (
+        parsedReview: {
+          cleanContent: string;
+          decision: "pass" | "needs_revision" | "unknown";
+          opinion: string | null;
+          rawDecisionBlock: string | null;
+        },
+        fallbackMessage?: string | null,
+      ) => string;
+    }
+  ).createDisplayContent(
+    {
+      cleanContent: "",
+      decision: "needs_revision",
+      opinion: "请继续补充实现依据。",
+      rawDecisionBlock: "<revision_request> 请继续补充实现依据。",
+    },
+    null,
+  );
+
+  assert.equal(displayContent, "请继续补充实现依据。");
+});
+
 test("群聊保留 @Agent，但下游转发读取的用户消息会去掉寻址 @Agent", async () => {
   const userDataPath = createTempDir();
   const projectPath = createTempDir();

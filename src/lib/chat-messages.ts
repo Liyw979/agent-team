@@ -8,6 +8,7 @@ import {
 import {
   extractLastReviewResponse,
   formatReviewResponseBlock,
+  stripReviewResponseMarkup,
   stripLeadingReviewResponseLabel,
 } from "@shared/review-response";
 
@@ -43,7 +44,7 @@ function stripTrailingMentions(content: string): string {
 }
 
 function stripRevisionFeedbackLabel(content: string): string {
-  return stripLeadingReviewResponseLabel(content);
+  return stripLeadingReviewResponseLabel(stripReviewResponseMarkup(content));
 }
 
 function getRevisionRequestFeedback(content: string): string {
@@ -85,7 +86,7 @@ function extractAgentFinalDisplayContent(message: MessageRecord): string {
     return "";
   }
 
-  const trailingSection = extractTrailingTopLevelSection(rawContent);
+  const trailingSection = extractTrailingTopLevelSection(stripReviewResponseMarkup(rawContent));
   const normalized = trailingSection
     .replace(/\n(?:---|\*\*\*)(?:\s*\n?)*$/u, "")
     .trim();
@@ -117,7 +118,7 @@ function buildMergedRevisionRequestContent(previous: ChatMessageItem, current: M
   }
 
   return formatRevisionRequestContent(
-    `${summary}\n\n${formatReviewResponseBlock(feedback)}`,
+    `${summary}\n\n${feedback}`,
     current.meta?.targetAgentId,
   );
 }
@@ -178,7 +179,10 @@ function getDisplayContent(message: MessageRecord): string {
     );
   }
   if (message.meta?.kind === "revision-request") {
-    return formatRevisionRequestContent(message.content, message.meta?.targetAgentId);
+    return formatRevisionRequestContent(
+      stripTrailingMentions(stripReviewResponseMarkup(message.content)),
+      message.meta?.targetAgentId,
+    );
   }
   return message.content;
 }

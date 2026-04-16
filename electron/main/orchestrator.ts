@@ -48,6 +48,7 @@ import {
 import {
   extractTrailingReviewResponseBlock,
   formatReviewResponseBlock,
+  stripReviewResponseMarkup,
 } from "@shared/review-response";
 import { buildZellijMissingReminder } from "@shared/zellij";
 import { CustomAgentConfigService } from "./custom-agent-config";
@@ -1861,7 +1862,7 @@ export class Orchestrator {
 
     const opinion = parsedReview.opinion?.trim();
     if (opinion) {
-      return formatReviewResponseBlock(opinion);
+      return stripReviewResponseMarkup(formatReviewResponseBlock(opinion));
     }
 
     if (parsedReview.decision === "needs_revision") {
