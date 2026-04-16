@@ -90,6 +90,53 @@ test("合并回应消息时保留结果正文并追加一份回应", () => {
   );
 });
 
+test("reviewer 的回流消息即使被其他消息隔开，也应继续合并回原结果卡片", () => {
+  const reviewContent = "我不认同现在可以直接交付。请继续补充这些信息后再确认是否达到可交付标准。";
+
+  const merged = mergeTaskChatMessages([
+    createMessage({
+      id: "task-review-final",
+      sender: "TaskReview",
+      timestamp: "2026-04-17T02:20:45.000Z",
+      content: reviewContent,
+      meta: {
+        kind: "agent-final",
+        reviewDecision: "needs_revision",
+        finalMessage: reviewContent,
+      },
+    }),
+    createMessage({
+      id: "unit-test-final",
+      sender: "UnitTest",
+      timestamp: "2026-04-17T02:20:52.000Z",
+      content: "测试已经有了，整体也符合大部分标准。",
+      meta: {
+        kind: "agent-final",
+        reviewDecision: "pass",
+        finalMessage: "测试已经有了，整体也符合大部分标准。",
+      },
+    }),
+    createMessage({
+      id: "task-review-revision-request",
+      sender: "TaskReview",
+      timestamp: "2026-04-17T02:20:52.500Z",
+      content: formatRevisionRequestContent(reviewContent, "Build"),
+      meta: {
+        kind: "revision-request",
+        targetAgentId: "Build",
+      },
+    }),
+  ]);
+
+  assert.equal(merged.length, 2);
+  assert.equal(
+    merged[0]?.content,
+    "我不认同现在可以直接交付。请继续补充这些信息后再确认是否达到可交付标准。\n\n@Build",
+  );
+  assert.deepEqual(merged[0]?.kinds, ["agent-final", "revision-request"]);
+  assert.equal(merged[1]?.sender, "UnitTest");
+});
+
 test("revision-request 单独展示时会移除标签后再追加 mention", () => {
   const merged = mergeTaskChatMessages([
     createMessage({

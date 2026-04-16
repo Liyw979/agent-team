@@ -160,6 +160,33 @@ function shouldMergeRevisionRequest(previous: ChatMessageItem, current: MessageR
   );
 }
 
+function findRevisionRequestMergeTargetIndex(
+  merged: ChatMessageItem[],
+  current: MessageRecord,
+): number {
+  if (current.meta?.kind !== "revision-request" || !isNonSystemAgent(current.sender)) {
+    return -1;
+  }
+
+  for (let index = merged.length - 1; index >= 0; index -= 1) {
+    const candidate = merged[index];
+    if (!candidate || candidate.sender !== current.sender) {
+      continue;
+    }
+    if (candidate.kinds.includes("revision-request")) {
+      continue;
+    }
+    if (
+      candidate.kinds.at(-1) === "agent-final" &&
+      candidate.metaChain.at(-1)?.reviewDecision === "needs_revision"
+    ) {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
 function shouldMergeMessages(previous: ChatMessageItem | undefined, current: MessageRecord) {
   if (!previous || previous.sender !== current.sender || !isNonSystemAgent(previous.sender)) {
     return false;
@@ -209,6 +236,19 @@ export function mergeTaskChatMessages(messages: MessageRecord[]): ChatMessageIte
       last.kinds.push(message.meta?.kind ?? "");
       last.metaChain.push(message.meta);
       continue;
+    }
+
+    const revisionRequestMergeTargetIndex = findRevisionRequestMergeTargetIndex(merged, message);
+    if (revisionRequestMergeTargetIndex >= 0) {
+      const target = merged[revisionRequestMergeTargetIndex];
+      if (target) {
+        target.id = `${target.id}:${message.id}`;
+        target.timestamp = message.timestamp;
+        target.content = buildMergedRevisionRequestContent(target, message);
+        target.kinds.push(message.meta?.kind ?? "");
+        target.metaChain.push(message.meta);
+        continue;
+      }
     }
 
     merged.push({
