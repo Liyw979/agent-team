@@ -31,6 +31,7 @@
 - 只允许用户自定义 prompt；当前 Project 可以不设置可写 Agent，也可以从已写入当前 Project 的 Agent 中指定 1 个作为可写 Agent。
 - 同一 Project 中最多只能有 1 个可写 Agent；只要当前 Project 已写入 `Build`，`Build` 就会固定为唯一可写 Agent。
 - `Build` 作为默认内置模板提供，但继续使用 OpenCode 自带 prompt，不支持在 AgentFlow 中修改 prompt、覆盖模板或改名；只能按需写入当前 Project 或从当前 Project 删除。
+- `UnitTest` 默认内置模板使用“单元测试审查”文案：先检查当前改动是否提供了测试；若没有测试，要明确指出缺失测试。若存在测试，再检查是否遵循“一个功能点一个测试、分支覆盖完全、每个测试有注释、执行极快、尽量使用纯函数而不是 Mock”四条标准，并给出修改建议。
 - 一旦当前 Project 出现 Task 启动记录，Agent 与内置模板配置都会被锁定，不允许继续修改。
 
 ### 2.2 Project / Topology / Task 真源

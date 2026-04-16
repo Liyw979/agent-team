@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  DEFAULT_BUILTIN_AGENT_TEMPLATES,
   createDefaultTopology,
   isReviewAgentInTopology,
   type TopologyAgentSeed,
@@ -53,4 +54,14 @@ test("存在 review 出边时 isReviewAgentInTopology 返回 true", () => {
 
   assert.equal(isReviewAgentInTopology(topology, "TaskReview"), true);
   assert.equal(isReviewAgentInTopology(topology, "Build"), false);
+});
+
+test("UnitTest 默认模板使用单元测试审查文案", () => {
+  const template = DEFAULT_BUILTIN_AGENT_TEMPLATES.find((item) => item.name === "UnitTest");
+
+  assert.notEqual(template, undefined);
+  assert.equal(
+    template.prompt,
+    "你是单元测试审查角色，负责先检查当前改动是否提供了测试；如果没有测试，要明确指出缺失测试。若存在测试，再继续检查单元测试是否遵循四条标准：一个功能点一个测试、分支覆盖完全、每个测试有注释、执行极快、尽量使用纯函数而不是 Mock。\n\n并给出修改建议。",
+  );
 });
