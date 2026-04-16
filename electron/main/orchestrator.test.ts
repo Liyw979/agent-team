@@ -122,6 +122,28 @@ async function addCustomAgent(
   });
 }
 
+async function waitForTaskSnapshot(
+  orchestrator: Orchestrator,
+  taskId: string,
+  predicate: (snapshot: Awaited<ReturnType<Orchestrator["getTaskSnapshot"]>>) => boolean,
+  timeoutMs = 5000,
+): Promise<Awaited<ReturnType<Orchestrator["getTaskSnapshot"]>>> {
+  const startedAt = Date.now();
+  let latestSnapshot = await orchestrator.getTaskSnapshot(taskId);
+  while (Date.now() - startedAt < timeoutMs) {
+    if (predicate(latestSnapshot)) {
+      return latestSnapshot;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    latestSnapshot = await orchestrator.getTaskSnapshot(taskId);
+  }
+
+  throw new Error(
+    `Task ${taskId} did not reach the expected state in ${timeoutMs}ms. `
+      + `Latest status=${latestSnapshot.task.status}, messageCount=${latestSnapshot.messages.length}.`,
+  );
+}
+
 test("task init 会写入 Zellij session 信息并补齐运行态", async () => {
   const userDataPath = createTempDir();
   const projectPath = createTempDir();
@@ -1429,4 +1451,261 @@ test("bootstrap does not delete unfinished tasks when zellij sessions are missin
 
   assert.notEqual(reloadedProject, undefined);
   assert.equal(reloadedProject?.tasks.some((item) => item.task.id === task.task.id), true);
+});
+
+test("BA dispatches Build through three review passes before the task can finish", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  const orchestrator = createTestOrchestrator({
+    userDataPath,
+    enableEventStream: false,
+    zellijManager: {
+      isAvailable: async () => true,
+      createTaskSession: async () => "oap-project-task",
+      createPanelBindings: () => [],
+      materializePanelBindings: async () => [],
+      openTaskSession: async () => undefined,
+      deleteTaskSession: async () => undefined,
+      setOpenCodeAttachBaseUrl: () => undefined,
+    } as never,
+  });
+
+  const typed = orchestrator as unknown as Orchestrator & {
+    opencodeClient: {
+      createSession: (projectPath: string, title: string) => Promise<string>;
+      reloadConfig: () => Promise<void>;
+    };
+    opencodeRunner: {
+      run: (payload: { agent: string; content: string }) => Promise<{
+        status: "completed";
+        finalMessage: string;
+        fallbackMessage: null;
+        messageId: string;
+        timestamp: string;
+        rawMessage: {
+          content: string;
+          error: null;
+        };
+      }>;
+    };
+  };
+
+  const addFilePath = path.join(projectPath, "add.js");
+  const callCount = new Map<string, number>();
+
+  const readBuildAttemptFromFile = () => {
+    if (!fs.existsSync(addFilePath)) {
+      return 0;
+    }
+    const content = fs.readFileSync(addFilePath, "utf8");
+    const matched = content.match(/build attempt (\d+)/u);
+    return matched ? Number(matched[1]) : 0;
+  };
+
+  const completedResponse = (agent: string, count: number, finalMessage: string) => ({
+    status: "completed" as const,
+    finalMessage,
+    fallbackMessage: null,
+    messageId: `message:${agent}:${count}`,
+    timestamp: `2026-04-15T00:00:${String(count).padStart(2, "0")}.000Z`,
+    rawMessage: {
+      content: finalMessage,
+      error: null,
+    },
+  });
+
+  typed.opencodeClient.createSession = async (_projectPath, title) => `session:${title}`;
+  typed.opencodeClient.reloadConfig = async () => undefined;
+  typed.opencodeRunner.run = async ({ agent, content }) => {
+    const count = (callCount.get(agent) ?? 0) + 1;
+    callCount.set(agent, count);
+
+    if (agent === "BA") {
+      return completedResponse(
+        agent,
+        count,
+        [
+          "# 实现要求",
+          "",
+          "1. 在工作区根目录创建 add.js。",
+          "2. 导出一个 add(a, b) 方法。",
+          "3. 每次修复都要覆盖写回 add.js。",
+        ].join("\n"),
+      );
+    }
+
+    if (agent === "Build") {
+      if (count === 1) {
+        assert.match(content, /\[Initial Task\]/u);
+        assert.match(content, /\[From BA Agent\]/u);
+      }
+      fs.writeFileSync(
+        addFilePath,
+        [
+          `// build attempt ${count}`,
+          "function add(a, b) {",
+          "  return a + b;",
+          "}",
+          "",
+          "module.exports = add;",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      return completedResponse(
+        agent,
+        count,
+        `已将 add.js 写入工作区，第 ${count} 次构建完成。`,
+      );
+    }
+
+    const buildAttempt = readBuildAttemptFromFile();
+    if (agent === "UnitTest") {
+      return buildAttempt >= 2
+        ? completedResponse(agent, count, "单元测试通过，进入下一段审查。")
+        : completedResponse(
+            agent,
+            count,
+            "单元测试未通过，缺少稳定交付版本。\n\n<revision_request> 请继续修复 add.js 并重新提交。",
+          );
+    }
+
+    if (agent === "CodeReview") {
+      return buildAttempt >= 3
+        ? completedResponse(agent, count, "代码审查通过，进入最终交付审查。")
+        : completedResponse(
+            agent,
+            count,
+            "代码审查未通过，当前实现还不够稳定。\n\n<revision_request> 请继续完善 add.js 的最终实现。",
+          );
+    }
+
+    if (agent === "TaskReview") {
+      return buildAttempt >= 4
+        ? completedResponse(agent, count, "任务交付通过，当前结果可以结束。")
+        : completedResponse(
+            agent,
+            count,
+            "最终交付未通过，需要再补一轮稳定交付。\n\n<revision_request> 请继续修复并重新交付。",
+          );
+    }
+
+    return completedResponse(agent, count, `${agent} 已完成。`);
+  };
+
+  let project = await orchestrator.createProject({ path: projectPath });
+  project = await addBuiltinAgents(
+    orchestrator,
+    project.project.id,
+    ["BA", "Build", "UnitTest", "CodeReview", "TaskReview"],
+    "Build",
+  );
+  await orchestrator.saveTopology({
+    projectId: project.project.id,
+    topology: {
+      ...project.topology,
+      startAgentId: "BA",
+      agentOrderIds: ["BA", "Build", "UnitTest", "CodeReview", "TaskReview"],
+      nodes: [
+        { id: "BA", label: "BA", kind: "agent" },
+        { id: "Build", label: "Build", kind: "agent" },
+        { id: "UnitTest", label: "UnitTest", kind: "agent" },
+        { id: "CodeReview", label: "CodeReview", kind: "agent" },
+        { id: "TaskReview", label: "TaskReview", kind: "agent" },
+      ],
+      edges: [
+        {
+          id: "BA__Build__association",
+          source: "BA",
+          target: "Build",
+          triggerOn: "association",
+        },
+        {
+          id: "Build__UnitTest__association",
+          source: "Build",
+          target: "UnitTest",
+          triggerOn: "association",
+        },
+        {
+          id: "UnitTest__Build__review_fail",
+          source: "UnitTest",
+          target: "Build",
+          triggerOn: "review_fail",
+        },
+        {
+          id: "UnitTest__CodeReview__review_pass",
+          source: "UnitTest",
+          target: "CodeReview",
+          triggerOn: "review_pass",
+        },
+        {
+          id: "CodeReview__Build__review_fail",
+          source: "CodeReview",
+          target: "Build",
+          triggerOn: "review_fail",
+        },
+        {
+          id: "CodeReview__TaskReview__review_pass",
+          source: "CodeReview",
+          target: "TaskReview",
+          triggerOn: "review_pass",
+        },
+        {
+          id: "TaskReview__Build__review_fail",
+          source: "TaskReview",
+          target: "Build",
+          triggerOn: "review_fail",
+        },
+      ],
+    },
+  });
+
+  const submittedTask = await orchestrator.submitTask({
+    projectId: project.project.id,
+    content: "@BA 请实现 add 方法，并把结果写入 add.js。",
+  });
+
+  const snapshot = await waitForTaskSnapshot(
+    orchestrator,
+    submittedTask.task.id,
+    (current) => current.task.status === "finished",
+  );
+
+  assert.equal(snapshot.task.status, "finished");
+  assert.notEqual(snapshot.task.completedAt, null);
+  assert.equal(fs.existsSync(addFilePath), true);
+  assert.equal(readBuildAttemptFromFile(), 4);
+  assert.match(fs.readFileSync(addFilePath, "utf8"), /module\.exports = add;/u);
+  assert.equal(callCount.get("BA"), 1);
+  assert.equal(callCount.get("Build"), 4);
+  assert.equal(callCount.get("UnitTest"), 4);
+  assert.equal(callCount.get("CodeReview"), 3);
+  assert.equal(callCount.get("TaskReview"), 2);
+  assert.equal(
+    snapshot.messages.some(
+      (message) =>
+        message.sender === "BA"
+        && message.meta?.kind === "agent-dispatch"
+        && message.meta?.targetAgentIds === "Build",
+    ),
+    true,
+  );
+  assert.equal(
+    snapshot.messages.filter(
+      (message) =>
+        message.meta?.kind === "revision-request"
+        && message.meta?.targetAgentId === "Build",
+    ).length,
+    3,
+  );
+  assert.deepEqual(
+    snapshot.agents.map((agent) => [agent.name, agent.runCount, agent.status]),
+    [
+      ["BA", 1, "completed"],
+      ["Build", 4, "completed"],
+      ["CodeReview", 3, "completed"],
+      ["TaskReview", 2, "completed"],
+      ["UnitTest", 4, "completed"],
+    ],
+  );
 });
