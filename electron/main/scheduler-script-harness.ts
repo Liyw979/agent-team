@@ -105,9 +105,18 @@ export async function assertSchedulerScript(
       }
 
       if (current.sourceHadBody && current.targets.length === 1) {
-        const staleTargets = sourceState.defaultTargets.filter(
+        const currentReviewer = current.targets[0] ?? "";
+        const currentReviewerIndex = sourceState.defaultTargets.indexOf(currentReviewer);
+        const trailingTargets = currentReviewerIndex >= 0
+          ? sourceState.defaultTargets.slice(currentReviewerIndex + 1)
+          : [];
+        const leadingStaleTargets = (currentReviewerIndex >= 0
+          ? sourceState.defaultTargets.slice(0, currentReviewerIndex)
+          : sourceState.defaultTargets
+        ).filter(
           (target) => sourceState.reviewerPassRevision.get(target) !== sourceState.currentRevision,
         );
+        const staleTargets = [...trailingTargets, ...leadingStaleTargets];
         sourceState.expectedNextTargets = staleTargets.length > 0 ? staleTargets : null;
         continue;
       }
