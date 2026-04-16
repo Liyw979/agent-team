@@ -30,6 +30,7 @@ import {
   type ResetBuiltinAgentTemplatePayload,
   type SaveAgentPromptPayload,
   type SaveBuiltinAgentTemplatePayload,
+  resolveBuildAgentName,
   resolveTopologyAgentOrder,
   resolveTopologyStartAgent,
   type SubmitTaskPayload,
@@ -451,10 +452,14 @@ export class Orchestrator {
     const agentFiles = this.listProjectAgents(project);
     this.customAgentConfig.validateProjectAgents(project.path);
     this.syncTopology(project, agentFiles);
+    const defaultBuildAgent = resolveBuildAgentName(agentFiles);
+    if (!defaultBuildAgent) {
+      throw new Error("当前 Project 缺少 Build Agent，禁止发送任务。请先在团队成员中写入 Build。");
+    }
     const mentionName =
       payload.mentionAgent ||
       extractMentionPure(payload.content) ||
-      agentFiles[0]?.name;
+      defaultBuildAgent;
     if (!mentionName) {
       throw new Error("当前没有可用的目标 Agent。");
     }

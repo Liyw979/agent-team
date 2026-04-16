@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { AgentFlowEvent, ProjectSnapshot, TaskAgentRecord, TaskSnapshot } from "@shared/types";
+import { resolveBuildAgentName, type AgentFlowEvent, type ProjectSnapshot, type TaskAgentRecord, type TaskSnapshot } from "@shared/types";
 
 interface AgentStatusPayload {
   taskId: string;
@@ -78,6 +78,21 @@ function appendProjectMessage(project: ProjectSnapshot, message: ProjectSnapshot
   };
 }
 
+function resolveSelectedAgentName(input: {
+  selectedAgentId?: string | null;
+  taskAgents?: Array<Pick<TaskAgentRecord, "name">>;
+  projectAgents?: Array<Pick<ProjectSnapshot["agentFiles"][number], "name">>;
+}): string | null {
+  const selectedAgentId = input.selectedAgentId ?? null;
+  return (
+    input.taskAgents?.find((agent) => agent.name === selectedAgentId)?.name ??
+    input.projectAgents?.find((agent) => agent.name === selectedAgentId)?.name ??
+    resolveBuildAgentName(input.taskAgents ?? []) ??
+    resolveBuildAgentName(input.projectAgents ?? []) ??
+    null
+  );
+}
+
 function normalizeProjectSnapshot(snapshot: ProjectSnapshot): ProjectSnapshot {
   return {
     ...snapshot,
@@ -114,12 +129,11 @@ export const useAgentFlowStore = create<AgentFlowState>((set) => ({
         ? null
         : selectedProject?.tasks.find((task) => task.task.id === state.selectedTaskId) ??
           selectedProject?.tasks[0];
-      const selectedAgent =
-        selectedTask?.agents.find((agent) => agent.name === state.selectedAgentId)?.name ??
-        selectedTask?.agents[0]?.name ??
-        selectedProject?.agentFiles.find((agent) => agent.name === state.selectedAgentId)?.name ??
-        selectedProject?.agentFiles[0]?.name ??
-        null;
+      const selectedAgent = resolveSelectedAgentName({
+        selectedAgentId: state.selectedAgentId,
+        taskAgents: selectedTask?.agents,
+        projectAgents: selectedProject?.agentFiles,
+      });
 
       return {
         projects: normalized,
@@ -134,7 +148,10 @@ export const useAgentFlowStore = create<AgentFlowState>((set) => ({
       return {
         selectedProjectId: projectId,
         selectedTaskId: project?.tasks[0]?.task.id ?? null,
-        selectedAgentId: project?.tasks[0]?.agents[0]?.name ?? project?.agentFiles[0]?.name ?? null,
+        selectedAgentId: resolveSelectedAgentName({
+          taskAgents: project?.tasks[0]?.agents,
+          projectAgents: project?.agentFiles,
+        }),
       };
     }),
   selectTask: (projectId, taskId) =>
@@ -144,7 +161,10 @@ export const useAgentFlowStore = create<AgentFlowState>((set) => ({
       return {
         selectedProjectId: projectId,
         selectedTaskId: taskId,
-        selectedAgentId: task?.agents[0]?.name ?? project?.agentFiles[0]?.name ?? null,
+        selectedAgentId: resolveSelectedAgentName({
+          taskAgents: task?.agents,
+          projectAgents: project?.agentFiles,
+        }),
       };
     }),
   selectAgent: (agentId) => set({ selectedAgentId: agentId }),
@@ -161,7 +181,10 @@ export const useAgentFlowStore = create<AgentFlowState>((set) => ({
           projects: [project, ...state.projects],
           selectedProjectId: project.project.id,
           selectedTaskId: project.tasks[0]?.task.id ?? null,
-          selectedAgentId: project.tasks[0]?.agents[0]?.name ?? project.agentFiles[0]?.name ?? null,
+          selectedAgentId: resolveSelectedAgentName({
+            taskAgents: project.tasks[0]?.agents,
+            projectAgents: project.agentFiles,
+          }),
         };
       }
 
@@ -189,12 +212,11 @@ export const useAgentFlowStore = create<AgentFlowState>((set) => ({
             ? state.selectedTaskId
             : project.tasks[0]?.task.id ?? null;
         const nextTask = project.tasks.find((task) => task.task.id === nextSelectedTaskId);
-        const nextSelectedAgentId =
-          nextTask?.agents.find((agent) => agent.name === state.selectedAgentId)?.name ??
-          nextTask?.agents[0]?.name ??
-          project.agentFiles.find((agent) => agent.name === state.selectedAgentId)?.name ??
-          project.agentFiles[0]?.name ??
-          null;
+        const nextSelectedAgentId = resolveSelectedAgentName({
+          selectedAgentId: state.selectedAgentId,
+          taskAgents: nextTask?.agents,
+          projectAgents: project.agentFiles,
+        });
 
         return {
           projects,
@@ -213,7 +235,10 @@ export const useAgentFlowStore = create<AgentFlowState>((set) => ({
           })),
           selectedProjectId: event.projectId,
           selectedTaskId: task.task.id,
-          selectedAgentId: task.agents[0]?.name ?? state.selectedAgentId,
+          selectedAgentId: resolveSelectedAgentName({
+            selectedAgentId: state.selectedAgentId,
+            taskAgents: task.agents,
+          }),
         };
       }
 

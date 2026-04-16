@@ -104,7 +104,7 @@ test("setProjects keeps the new-task selection during polling refresh", () => {
   const nextState = useAgentFlowStore.getState();
   assert.equal(nextState.selectedProjectId, project.project.id);
   assert.equal(nextState.selectedTaskId, null);
-  assert.equal(nextState.selectedAgentId, "BA");
+  assert.equal(nextState.selectedAgentId, "Build");
 });
 
 test("project-updated keeps the new-task selection for the active project", () => {
@@ -123,5 +123,5 @@ test("project-updated keeps the new-task selection for the active project", () =
   const nextState = useAgentFlowStore.getState();
   assert.equal(nextState.selectedProjectId, project.project.id);
   assert.equal(nextState.selectedTaskId, null);
-  assert.equal(nextState.selectedAgentId, "BA");
+  assert.equal(nextState.selectedAgentId, "Build");
 });

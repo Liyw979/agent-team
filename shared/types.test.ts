@@ -18,18 +18,31 @@ test("默认拓扑只生成首节点到次节点的 association 边", () => {
 
   const topology = createDefaultTopology("project-1", agents);
 
-  assert.equal(topology.startAgentId, "BA");
-  assert.deepEqual(topology.nodes, ["BA", "Build", "TaskReview"]);
+  assert.equal(topology.startAgentId, "Build");
+  assert.deepEqual(topology.nodes, ["Build", "BA", "TaskReview"]);
   assert.equal(topology.edges.length, 1);
   assert.deepEqual(topology.edges[0], {
-    source: "BA",
-    target: "Build",
+    source: "Build",
+    target: "BA",
     triggerOn: "association",
   });
   assert.equal(
     topology.edges.some((edge) => edge.triggerOn === "review_pass" || edge.triggerOn === "review_fail"),
     false,
   );
+});
+
+test("默认拓扑在缺少 Build 时不会偷偷把首个 Agent 当起点", () => {
+  const agents: TopologyAgentSeed[] = [
+    { name: "BA" },
+    { name: "TaskReview" },
+  ];
+
+  const topology = createDefaultTopology("project-2", agents);
+
+  assert.equal(topology.startAgentId, null);
+  assert.deepEqual(topology.nodes, ["BA", "TaskReview"]);
+  assert.deepEqual(topology.edges, []);
 });
 
 test("存在 review 出边时 isReviewAgentInTopology 返回 true", () => {

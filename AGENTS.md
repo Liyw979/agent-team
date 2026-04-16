@@ -78,7 +78,7 @@
 - 当某个 Agent 存在“直接下游通过 `association` 触发、且该下游会用 `review_fail` 直接回流给自己、同时该下游没有 `review_pass` 下游”的审查回路时，系统会先只放行这类直接审查回路；只有这些回路全部通过后，才会继续放行该 Agent 其余直接 `association` 下游，避免 Build 与单个审查 Agent 多轮对话时反复提前触发无关下游。
 - 同一轮里若某个 Agent 需要同时触发多个直接 `association` 下游 reviewer，这批 reviewer 会并发启动；只有当前整批 reviewer 都返回后，系统才会决定是否回流给上游修复，或继续补跑这一轮尚未确认通过的 reviewer，避免把并发批次错误串成“一次只放行一个”。
 - 团队成员列表支持直接调整 Agent 顺序；该顺序会持久化到拓扑配置，并直接决定拓扑图从左到右的节点排列。
-- 拓扑图中的 Agent 节点顺序是稳定的：未显式保存顺序时，默认优先取当前列表首个 Agent 作为最左侧起点。
+- 拓扑图中的 Agent 节点顺序是稳定的：未显式保存顺序时，默认优先取 `Build` 作为最左侧起点；若当前 Project 尚未写入 `Build`，则不会偷偷回退到其他 Agent 作为默认起点。
 - 拓扑配置中的 `nodes` 统一保存为有序的 Agent 名称字符串数组；该数组既是节点集合真源，也是节点顺序真源，不再额外保存 `agentOrderIds`、节点 `kind` 或节点对象里的冗余 `id/label` 字段。
 - 拓扑配置中的 `edges` 只持久化 `source / target / triggerOn`；边的唯一标识在运行时按三元组即时推导，不再单独持久化 `id` 字段。
 - 拓扑节点顶部直接展示 Agent 当前状态徽标，包括 `未启动 / 运行中 / 已完成 / 执行失败`；审查类 Agent 则显示 `审查通过 / 审查不通过`。
@@ -132,7 +132,7 @@
 
 - CLI 默认使用当前目录作为 project cwd。
 - CLI 只支持当前 Agent 名称。
-- `task init` 会先创建 Task，并把全部 Agent 的 OpenCode session / Zellij pane 启动完成；GUI 输入框会优先弹出候选 Agent 并默认选中当前列表第一个 Agent，CLI 仍通过 `task send <agent> <message...>` 指定目标。
+- `task init` 会先创建 Task，并把全部 Agent 的 OpenCode session / Zellij pane 启动完成；GUI 输入框会优先弹出候选 Agent，并默认把未显式 `@` 的消息发给 `Build`。若当前 Project 尚未写入 `Build`，GUI 会直接禁止发送，直到补齐 `Build`；CLI 仍通过 `task send <agent> <message...>` 指定目标。
 - `task send <agent> <message...>` 成功后会打印可复制的 panel 打开命令。
 - `task debug-info` 默认读取当前 Project 最新 Task，并只输出聊天区里实际展示的合并消息；追加 `--full` 后，才会输出 `zellijSessionId`、`opencodeSessionId`、panel 打开命令和完整运行态数据；也可以显式传入 `taskId`。
 - `task show <taskId>` 与 `task init` 在交互式终端里默认直接进入对应 Zellij session。

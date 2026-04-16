@@ -334,6 +334,18 @@ export function isReviewAgentInTopology(
   );
 }
 
+export function resolveBuildAgentName(
+  agents: ReadonlyArray<Pick<TopologyAgentSeed, "name"> | string>,
+): string | null {
+  for (const agent of agents) {
+    const agentName = typeof agent === "string" ? agent : agent.name;
+    if (usesOpenCodeBuiltinPrompt(agentName)) {
+      return agentName;
+    }
+  }
+  return null;
+}
+
 export function resolveTopologyStartAgent(
   agents: Array<Pick<TopologyAgentSeed, "name">>,
   preferredStartAgentId?: string | null,
@@ -345,7 +357,7 @@ export function resolveTopologyStartAgent(
     return preferredStartAgentId;
   }
 
-  return agents[0]?.name ?? null;
+  return resolveBuildAgentName(agents);
 }
 
 export function resolveTopologyAgentOrder(

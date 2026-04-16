@@ -6,7 +6,7 @@ import { TopologyGraph } from "./components/TopologyGraph";
 import { getAgentColorToken } from "./lib/agent-colors";
 import { getPanelHeaderActionButtonClass } from "./lib/panel-header-action-button";
 import { useAgentFlowStore } from "./store/useAgentFlowStore";
-import { resolveTopologyAgentOrder, usesOpenCodeBuiltinPrompt } from "@shared/types";
+import { resolveBuildAgentName, resolveTopologyAgentOrder, usesOpenCodeBuiltinPrompt } from "@shared/types";
 import type {
   AgentRuntimeSnapshot,
   MessageRecord,
@@ -466,9 +466,13 @@ function App() {
                       if (!activeProject) {
                         return;
                       }
+                      const defaultBuildAgent = resolveBuildAgentName(activeProject.agentFiles);
+                      if (!defaultBuildAgent) {
+                        throw new Error("当前 Project 缺少 Build Agent，禁止发送任务。请先在团队成员中写入 Build。");
+                      }
                       const resolvedMentionAgent =
                         mentionAgent ||
-                        activeProject.agentFiles[0]?.name;
+                        defaultBuildAgent;
                       if (!resolvedMentionAgent) {
                         throw new Error("当前 Project 还没有可用 Agent，请先配置团队成员。");
                       }

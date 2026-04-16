@@ -840,6 +840,36 @@ test("只有第一次 Agent 间传递会携带 [Initial Task]", async () => {
   assert.doesNotMatch(promptByAgent.get("QA")?.[0] ?? "", /\[Initial Task\]/u);
 });
 
+test("当前 Project 缺少 Build Agent 时禁止发送任务", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  const orchestrator = createTestOrchestrator({
+    userDataPath,
+    enableEventStream: false,
+    zellijManager: {
+      isAvailable: async () => true,
+      createTaskSession: async () => "oap-project-task",
+      createPanelBindings: () => [],
+      materializePanelBindings: async () => [],
+      openTaskSession: async () => undefined,
+      deleteTaskSession: async () => undefined,
+      setOpenCodeAttachBaseUrl: () => undefined,
+    } as never,
+  });
+
+  let project = await orchestrator.createProject({ path: projectPath });
+  project = await addCustomAgent(orchestrator, project.project.id, "BA", "你是 BA。");
+
+  await assert.rejects(
+    () =>
+      orchestrator.submitTask({
+        projectId: project.project.id,
+        content: "@BA 请先整理需求。",
+      }),
+    /缺少 Build Agent/u,
+  );
+});
+
 test("审查回流再次派发时不会重复携带 [Initial Task]", async () => {
   const userDataPath = createTempDir();
   const projectPath = createTempDir();

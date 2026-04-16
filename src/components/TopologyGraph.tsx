@@ -16,7 +16,7 @@ import {
 import { getAgentColorToken } from "@/lib/agent-colors";
 import { getPanelHeaderActionButtonClass } from "@/lib/panel-header-action-button";
 import { stripReviewResponseMarkup } from "@shared/review-response";
-import { isReviewAgentInTopology, resolveTopologyAgentOrder } from "@shared/types";
+import { isReviewAgentInTopology, resolveBuildAgentName, resolveTopologyAgentOrder } from "@shared/types";
 import type {
   AgentRole,
   AgentRuntimeSnapshot,
@@ -433,7 +433,7 @@ function computeNodeLayout(
   >();
   const nodeIds = [...draft.nodes];
   const nodeIdSet = new Set(nodeIds);
-  const startAgentId = nodeIdSet.has(draft.startAgentId ?? "") ? draft.startAgentId : nodeIds[0] ?? null;
+  const startAgentId = nodeIdSet.has(draft.startAgentId ?? "") ? draft.startAgentId : resolveBuildAgentName(nodeIds);
   const manualOrderIndex = new Map(nodeIds.map((agentId, index) => [agentId, index] as const));
   const directIncomingByNode = new Map(nodeIds.map((nodeId) => [nodeId, 0]));
   const ancestorSets = new Map(nodeIds.map((nodeId) => [nodeId, new Set<string>()]));

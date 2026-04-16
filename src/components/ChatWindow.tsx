@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import type { ProjectSnapshot, TaskSnapshot } from "@shared/types";
+import { resolveBuildAgentName, type ProjectSnapshot, type TaskSnapshot } from "@shared/types";
 import { cn } from "@/lib/utils";
 import { getAgentColorToken } from "@/lib/agent-colors";
 import { mergeTaskChatMessages, type ChatMessageItem } from "@/lib/chat-messages";
@@ -89,7 +89,7 @@ function extractFirstMention(content: string): string | undefined {
 }
 
 function getDefaultAgentName(agents: string[]): string | undefined {
-  return agents[0];
+  return resolveBuildAgentName(agents) ?? undefined;
 }
 
 function MessageBubble({
@@ -344,6 +344,10 @@ export function ChatWindow({
       setSubmitError("当前 Project 还没有可用 Agent，请先到右侧团队成员里配置并添加模板。");
       return;
     }
+    if (!defaultAgentName) {
+      setSubmitError("当前 Project 缺少 Build Agent，请先写入 Build，暂不允许发送任务。");
+      return;
+    }
 
     const submitted = draft;
     const mentionAgent = extractFirstMention(content) ?? defaultAgentName;
@@ -553,7 +557,9 @@ export function ChatWindow({
               }}
               placeholder={
                 hasAvailableAgents
-                  ? "默认向首个 Agent 发送消息，使用@指定Agent"
+                  ? defaultAgentName
+                    ? "默认向 Build 发送消息，使用@指定Agent"
+                    : "当前 Project 缺少 Build Agent，请先写入 Build"
                   : "当前还没有可用 Agent，请先配置团队成员"
               }
               className="no-drag block min-h-[68px] w-full resize-none rounded-[8px] border border-border bg-card px-4 py-2.5 text-sm leading-6 outline-none transition focus:border-primary"
