@@ -9,6 +9,7 @@ import {
   buildCliAttachSessionCommand,
   buildCliPanelFocusCommand,
 } from "@shared/terminal-commands";
+import { getTopologyEdgeId } from "@shared/types";
 import { buildZellijMissingMessage, buildZellijMissingReminder } from "@shared/zellij";
 import { appendAppLog, initAppFileLogger } from "../main/app-log";
 import { Orchestrator } from "../main/orchestrator";
@@ -106,10 +107,6 @@ function summarizePrompt(prompt: string) {
       .map((line) => line.trim())
       .find(Boolean) ?? ""
   ).slice(0, 120);
-}
-
-function createTopologyEdgeId(source: string, target: string, triggerOn: TopologyEdge["triggerOn"]) {
-  return `${source}__${target}__${triggerOn}`;
 }
 
 function buildOpenAgentTerminalCommand(panel: TaskPanelRecord) {
@@ -983,7 +980,7 @@ async function handleTopology(context: CliContext, parsed: ParsedArgv) {
 
     process.stdout.write("Nodes\n");
     for (const node of project.topology.nodes) {
-      process.stdout.write(`- ${node.id}\n`);
+      process.stdout.write(`- ${node}\n`);
     }
 
     printSection("Edges");
@@ -1023,8 +1020,13 @@ async function handleTopology(context: CliContext, parsed: ParsedArgv) {
     ensureAgentNames(project, [sourceAgent, targetAgent]);
     const trigger = parseTopologyRelation(parsed);
 
-    const edgeId = createTopologyEdgeId(sourceAgent, targetAgent, trigger);
-    const exists = project.topology.edges.some((edge) => edge.id === edgeId);
+    const nextEdge = {
+      source: sourceAgent,
+      target: targetAgent,
+      triggerOn: trigger,
+    } satisfies TopologyRecord["edges"][number];
+    const edgeId = getTopologyEdgeId(nextEdge);
+    const exists = project.topology.edges.some((edge) => getTopologyEdgeId(edge) === edgeId);
 
     let nextTopology = project.topology;
     if (action === "allow" && !exists) {
@@ -1034,12 +1036,7 @@ async function handleTopology(context: CliContext, parsed: ParsedArgv) {
           ...project.topology.edges.filter(
             (edge) => !(edge.source === sourceAgent && edge.target === targetAgent),
           ),
-          {
-            id: edgeId,
-            source: sourceAgent,
-            target: targetAgent,
-            triggerOn: trigger,
-          },
+          nextEdge,
         ],
       };
     }
@@ -1047,7 +1044,7 @@ async function handleTopology(context: CliContext, parsed: ParsedArgv) {
     if (action === "deny") {
       nextTopology = {
         ...project.topology,
-        edges: project.topology.edges.filter((edge) => edge.id !== edgeId),
+        edges: project.topology.edges.filter((edge) => getTopologyEdgeId(edge) !== edgeId),
       };
     }
 

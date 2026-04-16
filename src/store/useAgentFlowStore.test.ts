@@ -9,11 +9,7 @@ function createTopology(projectId: string): TopologyRecord {
   return {
     projectId,
     startAgentId: "BA",
-    agentOrderIds: ["BA", "Build"],
-    nodes: [
-      { id: "BA", label: "BA", kind: "agent" },
-      { id: "Build", label: "Build", kind: "agent" },
-    ],
+    nodes: ["BA", "Build"],
     edges: [],
   };
 }

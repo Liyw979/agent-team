@@ -280,12 +280,10 @@ function parseScenario(topology: TopologyRecord, script: string[]): ParsedScenar
   assert.notEqual(startAgent, undefined, "第一条脚本必须以 @Agent 开头");
   assert.equal(startAgent, topology.startAgentId, "第一条 user 消息的 @Agent 必须等于 topology.startAgentId");
 
-  const validAgents = new Set(topology.nodes.map((node) => node.id));
-  const agentOrder = topology.agentOrderIds.length > 0
-    ? [...topology.agentOrderIds]
-    : topology.nodes.map((node) => node.id);
+  const validAgents = new Set(topology.nodes);
+  const agentOrder = [...topology.nodes];
   for (const agentName of agentOrder) {
-    assert.ok(validAgents.has(agentName), `topology.agentOrderIds 包含未知 Agent：${agentName}`);
+    assert.ok(validAgents.has(agentName), `topology.nodes 包含未知 Agent：${agentName}`);
   }
 
   const repliesByAgent = new Map<string, ParsedReply[]>();

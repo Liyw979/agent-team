@@ -224,7 +224,7 @@ function App() {
       activeProject.agentFiles.map((agentFile) => ({
         name: agentFile.name,
       })),
-      activeProject.topology.agentOrderIds,
+      activeProject.topology.nodes,
     );
     const orderIndex = new Map(orderedAgentNames.map((agentName, index) => [agentName, index]));
 
@@ -339,24 +339,15 @@ function App() {
       activeProject.agentFiles.map((agent) => ({
         name: agent.name,
       })),
-      activeProject.topology.agentOrderIds,
+      activeProject.topology.nodes,
     );
     if (normalizedOrderIds.join("|") === currentOrderIds.join("|")) {
       return;
     }
 
-    const nodeById = new Map(activeProject.topology.nodes.map((node) => [node.id, node]));
     const nextTopology: TopologyRecord = {
       ...activeProject.topology,
-      agentOrderIds: normalizedOrderIds,
-      nodes: normalizedOrderIds.map(
-        (agentName) =>
-          nodeById.get(agentName) ?? {
-            id: agentName,
-            label: agentName,
-            kind: "agent",
-          },
-      ),
+      nodes: normalizedOrderIds,
     };
 
     await window.agentFlow.saveTopology({

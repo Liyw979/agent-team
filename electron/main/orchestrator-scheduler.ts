@@ -1,4 +1,4 @@
-import type { TopologyEdge, TopologyRecord } from "@shared/types";
+import { getTopologyEdgeId, type TopologyEdge, type TopologyRecord } from "@shared/types";
 
 export interface SchedulerAgentState {
   name: string;
@@ -111,9 +111,10 @@ export class OrchestratorScheduler {
 
     const completed = new Set(this.runtime.completedEdges);
     for (const edge of selectedOutgoing) {
-      completed.add(edge.id);
-      this.runtime.completedEdges.add(edge.id);
-      this.runtime.edgeTriggerVersion.set(edge.id, (this.runtime.edgeTriggerVersion.get(edge.id) ?? 0) + 1);
+      const edgeId = getTopologyEdgeId(edge);
+      completed.add(edgeId);
+      this.runtime.completedEdges.add(edgeId);
+      this.runtime.edgeTriggerVersion.set(edgeId, (this.runtime.edgeTriggerVersion.get(edgeId) ?? 0) + 1);
     }
 
     const targetNames = this.uniqueTargetNames(selectedOutgoing);
@@ -161,9 +162,10 @@ export class OrchestratorScheduler {
     const completed = new Set(this.runtime.completedEdges);
 
     for (const edge of outgoing) {
-      completed.add(edge.id);
-      this.runtime.completedEdges.add(edge.id);
-      this.runtime.edgeTriggerVersion.set(edge.id, (this.runtime.edgeTriggerVersion.get(edge.id) ?? 0) + 1);
+      const edgeId = getTopologyEdgeId(edge);
+      completed.add(edgeId);
+      this.runtime.completedEdges.add(edgeId);
+      this.runtime.edgeTriggerVersion.set(edgeId, (this.runtime.edgeTriggerVersion.get(edgeId) ?? 0) + 1);
     }
 
     const readyTargets: string[] = [];
@@ -265,13 +267,13 @@ export class OrchestratorScheduler {
   hasSatisfiedIncomingAssociation(agentName: string): boolean {
     const incomingEdges = this.getIncomingEdges(agentName, "association")
       .concat(this.getIncomingEdges(agentName, "review_pass"));
-    return incomingEdges.every((edge) => this.runtime.completedEdges.has(edge.id));
+    return incomingEdges.every((edge) => this.runtime.completedEdges.has(getTopologyEdgeId(edge)));
   }
 
   hasSatisfiedOutgoingAssociation(agentName: string): boolean {
     const outgoingEdges = this.getOutgoingEdges(agentName, "association")
       .concat(this.getOutgoingEdges(agentName, "review_pass"));
-    return outgoingEdges.every((edge) => this.runtime.completedEdges.has(edge.id));
+    return outgoingEdges.every((edge) => this.runtime.completedEdges.has(getTopologyEdgeId(edge)));
   }
 
   private claimNextBatchTarget(
@@ -324,7 +326,7 @@ export class OrchestratorScheduler {
 
     const incomingSuccessEdges = this.getIncomingEdges(targetName, "association")
       .concat(this.getIncomingEdges(targetName, "review_pass"));
-    if (incomingSuccessEdges.some((edge) => !completedEdges.has(edge.id))) {
+    if (incomingSuccessEdges.some((edge) => !completedEdges.has(getTopologyEdgeId(edge)))) {
       return false;
     }
 
@@ -346,9 +348,12 @@ export class OrchestratorScheduler {
         (edge) =>
           edge.target === targetName &&
           (edge.triggerOn === "association" || edge.triggerOn === "review_pass") &&
-          completedEdges.has(edge.id),
+          completedEdges.has(getTopologyEdgeId(edge)),
       )
-      .map((edge) => `${edge.id}@${this.runtime.edgeTriggerVersion.get(edge.id) ?? 0}`)
+      .map((edge) => {
+        const edgeId = getTopologyEdgeId(edge);
+        return `${edgeId}@${this.runtime.edgeTriggerVersion.get(edgeId) ?? 0}`;
+      })
       .sort();
     return relevantEdgeIds.join("|") || `direct:${targetName}`;
   }

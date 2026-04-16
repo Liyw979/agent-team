@@ -84,7 +84,7 @@ export function getPersistedCompletionSeedAgentNames(input: {
   agents: MinimalAgent[];
   messages: MinimalMessage[];
 }): string[] {
-  const validNames = new Set(input.topology.nodes.map((node) => node.id));
+  const validNames = new Set(input.topology.nodes);
   const seeds = new Set<string>();
 
   for (const agent of input.agents) {

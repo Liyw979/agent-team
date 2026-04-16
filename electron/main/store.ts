@@ -77,13 +77,37 @@ function normalizeMessageContent(content: string, meta?: Record<string, string>)
   return content;
 }
 
+function normalizeTopologyNodes(topology: Record<string, unknown>): string[] {
+  if (Array.isArray(topology.nodes)) {
+    const nextNodes = topology.nodes
+      .map((node) => {
+        if (typeof node === "string") {
+          return node;
+        }
+        if (node && typeof node === "object" && typeof node.id === "string") {
+          return node.id;
+        }
+        return null;
+      })
+      .filter((node): node is string => typeof node === "string" && node.length > 0);
+    if (nextNodes.length > 0) {
+      return nextNodes;
+    }
+  }
+
+  if (Array.isArray(topology.agentOrderIds)) {
+    return topology.agentOrderIds.filter((item): item is string => typeof item === "string" && item.length > 0);
+  }
+
+  return [];
+}
+
 function createDefaultProjectState(projectId: string): ProjectStateFile {
   return {
     version: 1,
     topology: {
       projectId,
       startAgentId: null,
-      agentOrderIds: [],
       nodes: [],
       edges: [],
     },
@@ -540,11 +564,32 @@ export class StoreService {
               projectId,
               startAgentId:
                 typeof parsed.topology.startAgentId === "string" ? parsed.topology.startAgentId : null,
-              agentOrderIds: Array.isArray(parsed.topology.agentOrderIds)
-                ? parsed.topology.agentOrderIds.filter((item): item is string => typeof item === "string")
+              nodes: normalizeTopologyNodes(parsed.topology),
+              edges: Array.isArray(parsed.topology.edges)
+                ? parsed.topology.edges
+                    .filter((edge): edge is Record<string, unknown> => Boolean(edge) && typeof edge === "object")
+                    .map((edge) => ({
+                      source: typeof edge.source === "string" ? edge.source : "",
+                      target: typeof edge.target === "string" ? edge.target : "",
+                      triggerOn: edge.triggerOn,
+                    }))
+                    .filter(
+                      (edge): edge is ProjectStateFile["topology"]["edges"][number] =>
+                        Boolean(edge.source)
+                        && Boolean(edge.target)
+                        && (
+                          edge.triggerOn === "association"
+                          || edge.triggerOn === "review_pass"
+                          || edge.triggerOn === "review_fail"
+                          || edge.triggerOn === "review"
+                        ),
+                    )
+                    .map((edge) => ({
+                      source: edge.source,
+                      target: edge.target,
+                      triggerOn: edge.triggerOn === "review" ? "review_fail" : edge.triggerOn,
+                    }))
                 : [],
-              nodes: Array.isArray(parsed.topology.nodes) ? parsed.topology.nodes : [],
-              edges: Array.isArray(parsed.topology.edges) ? parsed.topology.edges : [],
             }
           : createDefaultProjectState(projectId).topology,
       tasks,

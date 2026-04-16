@@ -59,8 +59,8 @@ export function getTopologyEdgeTriggerAppearance(triggerOn: TopologyEdge["trigge
 }
 
 export function getTopologyNodeOrder(
-  topology: Pick<TopologyRecord, "nodes" | "agentOrderIds">,
+  topology: Pick<TopologyRecord, "nodes">,
   defaultAgentOrderIds: string[],
 ) {
-  return topology.agentOrderIds.length > 0 ? topology.agentOrderIds : defaultAgentOrderIds;
+  return topology.nodes.length > 0 ? topology.nodes : defaultAgentOrderIds;
 }

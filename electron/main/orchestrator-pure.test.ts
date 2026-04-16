@@ -19,11 +19,11 @@ import {
 function createTopologyForTest(input: {
   projectId: string;
   startAgentId: string | null;
-  agentOrderIds: string[];
+  nodes: string[];
   edges: Array<{ source: string; target: string; triggerOn: TopologyEdgeTrigger }>;
 }): TopologyRecord {
   const nodeIds = new Set<string>();
-  for (const agentId of input.agentOrderIds) {
+  for (const agentId of input.nodes) {
     nodeIds.add(agentId);
   }
   if (input.startAgentId) {
@@ -37,10 +37,8 @@ function createTopologyForTest(input: {
   return {
     projectId: input.projectId,
     startAgentId: input.startAgentId,
-    agentOrderIds: input.agentOrderIds,
-    nodes: [...nodeIds].map((id) => ({ id, label: id, kind: "agent" as const })),
+    nodes: [...nodeIds],
     edges: input.edges.map((edge) => ({
-      id: `${edge.source}__${edge.target}__${edge.triggerOn}`,
       source: edge.source,
       target: edge.target,
       triggerOn: edge.triggerOn,
@@ -131,7 +129,7 @@ test("旧运行数据里悬空 idle Agent 不会阻止持久化补偿逻辑判�
   const topology = createTopologyForTest({
     projectId: "project-1",
     startAgentId: "BA",
-    agentOrderIds: ["BA", "Build", "CodeReview", "IntegrationTest", "TaskReview", "UnitTest"],
+    nodes: ["BA", "Build", "CodeReview", "IntegrationTest", "TaskReview", "UnitTest"],
     edges: [
       { source: "BA", target: "Build", triggerOn: "association" },
       { source: "Build", target: "UnitTest", triggerOn: "association" },
@@ -168,7 +166,7 @@ test("最新一条仍是用户 @Agent 追问时，持久化补偿逻辑不会提
   const topology = createTopologyForTest({
     projectId: "project-1",
     startAgentId: "UnitTest",
-    agentOrderIds: ["UnitTest"],
+    nodes: ["UnitTest"],
     edges: [],
   });
   const agents = [

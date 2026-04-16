@@ -69,17 +69,12 @@ function getTopologyHtml(messages: TaskSnapshot["messages"] = []) {
   const topology: TopologyRecord = {
     projectId: "project-1",
     startAgentId: "BA",
-    agentOrderIds: ["TaskReview", "BA", "Build"],
-    nodes: [
-      { id: "BA", label: "BA", kind: "agent" },
-      { id: "TaskReview", label: "TaskReview", kind: "agent" },
-      { id: "Build", label: "Build", kind: "agent" },
-    ],
+    nodes: ["TaskReview", "BA", "Build"],
     edges: [
-      { id: "BA__Build__association", source: "BA", target: "Build", triggerOn: "association" },
-      { id: "Build__TaskReview__association", source: "Build", target: "TaskReview", triggerOn: "association" },
-      { id: "TaskReview__BA__review_pass", source: "TaskReview", target: "BA", triggerOn: "review_pass" },
-      { id: "TaskReview__Build__review_fail", source: "TaskReview", target: "Build", triggerOn: "review_fail" },
+      { source: "BA", target: "Build", triggerOn: "association" },
+      { source: "Build", target: "TaskReview", triggerOn: "association" },
+      { source: "TaskReview", target: "BA", triggerOn: "review_pass" },
+      { source: "TaskReview", target: "Build", triggerOn: "review_fail" },
     ],
   };
 

@@ -111,16 +111,9 @@ export interface TaskPanelRecord {
   order: number;
 }
 
-export interface TopologyNode {
-  id: string;
-  label: string;
-  kind: "agent" | "checkpoint";
-}
-
 export type TopologyEdgeTrigger = "association" | "review_pass" | "review_fail";
 
 export interface TopologyEdge {
-  id: string;
   source: string;
   target: string;
   triggerOn: TopologyEdgeTrigger;
@@ -129,8 +122,7 @@ export interface TopologyEdge {
 export interface TopologyRecord {
   projectId: string;
   startAgentId: string | null;
-  agentOrderIds: string[];
-  nodes: TopologyNode[];
+  nodes: string[];
   edges: TopologyEdge[];
 }
 
@@ -323,12 +315,8 @@ export const DEFAULT_BUILTIN_AGENT_TEMPLATES: BuiltinAgentTemplateRecord[] = [
   },
 ];
 
-function createNode(name: string): TopologyNode {
-  return {
-    id: name,
-    label: name,
-    kind: "agent",
-  };
+export function getTopologyEdgeId(edge: Pick<TopologyEdge, "source" | "target" | "triggerOn">): string {
+  return `${edge.source}__${edge.target}__${edge.triggerOn}`;
 }
 
 export function isReviewAgentInTopology(
@@ -390,9 +378,8 @@ export function createDefaultTopology(
   projectId: string,
   agents: TopologyAgentSeed[],
 ): TopologyRecord {
-  const agentOrderIds = resolveTopologyAgentOrder(agents);
-  const names = new Set(agentOrderIds);
-  const nodes = agentOrderIds.map(createNode);
+  const nodes = resolveTopologyAgentOrder(agents);
+  const names = new Set(nodes);
   const edges: TopologyEdge[] = [];
 
   const startAgentName = resolveTopologyStartAgent(agents);
@@ -413,7 +400,6 @@ export function createDefaultTopology(
       return;
     }
     edges.push({
-      id: `${source}__${target}__${triggerOn}`,
       source,
       target,
       triggerOn,
@@ -425,7 +411,6 @@ export function createDefaultTopology(
   return {
     projectId,
     startAgentId: startAgent?.name ?? null,
-    agentOrderIds,
     nodes,
     edges,
   };

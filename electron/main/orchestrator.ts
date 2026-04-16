@@ -18,6 +18,7 @@ import {
   type DeleteTaskPayload,
   type GetTaskRuntimePayload,
   type InitializeTaskPayload,
+  getTopologyEdgeId,
   getProjectNameFromPath,
   type MessageRecord,
   type OpenAgentTerminalPayload,
@@ -1474,7 +1475,7 @@ export class Orchestrator {
   ): boolean {
     const incomingEdges = this.getIncomingEdges(topology, agentName, "association")
       .concat(this.getIncomingEdges(topology, agentName, "review_pass"));
-    return incomingEdges.every((edge) => completedEdges.has(edge.id));
+    return incomingEdges.every((edge) => completedEdges.has(getTopologyEdgeId(edge)));
   }
 
   private hasSatisfiedOutgoingAssociation(
@@ -1484,7 +1485,7 @@ export class Orchestrator {
   ): boolean {
     const outgoingEdges = this.getOutgoingEdges(topology, agentName, "association")
       .concat(this.getOutgoingEdges(topology, agentName, "review_pass"));
-    return outgoingEdges.every((edge) => completedEdges.has(edge.id));
+    return outgoingEdges.every((edge) => completedEdges.has(getTopologyEdgeId(edge)));
   }
 
   private invalidateDownstreamTriggerSignatures(taskId: string, agentName: string) {
@@ -1863,7 +1864,7 @@ export class Orchestrator {
     topologyOverride?: TopologyRecord,
   ): string[] {
     const topology = topologyOverride ?? this.store.getTopology(projectId);
-    return resolveTopologyAgentOrder(agentFiles, topology.agentOrderIds);
+    return resolveTopologyAgentOrder(agentFiles, topology.nodes);
   }
 
   private orderAgentFiles(
@@ -2101,33 +2102,21 @@ export class Orchestrator {
         return true;
       })
       .map((edge) => ({
-        ...edge,
-        id: `${edge.source}__${edge.target}__${edge.triggerOn}`,
+        source: edge.source,
+        target: edge.target,
+        triggerOn: edge.triggerOn,
       }));
-    const nodes = agentFiles.map((file) => ({
-      id: file.name,
-      label: file.name,
-      kind: "agent" as const,
-    }));
-    const agentOrderIds = resolveTopologyAgentOrder(
+    const nodes = resolveTopologyAgentOrder(
       agentFiles.map((file) => ({ name: file.name })),
-      Array.isArray(topology.agentOrderIds)
-        ? topology.agentOrderIds
-            .filter((item): item is string => typeof item === "string" && validNames.has(item))
-        : null,
+      topology.nodes.filter((item) => validNames.has(item)),
     );
-    const orderedNodes = agentOrderIds.map((agentName) => {
-      const node = nodes.find((item) => item.id === agentName);
-      return node ?? { id: agentName, label: agentName, kind: "agent" as const };
-    });
 
     return {
       projectId,
       startAgentId: resolveTopologyStartAgent(
         agentFiles.map((file) => ({ name: file.name })),
       ),
-      agentOrderIds,
-      nodes: orderedNodes,
+      nodes,
       edges,
     };
   }

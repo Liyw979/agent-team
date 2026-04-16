@@ -770,21 +770,14 @@ test("只有第一次 Agent 间传递会携带 [Initial Task]", async () => {
     topology: {
       ...project.topology,
       startAgentId: "BA",
-      agentOrderIds: ["BA", "Build", "QA"],
-      nodes: [
-        { id: "BA", label: "BA", kind: "agent" },
-        { id: "Build", label: "Build", kind: "agent" },
-        { id: "QA", label: "QA", kind: "agent" },
-      ],
+      nodes: ["BA", "Build", "QA"],
       edges: [
         {
-          id: "BA__Build__association",
           source: "BA",
           target: "Build",
           triggerOn: "association",
         },
         {
-          id: "Build__QA__association",
           source: "Build",
           target: "QA",
           triggerOn: "association",
@@ -896,27 +889,19 @@ test("审查回流再次派发时不会重复携带 [Initial Task]", async () =>
     topology: {
       ...project.topology,
       startAgentId: "BA",
-      agentOrderIds: ["BA", "Build", "CodeReview"],
-      nodes: [
-        { id: "BA", label: "BA", kind: "agent" },
-        { id: "Build", label: "Build", kind: "agent" },
-        { id: "CodeReview", label: "CodeReview", kind: "agent" },
-      ],
+      nodes: ["BA", "Build", "CodeReview"],
       edges: [
         {
-          id: "BA__Build__association",
           source: "BA",
           target: "Build",
           triggerOn: "association",
         },
         {
-          id: "Build__CodeReview__association",
           source: "Build",
           target: "CodeReview",
           triggerOn: "association",
         },
         {
-          id: "CodeReview__Build__review_fail",
           source: "CodeReview",
           target: "Build",
           triggerOn: "review_fail",
@@ -1032,34 +1017,24 @@ test("审查 Agent 的结构化 prompt 不会混入 Project Git Diff Summary", a
     topology: {
       ...project.topology,
       startAgentId: "BA",
-      agentOrderIds: ["BA", "Build", "TaskReview", "Ops"],
-      nodes: [
-        { id: "BA", label: "BA", kind: "agent" },
-        { id: "Build", label: "Build", kind: "agent" },
-        { id: "TaskReview", label: "TaskReview", kind: "agent" },
-        { id: "Ops", label: "Ops", kind: "agent" },
-      ],
+      nodes: ["BA", "Build", "TaskReview", "Ops"],
       edges: [
         {
-          id: "BA__Build__association",
           source: "BA",
           target: "Build",
           triggerOn: "association",
         },
         {
-          id: "Build__TaskReview__association",
           source: "Build",
           target: "TaskReview",
           triggerOn: "association",
         },
         {
-          id: "Build__Ops__association",
           source: "Build",
           target: "Ops",
           triggerOn: "association",
         },
         {
-          id: "TaskReview__Build__review_fail",
           source: "TaskReview",
           target: "Build",
           triggerOn: "review_fail",
@@ -1188,20 +1163,14 @@ test("Build 不会在首轮 reviewer 批次未收齐前提前进入下一轮修�
     topology: {
       ...project.topology,
       startAgentId: "Build",
-      agentOrderIds: ["Build", "UnitTest", "TaskReview", "CodeReview"],
-      nodes: [
-        { id: "Build", label: "Build", kind: "agent" },
-        { id: "UnitTest", label: "UnitTest", kind: "agent" },
-        { id: "TaskReview", label: "TaskReview", kind: "agent" },
-        { id: "CodeReview", label: "CodeReview", kind: "agent" },
-      ],
+      nodes: ["Build", "UnitTest", "TaskReview", "CodeReview"],
       edges: [
-        { id: "Build__UnitTest__association", source: "Build", target: "UnitTest", triggerOn: "association" },
-        { id: "Build__TaskReview__association", source: "Build", target: "TaskReview", triggerOn: "association" },
-        { id: "Build__CodeReview__association", source: "Build", target: "CodeReview", triggerOn: "association" },
-        { id: "UnitTest__Build__review_fail", source: "UnitTest", target: "Build", triggerOn: "review_fail" },
-        { id: "TaskReview__Build__review_fail", source: "TaskReview", target: "Build", triggerOn: "review_fail" },
-        { id: "CodeReview__Build__review_fail", source: "CodeReview", target: "Build", triggerOn: "review_fail" },
+        { source: "Build", target: "UnitTest", triggerOn: "association" },
+        { source: "Build", target: "TaskReview", triggerOn: "association" },
+        { source: "Build", target: "CodeReview", triggerOn: "association" },
+        { source: "UnitTest", target: "Build", triggerOn: "review_fail" },
+        { source: "TaskReview", target: "Build", triggerOn: "review_fail" },
+        { source: "CodeReview", target: "Build", triggerOn: "review_fail" },
       ],
     },
   });
@@ -1464,13 +1433,11 @@ test("审视 Agent 执行中止时不会伪造成整改意见", async () => {
     edges: [
       ...project.topology.edges.filter((edge) => edge.source !== "CodeReview"),
       {
-        id: "Build__CodeReview__association",
         source: "Build",
         target: "CodeReview",
         triggerOn: "association" as const,
       },
       {
-        id: "CodeReview__Build__review_fail",
         source: "CodeReview",
         target: "Build",
         triggerOn: "review_fail" as const,
@@ -1613,14 +1580,9 @@ test("Task 进入 finished 状态时会统一把所有 Agent 节点显示为已�
     topology: {
       ...project.topology,
       startAgentId: "Build",
-      agentOrderIds: ["Build", "QA"],
-      nodes: [
-        { id: "Build", label: "Build", kind: "agent" },
-        { id: "QA", label: "QA", kind: "agent" },
-      ],
+      nodes: ["Build", "QA"],
       edges: [
         {
-          id: "Build__QA__association",
           source: "Build",
           target: "QA",
           triggerOn: "association",

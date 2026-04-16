@@ -390,10 +390,10 @@ export function getTopologyEdgeTriggerAppearance(triggerOn: TopologyEdge["trigge
 }
 
 export function getTopologyNodeOrder(
-  topology: Pick<TopologyRecord, "nodes" | "agentOrderIds">,
+  topology: Pick<TopologyRecord, "nodes">,
   defaultAgentOrderIds: string[],
 ) {
-  return topology.agentOrderIds.length > 0 ? topology.agentOrderIds : defaultAgentOrderIds;
+  return topology.nodes.length > 0 ? topology.nodes : defaultAgentOrderIds;
 }
 
 function getRoleRank(role: AgentRole | null | undefined) {
@@ -431,14 +431,10 @@ function computeNodeLayout(
       targetPosition: Position;
     }
   >();
-  const nodeIds = draft.nodes.map((node) => node.id);
+  const nodeIds = [...draft.nodes];
   const nodeIdSet = new Set(nodeIds);
   const startAgentId = nodeIdSet.has(draft.startAgentId ?? "") ? draft.startAgentId : nodeIds[0] ?? null;
-  const manualOrderIndex = new Map(
-    (draft.agentOrderIds ?? [])
-      .filter((agentId) => nodeIdSet.has(agentId))
-      .map((agentId, index) => [agentId, index] as const),
-  );
+  const manualOrderIndex = new Map(nodeIds.map((agentId, index) => [agentId, index] as const));
   const directIncomingByNode = new Map(nodeIds.map((nodeId) => [nodeId, 0]));
   const ancestorSets = new Map(nodeIds.map((nodeId) => [nodeId, new Set<string>()]));
 
@@ -1085,7 +1081,7 @@ export function TopologyGraph({
     () =>
       resolveTopologyAgentOrder(
         project?.agentFiles.map((agent) => ({ name: agent.name })) ?? [],
-        project?.topology.agentOrderIds ?? null,
+        project?.topology.nodes ?? null,
       ),
     [project],
   );
@@ -1100,7 +1096,7 @@ export function TopologyGraph({
     return computeNodeLayout(
       {
         ...draft,
-        agentOrderIds: draft.agentOrderIds.length > 0 ? draft.agentOrderIds : defaultAgentOrderIds,
+        nodes: draft.nodes.length > 0 ? draft.nodes : defaultAgentOrderIds,
       },
       agentRoles,
       {
@@ -1130,7 +1126,7 @@ export function TopologyGraph({
     return computeNodeLayout(
       {
         ...draft,
-        agentOrderIds: draft.agentOrderIds.length > 0 ? draft.agentOrderIds : defaultAgentOrderIds,
+        nodes: draft.nodes.length > 0 ? draft.nodes : defaultAgentOrderIds,
       },
       agentRoles,
       {
@@ -1153,8 +1149,8 @@ export function TopologyGraph({
     const taskMessages = task?.messages ?? [];
     const histories = new Map<string, ReturnType<typeof getAgentHistoryFromMessages>>();
 
-    for (const node of draft?.nodes ?? []) {
-      histories.set(node.id, getAgentHistoryFromMessages(taskMessages, draft, node.id));
+    for (const nodeId of draft?.nodes ?? []) {
+      histories.set(nodeId, getAgentHistoryFromMessages(taskMessages, draft, nodeId));
     }
 
     return histories;
@@ -1206,33 +1202,33 @@ export function TopologyGraph({
       return [];
     }
 
-    return draft.nodes.map((node) => {
-      const displayName = getAgentDisplayName(node.label);
-      const agentState = taskStatuses.get(node.id) ?? "idle";
-      const agentColor = getAgentColorToken(node.id);
-      const active = node.id === selectedAgentId;
-      const hovered = node.id === hoveredAgentId;
-      const connectedFromHovered = highlightedOutgoingTargets.has(node.id);
-      const layout = layoutByNode.get(node.id) ?? {
+    return draft.nodes.map((nodeId) => {
+      const displayName = getAgentDisplayName(nodeId);
+      const agentState = taskStatuses.get(nodeId) ?? "idle";
+      const agentColor = getAgentColorToken(nodeId);
+      const active = nodeId === selectedAgentId;
+      const hovered = nodeId === hoveredAgentId;
+      const connectedFromHovered = highlightedOutgoingTargets.has(nodeId);
+      const layout = layoutByNode.get(nodeId) ?? {
         x: NODE_START_X,
         y: NODE_START_Y,
         sourcePosition: Position.Right,
         targetPosition: Position.Left,
       };
-      const runtime = agentState === "running" ? runtimeSnapshots[node.id] : undefined;
-      const statusBadge = getAgentStatusBadge(topologyForStatus, node.id, agentState);
+      const runtime = agentState === "running" ? runtimeSnapshots[nodeId] : undefined;
+      const statusBadge = getAgentStatusBadge(topologyForStatus, nodeId, agentState);
       const agentBlockHeight = getAgentBlockHeight(agentState);
-      const historyItems = agentHistories.get(node.id) ?? [];
+      const historyItems = agentHistories.get(nodeId) ?? [];
       const appearance = getAgentCardAppearance(agentState, agentColor);
       const visibleHistory =
         runtime && agentState === "running"
-          ? [...historyItems, ...getRuntimeHistoryItems(runtime, node.id)]
+          ? [...historyItems, ...getRuntimeHistoryItems(runtime, nodeId)]
               .sort((left, right) => left.sortTimestamp.localeCompare(right.sortTimestamp))
               .slice(-MAX_VISIBLE_HISTORY_ITEMS)
           : historyItems;
       const historyTopOffset = agentBlockHeight + HISTORY_STACK_GAP;
       const bindHistoryScrollRef = (element: HTMLDivElement | null) => {
-        const current = historyScrollRefs.current.get(node.id) ?? new Set<HTMLDivElement>();
+        const current = historyScrollRefs.current.get(nodeId) ?? new Set<HTMLDivElement>();
         current.forEach((registeredElement) => {
           if (!registeredElement.isConnected) {
             current.delete(registeredElement);
@@ -1241,16 +1237,16 @@ export function TopologyGraph({
 
         if (element) {
           current.add(element);
-          if (!historyAutoStickToBottom.current.has(node.id)) {
-            historyAutoStickToBottom.current.set(node.id, true);
+          if (!historyAutoStickToBottom.current.has(nodeId)) {
+            historyAutoStickToBottom.current.set(nodeId, true);
           }
         }
 
         if (current.size > 0) {
-          historyScrollRefs.current.set(node.id, current);
+          historyScrollRefs.current.set(nodeId, current);
         } else {
-          historyScrollRefs.current.delete(node.id);
-          historyAutoStickToBottom.current.delete(node.id);
+          historyScrollRefs.current.delete(nodeId);
+          historyAutoStickToBottom.current.delete(nodeId);
         }
       };
       const updateHoveredHistoryPreview = (
@@ -1300,7 +1296,7 @@ export function TopologyGraph({
       } as const;
 
       return {
-        id: node.id,
+        id: nodeId,
         position: { x: layout.x, y: layout.y },
         sourcePosition: layout.sourcePosition,
         targetPosition: layout.targetPosition,
@@ -1374,7 +1370,7 @@ export function TopologyGraph({
                         const element = event.currentTarget;
                         const distanceToBottom =
                           element.scrollHeight - element.clientHeight - element.scrollTop;
-                        historyAutoStickToBottom.current.set(node.id, distanceToBottom <= 12);
+                        historyAutoStickToBottom.current.set(nodeId, distanceToBottom <= 12);
                       }}
                       className="nowheel min-h-0 flex-1 space-y-1 overflow-y-auto pr-1"
                     >
@@ -1389,7 +1385,7 @@ export function TopologyGraph({
                           onMouseEnter={(event) => {
                             event.stopPropagation();
                             updateHoveredHistoryPreview(event, {
-                              agentName: getAgentDisplayName(node.label),
+                              agentName: getAgentDisplayName(nodeId),
                               label: item.label,
                               timestamp: item.timestamp,
                               content: item.fullDetail,
@@ -1397,7 +1393,7 @@ export function TopologyGraph({
                           }}
                           onMouseMove={(event) => {
                             updateHoveredHistoryPreview(event, {
-                              agentName: getAgentDisplayName(node.label),
+                              agentName: getAgentDisplayName(nodeId),
                               label: item.label,
                               timestamp: item.timestamp,
                               content: item.fullDetail,
@@ -1411,7 +1407,7 @@ export function TopologyGraph({
                           onClick={(event) => {
                             event.stopPropagation();
                             setSelectedHistoryRecord({
-                              agentName: getAgentDisplayName(node.label),
+                              agentName: getAgentDisplayName(nodeId),
                               label: item.label,
                               timestamp: item.timestamp,
                               content: item.fullDetail,
@@ -1481,7 +1477,7 @@ export function TopologyGraph({
   const edges = useMemo<Edge[]>(() => {
     const nodeOrder = new Map(
       draft?.nodes
-        .map((node) => node.id)
+        .map((node) => node)
         .sort((left, right) => {
           const leftX = autoLayout.layoutByNode.get(left)?.x ?? 0;
           const rightX = autoLayout.layoutByNode.get(right)?.x ?? 0;
@@ -1500,7 +1496,9 @@ export function TopologyGraph({
       if (leftTargetOrder !== rightTargetOrder) {
         return leftTargetOrder - rightTargetOrder;
       }
-      return left.id.localeCompare(right.id);
+      return createEdgeId(left.source, left.target, left.triggerOn).localeCompare(
+        createEdgeId(right.source, right.target, right.triggerOn),
+      );
     });
 
     return orderedEdges.map((edge, index) => {
@@ -1511,7 +1509,7 @@ export function TopologyGraph({
         edge.target !== hoveredAgentId;
 
       return {
-        id: edge.id,
+        id: createEdgeId(edge.source, edge.target, edge.triggerOn),
         source: edge.source,
         target: edge.target,
         type: "curvedTopology",
@@ -1587,7 +1585,6 @@ export function TopologyGraph({
       ? [
           ...retained,
           {
-            id: createEdgeId(editingAgentId, target, triggerOn),
             source: editingAgentId,
             target,
             triggerOn,
@@ -1693,7 +1690,7 @@ export function TopologyGraph({
             <div className="max-h-full space-y-2 overflow-y-auto">
               {(draft?.edges ?? []).map((edge) => (
                 <button
-                  key={edge.id}
+                  key={createEdgeId(edge.source, edge.target, edge.triggerOn)}
                   type="button"
                   onClick={() => {
                     onSelectAgent(edge.source);
