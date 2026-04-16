@@ -652,6 +652,10 @@ test("下游结构化 prompt 的 [Initial Task] 使用首条用户任务而不�
   });
 
   const typed = orchestrator as unknown as Orchestrator & {
+    opencodeClient: {
+      createSession: (projectPath: string, title: string) => Promise<string>;
+      reloadConfig: () => Promise<void>;
+    };
     createUserMessage: (
       projectId: string,
       taskId: string,
@@ -684,6 +688,9 @@ test("下游结构化 prompt 的 [Initial Task] 使用首条用户任务而不�
     };
   };
 
+  typed.opencodeClient.createSession = async (_projectPath, title) => `session:${title}`;
+  typed.opencodeClient.reloadConfig = async () => undefined;
+
   let project = await orchestrator.createProject({ path: projectPath });
   project = await addBuiltinAgents(orchestrator, project.project.id, ["Build"]);
   const task = await orchestrator.initializeTask({ projectId: project.project.id, title: "demo" });
@@ -711,6 +718,257 @@ test("下游结构化 prompt 的 [Initial Task] 使用首条用户任务而不�
 
   assert.equal(forwarded.userMessage, "初始任务：实现加法工具");
   assert.equal(forwarded.agentMessage, "Build 已完成实现，等待下游继续处理。");
+});
+
+test("只有第一次 Agent 间传递会携带 [Initial Task]", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  const orchestrator = createTestOrchestrator({
+    userDataPath,
+    enableEventStream: false,
+    zellijManager: {
+      isAvailable: async () => true,
+      createTaskSession: async () => "oap-project-task",
+      createPanelBindings: () => [],
+      materializePanelBindings: async () => [],
+      openTaskSession: async () => undefined,
+      deleteTaskSession: async () => undefined,
+      setOpenCodeAttachBaseUrl: () => undefined,
+    } as never,
+  });
+
+  const typed = orchestrator as unknown as Orchestrator & {
+    opencodeClient: {
+      createSession: (projectPath: string, title: string) => Promise<string>;
+      reloadConfig: () => Promise<void>;
+    };
+    opencodeRunner: {
+      run: (payload: { agent: string; content: string }) => Promise<{
+        status: "completed";
+        finalMessage: string;
+        fallbackMessage: null;
+        messageId: string;
+        timestamp: string;
+        rawMessage: {
+          content: string;
+          error: null;
+        };
+      }>;
+    };
+  };
+
+  const promptByAgent = new Map<string, string[]>();
+  const recordPrompt = (agent: string, content: string) => {
+    const current = promptByAgent.get(agent) ?? [];
+    current.push(content);
+    promptByAgent.set(agent, current);
+  };
+  const completedResponse = (agent: string, content: string) => ({
+    status: "completed" as const,
+    finalMessage: content,
+    fallbackMessage: null,
+    messageId: `message:${agent}:${(promptByAgent.get(agent) ?? []).length}`,
+    timestamp: "2026-04-15T00:00:00.000Z",
+    rawMessage: {
+      content,
+      error: null,
+    },
+  });
+
+  typed.opencodeClient.createSession = async (_projectPath, title) => `session:${title}`;
+  typed.opencodeClient.reloadConfig = async () => undefined;
+  typed.opencodeRunner.run = async ({ agent, content }) => {
+    recordPrompt(agent, content);
+    if (agent === "BA") {
+      return completedResponse(agent, "需求已澄清，交给 Build 继续实现。");
+    }
+    if (agent === "Build") {
+      return completedResponse(agent, "构建已完成，交给 QA 继续验证。");
+    }
+    return completedResponse(agent, "验证已完成。");
+  };
+
+  let project = await orchestrator.createProject({ path: projectPath });
+  project = await addBuiltinAgents(orchestrator, project.project.id, ["BA", "Build"]);
+  project = await addCustomAgent(orchestrator, project.project.id, "QA", "你是 QA。");
+  await orchestrator.saveTopology({
+    projectId: project.project.id,
+    topology: {
+      ...project.topology,
+      startAgentId: "BA",
+      agentOrderIds: ["BA", "Build", "QA"],
+      nodes: [
+        { id: "BA", label: "BA", kind: "agent" },
+        { id: "Build", label: "Build", kind: "agent" },
+        { id: "QA", label: "QA", kind: "agent" },
+      ],
+      edges: [
+        {
+          id: "BA__Build__association",
+          source: "BA",
+          target: "Build",
+          triggerOn: "association",
+        },
+        {
+          id: "Build__QA__association",
+          source: "Build",
+          target: "QA",
+          triggerOn: "association",
+        },
+      ],
+    },
+  });
+
+  const submittedTask = await orchestrator.submitTask({
+    projectId: project.project.id,
+    content: "@BA 请实现 add 方法，并补充验证说明。",
+  });
+
+  await waitForTaskSnapshot(
+    orchestrator,
+    submittedTask.task.id,
+    (current) =>
+      current.task.status === "finished"
+      && current.agents.every((agent) => agent.runCount === 1),
+  );
+
+  assert.match(promptByAgent.get("Build")?.[0] ?? "", /\[Initial Task\]/u);
+  assert.match(promptByAgent.get("Build")?.[0] ?? "", /\[From BA Agent\]/u);
+  assert.match(promptByAgent.get("QA")?.[0] ?? "", /\[From Build Agent\]/u);
+  assert.doesNotMatch(promptByAgent.get("QA")?.[0] ?? "", /\[Initial Task\]/u);
+});
+
+test("审查回流再次派发时不会重复携带 [Initial Task]", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  const orchestrator = createTestOrchestrator({
+    userDataPath,
+    enableEventStream: false,
+    zellijManager: {
+      isAvailable: async () => true,
+      createTaskSession: async () => "oap-project-task",
+      createPanelBindings: () => [],
+      materializePanelBindings: async () => [],
+      openTaskSession: async () => undefined,
+      deleteTaskSession: async () => undefined,
+      setOpenCodeAttachBaseUrl: () => undefined,
+    } as never,
+  });
+
+  const typed = orchestrator as unknown as Orchestrator & {
+    opencodeClient: {
+      createSession: (projectPath: string, title: string) => Promise<string>;
+      reloadConfig: () => Promise<void>;
+    };
+    opencodeRunner: {
+      run: (payload: { agent: string; content: string }) => Promise<{
+        status: "completed";
+        finalMessage: string;
+        fallbackMessage: null;
+        messageId: string;
+        timestamp: string;
+        rawMessage: {
+          content: string;
+          error: null;
+        };
+      }>;
+    };
+  };
+
+  const promptByAgent = new Map<string, string[]>();
+  const recordPrompt = (agent: string, content: string) => {
+    const current = promptByAgent.get(agent) ?? [];
+    current.push(content);
+    promptByAgent.set(agent, current);
+    return current.length;
+  };
+  const completedResponse = (agent: string, count: number, content: string) => ({
+    status: "completed" as const,
+    finalMessage: content,
+    fallbackMessage: null,
+    messageId: `message:${agent}:${count}`,
+    timestamp: `2026-04-15T00:00:0${count}.000Z`,
+    rawMessage: {
+      content,
+      error: null,
+    },
+  });
+
+  typed.opencodeClient.createSession = async (_projectPath, title) => `session:${title}`;
+  typed.opencodeClient.reloadConfig = async () => undefined;
+  typed.opencodeRunner.run = async ({ agent, content }) => {
+    const count = recordPrompt(agent, content);
+    if (agent === "BA") {
+      return completedResponse(agent, count, "需求已澄清，交给 Build 继续实现。");
+    }
+    if (agent === "Build") {
+      return count === 1
+        ? completedResponse(agent, count, "构建已完成，交给 CodeReview 审查。")
+        : completedResponse(agent, count, "已根据审查意见修复完成。");
+    }
+    return count === 1
+      ? completedResponse(
+          agent,
+          count,
+          "审查未通过。\n\n<revision_request> 请修复构建结果。</revision_request>",
+        )
+      : completedResponse(agent, count, "审查通过。");
+  };
+
+  let project = await orchestrator.createProject({ path: projectPath });
+  project = await addBuiltinAgents(orchestrator, project.project.id, ["BA", "Build", "CodeReview"]);
+  await orchestrator.saveTopology({
+    projectId: project.project.id,
+    topology: {
+      ...project.topology,
+      startAgentId: "BA",
+      agentOrderIds: ["BA", "Build", "CodeReview"],
+      nodes: [
+        { id: "BA", label: "BA", kind: "agent" },
+        { id: "Build", label: "Build", kind: "agent" },
+        { id: "CodeReview", label: "CodeReview", kind: "agent" },
+      ],
+      edges: [
+        {
+          id: "BA__Build__association",
+          source: "BA",
+          target: "Build",
+          triggerOn: "association",
+        },
+        {
+          id: "Build__CodeReview__association",
+          source: "Build",
+          target: "CodeReview",
+          triggerOn: "association",
+        },
+        {
+          id: "CodeReview__Build__review_fail",
+          source: "CodeReview",
+          target: "Build",
+          triggerOn: "review_fail",
+        },
+      ],
+    },
+  });
+
+  const submittedTask = await orchestrator.submitTask({
+    projectId: project.project.id,
+    content: "@BA 请实现 add 方法，并准备审查修复。",
+  });
+
+  await waitForTaskSnapshot(
+    orchestrator,
+    submittedTask.task.id,
+    () =>
+      (promptByAgent.get("Build")?.length ?? 0) >= 2
+      && (promptByAgent.get("CodeReview")?.length ?? 0) >= 1,
+  );
+
+  assert.match(promptByAgent.get("Build")?.[0] ?? "", /\[Initial Task\]/u);
+  assert.doesNotMatch(promptByAgent.get("CodeReview")?.[0] ?? "", /\[Initial Task\]/u);
+  assert.match(promptByAgent.get("CodeReview")?.[0] ?? "", /\[From Build Agent\]/u);
+  assert.doesNotMatch(promptByAgent.get("Build")?.[1] ?? "", /\[Initial Task\]/u);
+  assert.match(promptByAgent.get("Build")?.[1] ?? "", /\[From CodeReview Agent\]/u);
 });
 
 test("审视类 system prompt 会使用真实来源 Agent 名称", () => {

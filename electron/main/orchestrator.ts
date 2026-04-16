@@ -83,6 +83,7 @@ interface TaskRuntimeState {
   completedEdges: Set<string>;
   edgeTriggerVersion: Map<string, number>;
   lastSignatureByAgent: Map<string, string>;
+  hasForwardedInitialTask: boolean;
   runningAgents: Set<string>;
   queuedAgents: Set<string>;
   queuedPromptsByAgent: Map<string, AgentExecutionPrompt>;
@@ -644,6 +645,7 @@ export class Orchestrator {
       completedEdges: new Set(),
       edgeTriggerVersion: new Map(),
       lastSignatureByAgent: new Map(),
+      hasForwardedInitialTask: false,
       runningAgents: new Set(),
       queuedAgents: new Set(),
       queuedPromptsByAgent: new Map(),
@@ -1172,6 +1174,8 @@ export class Orchestrator {
 
     const currentTask = this.store.getTask(taskId);
     const gitDiffSummary = await this.buildProjectGitDiffSummary(currentTask.cwd);
+    const includeInitialTask = this.consumeInitialTaskForwardingAllowance(taskId);
+    const forwardedContext = this.buildDownstreamForwardedContext(taskId, sourceContent, includeInitialTask);
 
     await Promise.all(
       readyTargets.map(async (targetName) => {
@@ -1180,7 +1184,6 @@ export class Orchestrator {
           return;
         }
 
-        const forwardedContext = this.buildDownstreamForwardedContext(taskId, sourceContent);
         const signature = this.buildTriggerSignature(
           topology,
           completed,
@@ -1254,7 +1257,8 @@ export class Orchestrator {
 
     const currentTask = this.store.getTask(taskId);
     const gitDiffSummary = await this.buildProjectGitDiffSummary(currentTask.cwd);
-    const forwardedContext = this.buildDownstreamForwardedContext(taskId, sourceContent);
+    const includeInitialTask = this.consumeInitialTaskForwardingAllowance(taskId);
+    const forwardedContext = this.buildDownstreamForwardedContext(taskId, sourceContent, includeInitialTask);
 
     await Promise.all(
       uniqueTargets.map(async (targetName) => {
@@ -1298,7 +1302,10 @@ export class Orchestrator {
       || "请直接回应当前内容，给出你的判断、补充、澄清、反驳或修改方案。";
     const reviewContent = formatReviewResponseBlock(opinion);
     const initialUserContent = this.getInitialUserMessageContent(taskId);
-    const userMessage = initialUserContent && !this.contentContainsNormalized(reviewContent, initialUserContent)
+    const includeInitialTask = this.consumeInitialTaskForwardingAllowance(taskId);
+    const userMessage = includeInitialTask
+      && initialUserContent
+      && !this.contentContainsNormalized(reviewContent, initialUserContent)
       ? initialUserContent
       : undefined;
     const currentTask = this.store.getTask(taskId);
@@ -1784,16 +1791,28 @@ export class Orchestrator {
   private buildDownstreamForwardedContext(
     taskId: string,
     sourceContent: string,
+    includeInitialTask = true,
   ): { userMessage?: string; agentMessage: string } {
     const initialUserContent = this.getInitialUserMessageContent(taskId);
     const latestSourceContent = sourceContent.trim();
     return {
       userMessage:
-        initialUserContent && !this.contentContainsNormalized(latestSourceContent, initialUserContent)
+        includeInitialTask
+        && initialUserContent
+        && !this.contentContainsNormalized(latestSourceContent, initialUserContent)
           ? initialUserContent
           : undefined,
       agentMessage: latestSourceContent || "（该上游 Agent 未返回可继续流转的正文。）",
     };
+  }
+
+  private consumeInitialTaskForwardingAllowance(taskId: string): boolean {
+    const runtime = this.getRuntime(taskId);
+    if (runtime.hasForwardedInitialTask) {
+      return false;
+    }
+    runtime.hasForwardedInitialTask = true;
+    return true;
   }
 
   private buildDispatchMessageContent(targetAgentIds: string[], content: string): string {
@@ -2325,6 +2344,7 @@ export class Orchestrator {
         completedEdges: new Set(),
         edgeTriggerVersion: new Map(),
         lastSignatureByAgent: new Map(),
+        hasForwardedInitialTask: false,
         runningAgents: new Set(),
         queuedAgents: new Set(),
         queuedPromptsByAgent: new Map(),
