@@ -6,6 +6,10 @@ import os from "node:os";
 import path from "node:path";
 
 import { DEFAULT_BUILTIN_AGENT_TEMPLATES } from "@shared/types";
+import {
+  REVIEW_RESPONSE_END_LABEL,
+  REVIEW_RESPONSE_LABEL,
+} from "@shared/review-response";
 import { Orchestrator } from "./orchestrator";
 
 function createTempDir() {
@@ -246,6 +250,30 @@ test("zellij 不可用时会追加系统提醒", async () => {
   const task = await orchestrator.initializeTask({ projectId: project.project.id, title: "demo" });
 
   assert.equal(task.messages.some((message) => message.meta?.kind === "zellij-missing"), true);
+});
+
+test("buildProjectGitDiffSummary 在系统没有 git 时返回空字符串", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  const originalPath = process.env.PATH;
+  const orchestrator = createTestOrchestrator({
+    userDataPath,
+    enableEventStream: false,
+  });
+
+  process.env.PATH = createTempDir();
+
+  try {
+    const summary = await (
+      orchestrator as unknown as {
+        buildProjectGitDiffSummary(cwd: string): Promise<string>;
+      }
+    ).buildProjectGitDiffSummary(projectPath);
+
+    assert.equal(summary, "");
+  } finally {
+    process.env.PATH = originalPath;
+  }
 });
 
 test("OpenCode 事件会触发 runtime-updated 前端事件", async () => {
@@ -969,6 +997,8 @@ test("审查回流再次派发时不会重复携带 [Initial Task]", async () =>
   assert.match(promptByAgent.get("CodeReview")?.[0] ?? "", /\[From Build Agent\]/u);
   assert.doesNotMatch(promptByAgent.get("Build")?.[1] ?? "", /\[Initial Task\]/u);
   assert.match(promptByAgent.get("Build")?.[1] ?? "", /\[From CodeReview Agent\]/u);
+  assert.doesNotMatch(promptByAgent.get("Build")?.[1] ?? "", new RegExp(REVIEW_RESPONSE_LABEL, "u"));
+  assert.doesNotMatch(promptByAgent.get("Build")?.[1] ?? "", new RegExp(REVIEW_RESPONSE_END_LABEL, "u"));
 });
 
 test("审视类 system prompt 会使用真实来源 Agent 名称", () => {
@@ -2105,6 +2135,30 @@ test("BA dispatches Build through three review passes before the task can finish
         && message.meta?.targetAgentId === "Build",
     ).length,
     3,
+  );
+  assert.equal(
+    snapshot.messages
+      .filter(
+        (message) =>
+          message.meta?.kind === "revision-request"
+          && message.meta?.targetAgentId === "Build",
+      )
+      .every(
+        (message) =>
+          !message.content.includes(REVIEW_RESPONSE_LABEL)
+          && !message.content.includes(REVIEW_RESPONSE_END_LABEL),
+      ),
+    true,
+  );
+  assert.equal(
+    snapshot.messages
+      .filter(
+        (message) =>
+          message.meta?.kind === "revision-request"
+          && message.meta?.targetAgentId === "Build",
+      )
+      .every((message) => !message.content.includes("审视不通过，请回应以下内容")),
+    true,
   );
   assert.deepEqual(
     snapshot.agents.map((agent) => [agent.name, agent.runCount, agent.status]),

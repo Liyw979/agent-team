@@ -47,7 +47,6 @@ import {
 } from "@shared/chat-message-format";
 import {
   extractTrailingReviewResponseBlock,
-  formatReviewResponseBlock,
   stripReviewResponseMarkup,
 } from "@shared/review-response";
 import { buildZellijMissingReminder } from "@shared/zellij";
@@ -78,6 +77,11 @@ interface ParsedReview {
   decision: ReviewDecision;
   opinion: string | null;
   rawDecisionBlock: string | null;
+}
+
+interface GitSummaryCommandResult {
+  stdout: string;
+  gitMissing: boolean;
 }
 
 interface TaskRuntimeState {
@@ -1301,7 +1305,7 @@ export class Orchestrator {
 
     const opinion = parsedReview.opinion?.trim()
       || "请直接回应当前内容，给出你的判断、补充、澄清、反驳或修改方案。";
-    const reviewContent = formatReviewResponseBlock(opinion);
+    const reviewContent = opinion;
     const initialUserContent = this.getInitialUserMessageContent(taskId);
     const includeInitialTask = this.consumeInitialTaskForwardingAllowance(taskId);
     const userMessage = includeInitialTask
@@ -1313,14 +1317,13 @@ export class Orchestrator {
     const gitDiffSummary = await this.buildProjectGitDiffSummary(currentTask.cwd);
 
     for (const targetName of reviewTargets) {
-      const remediationBody = `审视不通过，请回应以下内容。\n\n${formatReviewResponseBlock(opinion)}`;
       const remediationMessage: MessageRecord = {
         id: randomUUID(),
         projectId: project.id,
         taskId,
         sender: sourceAgent.name,
         timestamp: new Date().toISOString(),
-        content: formatRevisionRequestContent(remediationBody, targetName),
+        content: formatRevisionRequestContent(opinion, targetName),
         meta: {
           kind: "revision-request",
           sourceAgentId: sourceAgent.name,
@@ -1683,16 +1686,14 @@ export class Orchestrator {
   private async buildProjectGitDiffSummary(cwd: string): Promise<string> {
     try {
       const [statusResult, stagedStatResult, unstagedStatResult] = await Promise.all([
-        execFileAsync("git", ["-C", cwd, "status", "--short", "--untracked-files=all"], {
-          timeout: 2500,
-        }).catch(() => ({ stdout: "" })),
-        execFileAsync("git", ["-C", cwd, "diff", "--cached", "--stat", "--compact-summary"], {
-          timeout: 2500,
-        }).catch(() => ({ stdout: "" })),
-        execFileAsync("git", ["-C", cwd, "diff", "--stat", "--compact-summary"], {
-          timeout: 2500,
-        }).catch(() => ({ stdout: "" })),
+        this.runGitSummaryCommand(cwd, ["status", "--short", "--untracked-files=all"]),
+        this.runGitSummaryCommand(cwd, ["diff", "--cached", "--stat", "--compact-summary"]),
+        this.runGitSummaryCommand(cwd, ["diff", "--stat", "--compact-summary"]),
       ]);
+
+      if (statusResult.gitMissing || stagedStatResult.gitMissing || unstagedStatResult.gitMissing) {
+        return "";
+      }
 
       const sections: string[] = [];
       const statusLines = this.limitGitSummaryLines(
@@ -1735,6 +1736,29 @@ export class Orchestrator {
       return `当前项目 Git Diff 精简摘要：\n${sections.join("\n\n")}`.trim();
     } catch {
       return "";
+    }
+  }
+
+  private async runGitSummaryCommand(cwd: string, args: string[]): Promise<GitSummaryCommandResult> {
+    try {
+      const result = await execFileAsync("git", ["-C", cwd, ...args], {
+        timeout: 2500,
+      });
+      return {
+        stdout: result.stdout,
+        gitMissing: false,
+      };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+        return {
+          stdout: "",
+          gitMissing: true,
+        };
+      }
+      return {
+        stdout: "",
+        gitMissing: false,
+      };
     }
   }
 
@@ -1862,7 +1886,7 @@ export class Orchestrator {
 
     const opinion = parsedReview.opinion?.trim();
     if (opinion) {
-      return stripReviewResponseMarkup(formatReviewResponseBlock(opinion));
+      return opinion;
     }
 
     if (parsedReview.decision === "needs_revision") {
