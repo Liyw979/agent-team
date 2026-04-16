@@ -5,26 +5,51 @@ import type { TopologyRecord } from "@shared/types";
 
 import { assertSchedulerScript } from "./scheduler-script-harness";
 
+function createAgentNodes(agentIds: string[]): TopologyRecord["nodes"] {
+  return agentIds.map((id) => ({ id, label: id, kind: "agent" as const }));
+}
+
+function createEdge(
+  source: string,
+  target: string,
+  triggerOn: TopologyRecord["edges"][number]["triggerOn"],
+): TopologyRecord["edges"][number] {
+  return {
+    id: `${source}__${target}__${triggerOn}`,
+    source,
+    target,
+    triggerOn,
+  };
+}
+
+function createTopology(options: {
+  projectId: string;
+  startAgentId: string;
+  agentOrderIds: string[];
+  edges: TopologyRecord["edges"];
+}): TopologyRecord {
+  return {
+    projectId: options.projectId,
+    startAgentId: options.startAgentId,
+    agentOrderIds: options.agentOrderIds,
+    nodes: createAgentNodes(options.agentOrderIds),
+    edges: options.edges,
+  };
+}
+
 test("直接挂在 Build 下的后续节点会等 CodeReview 回合结束后再触发", async () => {
-  const topology: TopologyRecord = {
+  const topology = createTopology({
     projectId: "migrated-script-1021",
     startAgentId: "BA",
     agentOrderIds: ["BA", "Build", "CodeReview", "UnitTest", "TaskReview"],
-    nodes: [
-      { id: "BA", label: "BA", kind: "agent" },
-      { id: "Build", label: "Build", kind: "agent" },
-      { id: "CodeReview", label: "CodeReview", kind: "agent" },
-      { id: "UnitTest", label: "UnitTest", kind: "agent" },
-      { id: "TaskReview", label: "TaskReview", kind: "agent" },
-    ],
     edges: [
-      { id: "BA__Build__association", source: "BA", target: "Build", triggerOn: "association" },
-      { id: "Build__CodeReview__association", source: "Build", target: "CodeReview", triggerOn: "association" },
-      { id: "Build__UnitTest__association", source: "Build", target: "UnitTest", triggerOn: "association" },
-      { id: "Build__TaskReview__association", source: "Build", target: "TaskReview", triggerOn: "association" },
-      { id: "CodeReview__Build__review_fail", source: "CodeReview", target: "Build", triggerOn: "review_fail" },
+      createEdge("BA", "Build", "association"),
+      createEdge("Build", "CodeReview", "association"),
+      createEdge("Build", "UnitTest", "association"),
+      createEdge("Build", "TaskReview", "association"),
+      createEdge("CodeReview", "Build", "review_fail"),
     ],
-  };
+  });
 
   const script = [
     "user: @BA 请先完成实现，再经过 CodeReview，多轮修复结束后再进入其他审查。",
@@ -44,23 +69,17 @@ test("直接挂在 Build 下的后续节点会等 CodeReview 回合结束后再�
 });
 
 test("通用调度脚本模式支持非 Build 的实现者反复修复 reviewer 意见", async () => {
-  const topology: TopologyRecord = {
+  const topology = createTopology({
     projectId: "generic-script-1",
     startAgentId: "Implementer",
     agentOrderIds: ["Implementer", "UnitTest", "TaskReview", "CodeReview"],
-    nodes: [
-      { id: "Implementer", label: "Implementer", kind: "agent" },
-      { id: "UnitTest", label: "UnitTest", kind: "agent" },
-      { id: "TaskReview", label: "TaskReview", kind: "agent" },
-      { id: "CodeReview", label: "CodeReview", kind: "agent" },
-    ],
     edges: [
-      { id: "Implementer__UnitTest__association", source: "Implementer", target: "UnitTest", triggerOn: "association" },
-      { id: "Implementer__TaskReview__association", source: "Implementer", target: "TaskReview", triggerOn: "association" },
-      { id: "Implementer__CodeReview__association", source: "Implementer", target: "CodeReview", triggerOn: "association" },
-      { id: "UnitTest__Implementer__review_fail", source: "UnitTest", target: "Implementer", triggerOn: "review_fail" },
+      createEdge("Implementer", "UnitTest", "association"),
+      createEdge("Implementer", "TaskReview", "association"),
+      createEdge("Implementer", "CodeReview", "association"),
+      createEdge("UnitTest", "Implementer", "review_fail"),
     ],
-  };
+  });
 
   const script = [
     "user: @Implementer 请完成这个需求",
@@ -81,21 +100,15 @@ test("通用调度脚本模式支持非 Build 的实现者反复修复 reviewer 
 });
 
 test("脚本模式要求 topology 显式给出边，脚本里的派发不能脱离 topology 单独存在", async () => {
-  const topology: TopologyRecord = {
+  const topology = createTopology({
     projectId: "generic-script-invalid",
     startAgentId: "Implementer",
     agentOrderIds: ["Implementer", "UnitTest", "TaskReview", "CodeReview"],
-    nodes: [
-      { id: "Implementer", label: "Implementer", kind: "agent" },
-      { id: "UnitTest", label: "UnitTest", kind: "agent" },
-      { id: "TaskReview", label: "TaskReview", kind: "agent" },
-      { id: "CodeReview", label: "CodeReview", kind: "agent" },
-    ],
     edges: [
-      { id: "Implementer__UnitTest__association", source: "Implementer", target: "UnitTest", triggerOn: "association" },
-      { id: "UnitTest__Implementer__review_fail", source: "UnitTest", target: "Implementer", triggerOn: "review_fail" },
+      createEdge("Implementer", "UnitTest", "association"),
+      createEdge("UnitTest", "Implementer", "review_fail"),
     ],
-  };
+  });
 
   const script = [
     "user: @Implementer 请完成这个需求",
@@ -109,25 +122,18 @@ test("脚本模式要求 topology 显式给出边，脚本里的派发不能脱�
 });
 
 test("通用调度脚本模式支持 reviewer 通过后显式触发 review_pass 下游", async () => {
-  const topology: TopologyRecord = {
+  const topology = createTopology({
     projectId: "generic-script-2",
     startAgentId: "BA",
     agentOrderIds: ["BA", "Implementer", "CodeReview", "TaskReview", "UnitTest"],
-    nodes: [
-      { id: "BA", label: "BA", kind: "agent" },
-      { id: "Implementer", label: "Implementer", kind: "agent" },
-      { id: "CodeReview", label: "CodeReview", kind: "agent" },
-      { id: "TaskReview", label: "TaskReview", kind: "agent" },
-      { id: "UnitTest", label: "UnitTest", kind: "agent" },
-    ],
     edges: [
-      { id: "BA__Implementer__association", source: "BA", target: "Implementer", triggerOn: "association" },
-      { id: "Implementer__CodeReview__association", source: "Implementer", target: "CodeReview", triggerOn: "association" },
-      { id: "CodeReview__Implementer__review_fail", source: "CodeReview", target: "Implementer", triggerOn: "review_fail" },
-      { id: "CodeReview__TaskReview__review_pass", source: "CodeReview", target: "TaskReview", triggerOn: "review_pass" },
-      { id: "CodeReview__UnitTest__review_pass", source: "CodeReview", target: "UnitTest", triggerOn: "review_pass" },
+      createEdge("BA", "Implementer", "association"),
+      createEdge("Implementer", "CodeReview", "association"),
+      createEdge("CodeReview", "Implementer", "review_fail"),
+      createEdge("CodeReview", "TaskReview", "review_pass"),
+      createEdge("CodeReview", "UnitTest", "review_pass"),
     ],
-  };
+  });
 
   const script = [
     "user: @BA 请先澄清需求再推进实现",
@@ -144,25 +150,18 @@ test("通用调度脚本模式支持 reviewer 通过后显式触发 review_pass 
 });
 
 test("CodeReview 即使存在 review_pass 下游，也会先拦住 Build 的其他 association 下游", async () => {
-  const topology: TopologyRecord = {
+  const topology = createTopology({
     projectId: "migrated-script-1176",
     startAgentId: "BA",
     agentOrderIds: ["BA", "Build", "CodeReview", "UnitTest", "TaskReview"],
-    nodes: [
-      { id: "BA", label: "BA", kind: "agent" },
-      { id: "Build", label: "Build", kind: "agent" },
-      { id: "CodeReview", label: "CodeReview", kind: "agent" },
-      { id: "UnitTest", label: "UnitTest", kind: "agent" },
-      { id: "TaskReview", label: "TaskReview", kind: "agent" },
-    ],
     edges: [
-      { id: "BA__Build__association", source: "BA", target: "Build", triggerOn: "association" },
-      { id: "Build__CodeReview__association", source: "Build", target: "CodeReview", triggerOn: "association" },
-      { id: "Build__UnitTest__association", source: "Build", target: "UnitTest", triggerOn: "association" },
-      { id: "CodeReview__Build__review_fail", source: "CodeReview", target: "Build", triggerOn: "review_fail" },
-      { id: "CodeReview__TaskReview__review_pass", source: "CodeReview", target: "TaskReview", triggerOn: "review_pass" },
+      createEdge("BA", "Build", "association"),
+      createEdge("Build", "CodeReview", "association"),
+      createEdge("Build", "UnitTest", "association"),
+      createEdge("CodeReview", "Build", "review_fail"),
+      createEdge("CodeReview", "TaskReview", "review_pass"),
     ],
-  };
+  });
 
   const script = [
     "user: @BA 请先实现，然后只在 CodeReview 通过后再跑 UnitTest。",
@@ -176,68 +175,21 @@ test("CodeReview 即使存在 review_pass 下游，也会先拦住 Build 的其�
   await assertSchedulerScript({ topology, script });
 });
 
-test("CodeReview 给出整改意见后，Build 只会继续回复 CodeReview，直到通过后才触发其他关联审查", async () => {
-  const topology: TopologyRecord = {
-    projectId: "migrated-script-1329",
-    startAgentId: "BA",
-    agentOrderIds: ["BA", "Build", "CodeReview", "UnitTest", "TaskReview"],
-    nodes: [
-      { id: "BA", label: "BA", kind: "agent" },
-      { id: "Build", label: "Build", kind: "agent" },
-      { id: "CodeReview", label: "CodeReview", kind: "agent" },
-      { id: "UnitTest", label: "UnitTest", kind: "agent" },
-      { id: "TaskReview", label: "TaskReview", kind: "agent" },
-    ],
-    edges: [
-      { id: "BA__Build__association", source: "BA", target: "Build", triggerOn: "association" },
-      { id: "Build__CodeReview__association", source: "Build", target: "CodeReview", triggerOn: "association" },
-      { id: "Build__UnitTest__association", source: "Build", target: "UnitTest", triggerOn: "association" },
-      { id: "Build__TaskReview__association", source: "Build", target: "TaskReview", triggerOn: "association" },
-      { id: "CodeReview__Build__review_fail", source: "CodeReview", target: "Build", triggerOn: "review_fail" },
-      { id: "UnitTest__Build__review_fail", source: "UnitTest", target: "Build", triggerOn: "review_fail" },
-      { id: "TaskReview__Build__review_fail", source: "TaskReview", target: "Build", triggerOn: "review_fail" },
-    ],
-  };
-
-  const script = [
-    "user: @BA 请实现一个临时工具，并按 CodeReview 意见来回修复直到通过。",
-    "BA: 需求明确，交给 Build 实现。 @Build",
-    "Build: Build 首轮已完成，请先走 CodeReview。 @CodeReview @UnitTest @TaskReview",
-    "CodeReview: CodeReview 认为还需要继续修复。 @Build",
-    "UnitTest: UnitTest 已收到首轮 Build 结果。",
-    "TaskReview: TaskReview 已收到首轮 Build 结果。",
-    "Build: Build 已根据 CodeReview 意见完成修复。 @CodeReview",
-    "CodeReview: CodeReview 已确认通过，可以进入后续审查。",
-    "Build: @UnitTest @TaskReview",
-    "UnitTest: UnitTest 已收到 CodeReview 通过后的最终 Build 结果。",
-    "TaskReview: TaskReview 已收到 CodeReview 通过后的最终 Build 结果。",
-  ];
-
-  await assertSchedulerScript({ topology, script });
-});
-
 test("BA dispatches Build through three review passes before the task can finish", async () => {
-  const topology: TopologyRecord = {
+  const topology = createTopology({
     projectId: "migrated-script-2388",
     startAgentId: "BA",
     agentOrderIds: ["BA", "Build", "UnitTest", "CodeReview", "TaskReview"],
-    nodes: [
-      { id: "BA", label: "BA", kind: "agent" },
-      { id: "Build", label: "Build", kind: "agent" },
-      { id: "UnitTest", label: "UnitTest", kind: "agent" },
-      { id: "CodeReview", label: "CodeReview", kind: "agent" },
-      { id: "TaskReview", label: "TaskReview", kind: "agent" },
-    ],
     edges: [
-      { id: "BA__Build__association", source: "BA", target: "Build", triggerOn: "association" },
-      { id: "Build__UnitTest__association", source: "Build", target: "UnitTest", triggerOn: "association" },
-      { id: "UnitTest__Build__review_fail", source: "UnitTest", target: "Build", triggerOn: "review_fail" },
-      { id: "UnitTest__CodeReview__review_pass", source: "UnitTest", target: "CodeReview", triggerOn: "review_pass" },
-      { id: "CodeReview__Build__review_fail", source: "CodeReview", target: "Build", triggerOn: "review_fail" },
-      { id: "CodeReview__TaskReview__review_pass", source: "CodeReview", target: "TaskReview", triggerOn: "review_pass" },
-      { id: "TaskReview__Build__review_fail", source: "TaskReview", target: "Build", triggerOn: "review_fail" },
+      createEdge("BA", "Build", "association"),
+      createEdge("Build", "UnitTest", "association"),
+      createEdge("UnitTest", "Build", "review_fail"),
+      createEdge("UnitTest", "CodeReview", "review_pass"),
+      createEdge("CodeReview", "Build", "review_fail"),
+      createEdge("CodeReview", "TaskReview", "review_pass"),
+      createEdge("TaskReview", "Build", "review_fail"),
     ],
-  };
+  });
 
   const script = [
     "user: @BA 请实现 add 方法，并把结果写入 add.js。",
@@ -261,25 +213,19 @@ test("BA dispatches Build through three review passes before the task can finish
 });
 
 test("长链路脚本会覆盖 UnitTest、TaskReview、CodeReview 多轮往返后的最终双确认", async () => {
-  const topology: TopologyRecord = {
+  const topology = createTopology({
     projectId: "generic-script-long-cycle",
     startAgentId: "Build",
     agentOrderIds: ["Build", "UnitTest", "TaskReview", "CodeReview"],
-    nodes: [
-      { id: "Build", label: "Build", kind: "agent" },
-      { id: "UnitTest", label: "UnitTest", kind: "agent" },
-      { id: "TaskReview", label: "TaskReview", kind: "agent" },
-      { id: "CodeReview", label: "CodeReview", kind: "agent" },
-    ],
     edges: [
-      { id: "Build__UnitTest__association", source: "Build", target: "UnitTest", triggerOn: "association" },
-      { id: "Build__TaskReview__association", source: "Build", target: "TaskReview", triggerOn: "association" },
-      { id: "Build__CodeReview__association", source: "Build", target: "CodeReview", triggerOn: "association" },
-      { id: "UnitTest__Build__review_fail", source: "UnitTest", target: "Build", triggerOn: "review_fail" },
-      { id: "TaskReview__Build__review_fail", source: "TaskReview", target: "Build", triggerOn: "review_fail" },
-      { id: "CodeReview__Build__review_fail", source: "CodeReview", target: "Build", triggerOn: "review_fail" },
+      createEdge("Build", "UnitTest", "association"),
+      createEdge("Build", "TaskReview", "association"),
+      createEdge("Build", "CodeReview", "association"),
+      createEdge("UnitTest", "Build", "review_fail"),
+      createEdge("TaskReview", "Build", "review_fail"),
+      createEdge("CodeReview", "Build", "review_fail"),
     ],
-  };
+  });
 
   const script = [
     "user: @Build 请完成这个需求",
@@ -323,27 +269,20 @@ test("长链路脚本会覆盖 UnitTest、TaskReview、CodeReview 多轮往返�
 });
 
 test("修完中间 reviewer 后，会先继续后续未完成 reviewer，再补前面的 stale reviewer", async () => {
-  const topology: TopologyRecord = {
+  const topology = createTopology({
     projectId: "generic-script-user-expected-order",
     startAgentId: "BA",
     agentOrderIds: ["BA", "Build", "UnitTest", "TaskReview", "CodeReview"],
-    nodes: [
-      { id: "BA", label: "BA", kind: "agent" },
-      { id: "Build", label: "Build", kind: "agent" },
-      { id: "UnitTest", label: "UnitTest", kind: "agent" },
-      { id: "TaskReview", label: "TaskReview", kind: "agent" },
-      { id: "CodeReview", label: "CodeReview", kind: "agent" },
-    ],
     edges: [
-      { id: "BA__Build__association", source: "BA", target: "Build", triggerOn: "association" },
-      { id: "Build__UnitTest__association", source: "Build", target: "UnitTest", triggerOn: "association" },
-      { id: "Build__TaskReview__association", source: "Build", target: "TaskReview", triggerOn: "association" },
-      { id: "Build__CodeReview__association", source: "Build", target: "CodeReview", triggerOn: "association" },
-      { id: "UnitTest__Build__review_fail", source: "UnitTest", target: "Build", triggerOn: "review_fail" },
-      { id: "TaskReview__Build__review_fail", source: "TaskReview", target: "Build", triggerOn: "review_fail" },
-      { id: "CodeReview__Build__review_fail", source: "CodeReview", target: "Build", triggerOn: "review_fail" },
+      createEdge("BA", "Build", "association"),
+      createEdge("Build", "UnitTest", "association"),
+      createEdge("Build", "TaskReview", "association"),
+      createEdge("Build", "CodeReview", "association"),
+      createEdge("UnitTest", "Build", "review_fail"),
+      createEdge("TaskReview", "Build", "review_fail"),
+      createEdge("CodeReview", "Build", "review_fail"),
     ],
-  };
+  });
 
   const script = [
     "user: @BA 在当前项目的一个临时文件中实现一个加法工具，调用后传入a和b，返回c",
@@ -368,27 +307,20 @@ test("修完中间 reviewer 后，会先继续后续未完成 reviewer，再补�
 });
 
 test("真实日志里重复 reviewer 回复并在整批失败后再次全量派发，不应通过脚本校验", async () => {
-  const topology: TopologyRecord = {
+  const topology = createTopology({
     projectId: "generic-script-invalid-real-log",
     startAgentId: "BA",
     agentOrderIds: ["BA", "Build", "UnitTest", "TaskReview", "CodeReview"],
-    nodes: [
-      { id: "BA", label: "BA", kind: "agent" },
-      { id: "Build", label: "Build", kind: "agent" },
-      { id: "UnitTest", label: "UnitTest", kind: "agent" },
-      { id: "TaskReview", label: "TaskReview", kind: "agent" },
-      { id: "CodeReview", label: "CodeReview", kind: "agent" },
-    ],
     edges: [
-      { id: "BA__Build__association", source: "BA", target: "Build", triggerOn: "association" },
-      { id: "Build__UnitTest__association", source: "Build", target: "UnitTest", triggerOn: "association" },
-      { id: "Build__TaskReview__association", source: "Build", target: "TaskReview", triggerOn: "association" },
-      { id: "Build__CodeReview__association", source: "Build", target: "CodeReview", triggerOn: "association" },
-      { id: "UnitTest__Build__review_fail", source: "UnitTest", target: "Build", triggerOn: "review_fail" },
-      { id: "TaskReview__Build__review_fail", source: "TaskReview", target: "Build", triggerOn: "review_fail" },
-      { id: "CodeReview__Build__review_fail", source: "CodeReview", target: "Build", triggerOn: "review_fail" },
+      createEdge("BA", "Build", "association"),
+      createEdge("Build", "UnitTest", "association"),
+      createEdge("Build", "TaskReview", "association"),
+      createEdge("Build", "CodeReview", "association"),
+      createEdge("UnitTest", "Build", "review_fail"),
+      createEdge("TaskReview", "Build", "review_fail"),
+      createEdge("CodeReview", "Build", "review_fail"),
     ],
-  };
+  });
 
   const script = [
     "user: @BA 在当前项目的一个临时文件中实现一个加法工具，调用后传入a和b，返回c",
