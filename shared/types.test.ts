@@ -80,12 +80,13 @@ test("UnitTest 默认模板使用单元测试审查文案", () => {
   );
 });
 
-test("TaskReview 默认模板明确聚焦功能交付而不是代码实现细节", () => {
+test("TaskReview 默认模板要求阅读代码验证功能实现且不评价代码风格", () => {
   const template = DEFAULT_BUILTIN_AGENT_TEMPLATES.find((item) => item.name === "TaskReview");
 
   assert.notEqual(template, undefined);
-  assert.match(template.prompt, /功能.*实现|功能.*交付|业务.*目标/u);
-  assert.match(template.prompt, /不要.*代码|不.*代码风格|不.*架构|不.*实现细节/u);
+  assert.match(template.prompt, /阅读.*代码|查看.*代码|结合.*代码/u);
+  assert.match(template.prompt, /功能.*实现|是否已经实现|业务.*目标/u);
+  assert.match(template.prompt, /不要.*代码风格|不.*代码风格/u);
 });
 
 test("UnitTest 默认模板要求主动查看代码与测试的一致性", () => {
@@ -95,9 +96,11 @@ test("UnitTest 默认模板要求主动查看代码与测试的一致性", () =>
   assert.match(template.prompt, /主动.*看代码|主动.*阅读.*代码|结合.*代码/u);
 });
 
-test("CodeReview 默认模板要求主动阅读代码实现", () => {
+test("CodeReview 默认模板只关注优雅与简洁并忽略测试等其他逻辑", () => {
   const template = DEFAULT_BUILTIN_AGENT_TEMPLATES.find((item) => item.name === "CodeReview");
 
   assert.notEqual(template, undefined);
-  assert.match(template.prompt, /主动.*看代码|主动.*阅读.*代码|逐段.*代码|结合.*代码/u);
+  assert.match(template.prompt, /优雅/u);
+  assert.match(template.prompt, /最简洁|简洁/u);
+  assert.match(template.prompt, /不要.*测试|不.*测试|不要关注.*测试/u);
 });
