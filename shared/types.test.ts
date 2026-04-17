@@ -18,7 +18,7 @@ test("默认拓扑只生成首节点到次节点的 association 边", () => {
 
   const topology = createDefaultTopology("project-1", agents);
 
-  assert.equal(topology.startAgentId, "Build");
+  assert.equal(Object.prototype.hasOwnProperty.call(topology, "startAgentId"), false);
   assert.deepEqual(topology.nodes, ["Build", "BA", "TaskReview"]);
   assert.equal(topology.edges.length, 1);
   assert.deepEqual(topology.edges[0], {
@@ -40,7 +40,7 @@ test("默认拓扑在缺少 Build 时不会偷偷把首个 Agent 当起点", () 
 
   const topology = createDefaultTopology("project-2", agents);
 
-  assert.equal(topology.startAgentId, null);
+  assert.equal(Object.prototype.hasOwnProperty.call(topology, "startAgentId"), false);
   assert.deepEqual(topology.nodes, ["BA", "TaskReview"]);
   assert.deepEqual(topology.edges, []);
 });
@@ -48,7 +48,6 @@ test("默认拓扑在缺少 Build 时不会偷偷把首个 Agent 当起点", () 
 test("存在 review 出边时 isReviewAgentInTopology 返回 true", () => {
   const topology: TopologyRecord = {
     projectId: "project-1",
-    startAgentId: "Build",
     nodes: ["Build", "TaskReview"],
     edges: [
       {

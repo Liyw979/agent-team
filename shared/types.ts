@@ -121,7 +121,6 @@ export interface TopologyEdge {
 
 export interface TopologyRecord {
   projectId: string;
-  startAgentId: string | null;
   nodes: string[];
   edges: TopologyEdge[];
 }
@@ -348,15 +347,7 @@ export function resolveBuildAgentName(
 
 export function resolveTopologyStartAgent(
   agents: Array<Pick<TopologyAgentSeed, "name">>,
-  preferredStartAgentId?: string | null,
 ): string | null {
-  if (
-    preferredStartAgentId &&
-    agents.some((agent) => agent.name === preferredStartAgentId)
-  ) {
-    return preferredStartAgentId;
-  }
-
   return resolveBuildAgentName(agents);
 }
 
@@ -426,7 +417,6 @@ export function createDefaultTopology(
 
   return {
     projectId,
-    startAgentId: startAgent?.name ?? null,
     nodes,
     edges,
   };

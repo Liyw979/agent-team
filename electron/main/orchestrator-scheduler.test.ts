@@ -11,21 +11,14 @@ import {
 function createTopology(): TopologyRecord {
   return {
     projectId: "project-1",
-    startAgentId: "Build",
-    agentOrderIds: ["Build", "UnitTest", "TaskReview", "CodeReview"],
-    nodes: [
-      { id: "Build", label: "Build", kind: "agent" },
-      { id: "UnitTest", label: "UnitTest", kind: "agent" },
-      { id: "TaskReview", label: "TaskReview", kind: "agent" },
-      { id: "CodeReview", label: "CodeReview", kind: "agent" },
-    ],
+    nodes: ["Build", "UnitTest", "TaskReview", "CodeReview"],
     edges: [
-      { id: "Build__UnitTest__association", source: "Build", target: "UnitTest", triggerOn: "association" },
-      { id: "Build__TaskReview__association", source: "Build", target: "TaskReview", triggerOn: "association" },
-      { id: "Build__CodeReview__association", source: "Build", target: "CodeReview", triggerOn: "association" },
-      { id: "UnitTest__Build__review_fail", source: "UnitTest", target: "Build", triggerOn: "review_fail" },
-      { id: "TaskReview__Build__review_fail", source: "TaskReview", target: "Build", triggerOn: "review_fail" },
-      { id: "CodeReview__Build__review_fail", source: "CodeReview", target: "Build", triggerOn: "review_fail" },
+      { source: "Build", target: "UnitTest", triggerOn: "association" },
+      { source: "Build", target: "TaskReview", triggerOn: "association" },
+      { source: "Build", target: "CodeReview", triggerOn: "association" },
+      { source: "UnitTest", target: "Build", triggerOn: "review_fail" },
+      { source: "TaskReview", target: "Build", triggerOn: "review_fail" },
+      { source: "CodeReview", target: "Build", triggerOn: "review_fail" },
     ],
   };
 }

@@ -3,6 +3,18 @@ import test from "node:test";
 
 import { resolveTaskSubmissionTarget } from "./task-submission";
 
+test("未显式 @Agent 时默认投递给 Build", () => {
+  const resolution = resolveTaskSubmissionTarget({
+    content: "请直接实现功能",
+    availableAgents: ["BA", "Build", "TaskReview"],
+  });
+
+  assert.deepEqual(resolution, {
+    ok: true,
+    targetAgent: "Build",
+  });
+});
+
 test("缺少 Build 时仍允许显式 @ 非 Build Agent 发送消息", () => {
   const resolution = resolveTaskSubmissionTarget({
     content: "@BA 请先整理需求",

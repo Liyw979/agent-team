@@ -33,7 +33,6 @@ import {
   type SaveBuiltinAgentTemplatePayload,
   resolveBuildAgentName,
   resolveTopologyAgentOrder,
-  resolveTopologyStartAgent,
   type SubmitTaskPayload,
   type TaskAgentRecord,
   type TaskPanelRecord,
@@ -2184,9 +2183,6 @@ export class Orchestrator {
 
     return {
       projectId,
-      startAgentId: resolveTopologyStartAgent(
-        agentFiles.map((file) => ({ name: file.name })),
-      ),
       nodes,
       edges,
     };

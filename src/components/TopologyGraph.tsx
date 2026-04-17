@@ -16,7 +16,7 @@ import {
 import { getAgentColorToken } from "@/lib/agent-colors";
 import { getPanelHeaderActionButtonClass } from "@/lib/panel-header-action-button";
 import { stripReviewResponseMarkup } from "@shared/review-response";
-import { isReviewAgentInTopology, resolveBuildAgentName, resolveTopologyAgentOrder } from "@shared/types";
+import { isReviewAgentInTopology, resolveTopologyAgentOrder } from "@shared/types";
 import type {
   AgentRole,
   AgentRuntimeSnapshot,
@@ -103,22 +103,6 @@ const REJECTION_BADGE_CLASS_NAME = "border border-[#d66b63]/45 bg-[#fff1ef] text
 const REJECTION_HISTORY_CLASS_NAME = "border-[#df766e]/45 bg-[#fff1ef] text-[#a33f38]";
 const REJECTION_CARD_BORDER = "#D66B63";
 const REJECTION_CARD_SHADOW = "0 12px 28px rgba(214,107,99,0.2)";
-
-const preferredRoleRank: Partial<Record<AgentRole, number>> = {
-  business_analyst: 0,
-  implementation: 1,
-  unit_test: 2,
-  integration_test: 2,
-  code_review: 2,
-  task_review: 2,
-};
-
-const preferredRoleRowOrder: Partial<Record<AgentRole, number>> = {
-  unit_test: 0,
-  integration_test: 1,
-  code_review: 2,
-  task_review: 3,
-};
 
 function getAgentDisplayName(name: string) {
   return name;
@@ -396,17 +380,9 @@ export function getTopologyNodeOrder(
   return topology.nodes.length > 0 ? topology.nodes : defaultAgentOrderIds;
 }
 
-function getRoleRank(role: AgentRole | null | undefined) {
-  return preferredRoleRank[role ?? ""] ?? 2;
-}
-
-function getRoleRowOrder(role: AgentRole | null | undefined) {
-  return preferredRoleRowOrder[role ?? ""] ?? 99;
-}
-
 function computeNodeLayout(
   draft: TopologyRecord,
-  agentRoles: Map<string, AgentRole | null>,
+  _agentRoles: Map<string, AgentRole | null>,
   options?: {
     viewportWidth: number;
     viewportHeight: number;
@@ -431,110 +407,7 @@ function computeNodeLayout(
       targetPosition: Position;
     }
   >();
-  const nodeIds = [...draft.nodes];
-  const nodeIdSet = new Set(nodeIds);
-  const startAgentId = nodeIdSet.has(draft.startAgentId ?? "") ? draft.startAgentId : resolveBuildAgentName(nodeIds);
-  const manualOrderIndex = new Map(nodeIds.map((agentId, index) => [agentId, index] as const));
-  const directIncomingByNode = new Map(nodeIds.map((nodeId) => [nodeId, 0]));
-  const ancestorSets = new Map(nodeIds.map((nodeId) => [nodeId, new Set<string>()]));
-
-  for (const edge of draft.edges) {
-    if (!nodeIdSet.has(edge.source) || !nodeIdSet.has(edge.target) || edge.source === edge.target) {
-      continue;
-    }
-    directIncomingByNode.set(edge.target, (directIncomingByNode.get(edge.target) ?? 0) + 1);
-  }
-
-  const maxIterations = Math.max(1, nodeIds.length * Math.max(draft.edges.length, 1));
-  for (let iteration = 0; iteration < maxIterations; iteration += 1) {
-    let changed = false;
-
-    for (const edge of draft.edges) {
-      if (
-        !nodeIdSet.has(edge.source) ||
-        !nodeIdSet.has(edge.target) ||
-        edge.source === edge.target ||
-        edge.target === startAgentId
-      ) {
-        continue;
-      }
-
-      const sourceAncestors = ancestorSets.get(edge.source) ?? new Set<string>();
-      const sourceReachable = edge.source === startAgentId || sourceAncestors.size > 0;
-      if (!sourceReachable || sourceAncestors.has(edge.target)) {
-        continue;
-      }
-
-      const currentTargetAncestors = ancestorSets.get(edge.target) ?? new Set<string>();
-      const nextTargetAncestors = new Set(currentTargetAncestors);
-      nextTargetAncestors.add(edge.source);
-      for (const ancestor of sourceAncestors) {
-        if (ancestor !== edge.target) {
-          nextTargetAncestors.add(ancestor);
-        }
-      }
-
-      if (nextTargetAncestors.size !== currentTargetAncestors.size) {
-        ancestorSets.set(edge.target, nextTargetAncestors);
-        changed = true;
-      }
-    }
-
-    if (!changed) {
-      break;
-    }
-  }
-
-  const sortedNodeIds = [...nodeIds].sort((left, right) => {
-    const leftManualIndex = manualOrderIndex.get(left);
-    const rightManualIndex = manualOrderIndex.get(right);
-    if (leftManualIndex !== undefined || rightManualIndex !== undefined) {
-      if (leftManualIndex === undefined) {
-        return 1;
-      }
-      if (rightManualIndex === undefined) {
-        return -1;
-      }
-      if (leftManualIndex !== rightManualIndex) {
-        return leftManualIndex - rightManualIndex;
-      }
-    } else {
-      if (left === startAgentId) {
-        return -1;
-      }
-      if (right === startAgentId) {
-        return 1;
-      }
-    }
-
-    const leftReachable = (ancestorSets.get(left)?.size ?? 0) > 0;
-    const rightReachable = (ancestorSets.get(right)?.size ?? 0) > 0;
-    if (leftReachable !== rightReachable) {
-      return leftReachable ? -1 : 1;
-    }
-
-    const leftAncestorCount = ancestorSets.get(left)?.size ?? 0;
-    const rightAncestorCount = ancestorSets.get(right)?.size ?? 0;
-    if (leftAncestorCount !== rightAncestorCount) {
-      return leftAncestorCount - rightAncestorCount;
-    }
-
-    const leftIncoming = directIncomingByNode.get(left) ?? 0;
-    const rightIncoming = directIncomingByNode.get(right) ?? 0;
-    if (leftIncoming !== rightIncoming) {
-      return leftIncoming - rightIncoming;
-    }
-
-    const rankGap = getRoleRank(agentRoles.get(left)) - getRoleRank(agentRoles.get(right));
-    if (rankGap !== 0) {
-      return rankGap;
-    }
-    const rowGap = getRoleRowOrder(agentRoles.get(left)) - getRoleRowOrder(agentRoles.get(right));
-    if (rowGap !== 0) {
-      return rowGap;
-    }
-    return left.localeCompare(right);
-  });
+  const sortedNodeIds = [...draft.nodes];
 
   const nodeCount = Math.max(sortedNodeIds.length, 1);
   const fallbackGap = NODE_COLUMN_GAP;

@@ -12,6 +12,7 @@ import type {
 import {
   buildDownstreamForwardedContextFromMessages,
   buildUserHistoryContent,
+  getPersistedCompletionSeedAgentNames,
   getInitialUserMessageContent,
   resolveAgentStatusFromReview,
   resolveRevisionRequestContinuationAction,
@@ -21,16 +22,12 @@ import {
 
 function createTopologyForTest(input: {
   projectId: string;
-  startAgentId: string | null;
   nodes: string[];
   edges: Array<{ source: string; target: string; triggerOn: TopologyEdgeTrigger }>;
 }): TopologyRecord {
   const nodeIds = new Set<string>();
   for (const agentId of input.nodes) {
     nodeIds.add(agentId);
-  }
-  if (input.startAgentId) {
-    nodeIds.add(input.startAgentId);
   }
   for (const edge of input.edges) {
     nodeIds.add(edge.source);
@@ -39,7 +36,6 @@ function createTopologyForTest(input: {
 
   return {
     projectId: input.projectId,
-    startAgentId: input.startAgentId,
     nodes: [...nodeIds],
     edges: input.edges.map((edge) => ({
       source: edge.source,
@@ -131,7 +127,6 @@ test("群聊消息保留寻址 @Agent，但下游转发读取时会去掉该寻�
 test("旧运行数据里悬空 idle Agent 不会阻止持久化补偿逻辑判定任务结束", () => {
   const topology = createTopologyForTest({
     projectId: "project-1",
-    startAgentId: "BA",
     nodes: ["BA", "Build", "CodeReview", "IntegrationTest", "TaskReview", "UnitTest"],
     edges: [
       { source: "BA", target: "Build", triggerOn: "association" },
@@ -168,7 +163,6 @@ test("旧运行数据里悬空 idle Agent 不会阻止持久化补偿逻辑判�
 test("最新一条仍是用户 @Agent 追问时，持久化补偿逻辑不会提前把任务判 finished", () => {
   const topology = createTopologyForTest({
     projectId: "project-1",
-    startAgentId: "UnitTest",
     nodes: ["UnitTest"],
     edges: [],
   });
@@ -195,6 +189,25 @@ test("最新一条仍是用户 @Agent 追问时，持久化补偿逻辑不会提
   });
 
   assert.equal(shouldFinish, false);
+});
+
+test("没有消息和运行痕迹时，持久化补偿逻辑只会把 Build 当默认入口 seed", () => {
+  const topology = createTopologyForTest({
+    projectId: "project-1",
+    nodes: ["BA", "Build", "TaskReview"],
+    edges: [{ source: "Build", target: "TaskReview", triggerOn: "association" }],
+  });
+  const seedAgentNames = getPersistedCompletionSeedAgentNames({
+    topology,
+    agents: [
+      createAgent({ name: "BA", status: "idle", runCount: 0 }),
+      createAgent({ name: "Build", status: "idle", runCount: 0 }),
+      createAgent({ name: "TaskReview", status: "idle", runCount: 0 }),
+    ],
+    messages: [],
+  });
+
+  assert.deepEqual(seedAgentNames, ["Build"]);
 });
 
 test("过期 reviewer 回复不应被当成有效回流继续触发修复", () => {

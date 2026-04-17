@@ -107,7 +107,6 @@ function createDefaultProjectState(projectId: string): ProjectStateFile {
     version: 1,
     topology: {
       projectId,
-      startAgentId: null,
       nodes: [],
       edges: [],
     },
@@ -562,8 +561,6 @@ export class StoreService {
         parsed.topology && typeof parsed.topology === "object"
           ? {
               projectId,
-              startAgentId:
-                typeof parsed.topology.startAgentId === "string" ? parsed.topology.startAgentId : null,
               nodes: normalizeTopologyNodes(parsed.topology),
               edges: Array.isArray(parsed.topology.edges)
                 ? parsed.topology.edges

@@ -1,5 +1,5 @@
 import { parseTargetAgentIds } from "@shared/chat-message-format";
-import type { AgentStatus } from "@shared/types";
+import { resolveBuildAgentName, type AgentStatus } from "@shared/types";
 import type { MessageRecord, TaskAgentRecord, TaskRecord, TopologyRecord } from "@shared/types";
 
 type MinimalMessage = Pick<MessageRecord, "sender" | "content" | "meta">;
@@ -147,8 +147,9 @@ export function getPersistedCompletionSeedAgentNames(input: {
     }
   }
 
-  if (seeds.size === 0 && input.topology.startAgentId) {
-    seeds.add(input.topology.startAgentId);
+  const defaultEntryAgent = resolveBuildAgentName(input.topology.nodes);
+  if (seeds.size === 0 && defaultEntryAgent) {
+    seeds.add(defaultEntryAgent);
   }
 
   return [...seeds].filter((name) => validNames.has(name));

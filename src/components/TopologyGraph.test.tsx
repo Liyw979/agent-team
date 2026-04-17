@@ -2,10 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import fs from "node:fs";
+import path from "node:path";
 
 import { TopologyGraph } from "./TopologyGraph";
 import type { ProjectSnapshot, TaskSnapshot, TopologyRecord } from "@shared/types";
 import { REVIEW_RESPONSE_END_LABEL, REVIEW_RESPONSE_LABEL } from "@shared/review-response";
+
+const TOPOLOGY_GRAPH_SOURCE = fs.readFileSync(
+  path.join(import.meta.dirname, "TopologyGraph.tsx"),
+  "utf8",
+);
 
 function createProjectSnapshot(topology: TopologyRecord): ProjectSnapshot {
   return {
@@ -68,7 +75,6 @@ function createTaskSnapshot(
 function getTopologyHtml(messages: TaskSnapshot["messages"] = []) {
   const topology: TopologyRecord = {
     projectId: "project-1",
-    startAgentId: "BA",
     nodes: ["TaskReview", "BA", "Build"],
     edges: [
       { source: "BA", target: "Build", triggerOn: "association" },
@@ -104,6 +110,11 @@ test("TopologyGraph 真实渲染包含状态徽标和边关系", () => {
   assert.match(html, /TaskReview/);
   assert.match(html, /BA/);
   assert.match(html, /Build/);
+});
+
+test("布局顺序直接跟随 topology.nodes，不再被边关系和角色启发式改写", () => {
+  assert.match(TOPOLOGY_GRAPH_SOURCE, /const sortedNodeIds = \[\.\.\.draft\.nodes\];/);
+  assert.doesNotMatch(TOPOLOGY_GRAPH_SOURCE, /resolveBuildAgentName|getRoleRank|getRoleRowOrder/);
 });
 
 test("TopologyGraph 历史记录会去掉 revision_request 标签", () => {

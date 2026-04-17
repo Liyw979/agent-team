@@ -8,7 +8,6 @@ import { useAgentFlowStore } from "./useAgentFlowStore";
 function createTopology(projectId: string): TopologyRecord {
   return {
     projectId,
-    startAgentId: "BA",
     nodes: ["BA", "Build"],
     edges: [],
   };
