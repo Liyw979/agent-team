@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { IPC_CHANNELS } from "@shared/ipc";
@@ -9,6 +9,7 @@ import type {
   DeleteAgentPayload,
   DeleteTaskPayload,
   GetTaskRuntimePayload,
+  OpenLangGraphStudioPayload,
   OpenAgentTerminalPayload,
   OpenTaskSessionPayload,
   ReadAgentFilePayload,
@@ -191,6 +192,14 @@ app.whenReady().then(async () => {
   ipcMain.handle(
     IPC_CHANNELS.openTaskSession,
     (_event, payload: OpenTaskSessionPayload) => orchestrator.openTaskSession(payload),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.openLangGraphStudio,
+    async (_event, payload: OpenLangGraphStudioPayload) => {
+      const url = await orchestrator.openLangGraphStudio(payload);
+      await shell.openExternal(url);
+      return url;
+    },
   );
   ipcMain.handle(
     IPC_CHANNELS.readAgentFile,

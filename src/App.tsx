@@ -437,6 +437,14 @@ function App() {
                 onSelectAgent={(agentId) => {
                   selectAgent(agentId);
                 }}
+                onOpenLangGraphStudio={async () => {
+                  if (!activeProject) {
+                    return;
+                  }
+                  return window.agentFlow.openLangGraphStudio({
+                    projectId: activeProject.project.id,
+                  });
+                }}
                 onSaveTopology={async (topology) => {
                   if (!activeProject) {
                     return;

@@ -33,6 +33,7 @@ interface TopologyGraphProps {
   selectedAgentId: string | null;
   onSelectAgent: (agentId: string) => void;
   onSaveTopology: (topology: TopologyRecord) => Promise<void>;
+  onOpenLangGraphStudio: () => Promise<string | void>;
   compact?: boolean;
   showEdgeList?: boolean;
   runtimeSnapshots?: Record<string, AgentRuntimeSnapshot>;
@@ -866,6 +867,7 @@ export function TopologyGraph({
   selectedAgentId,
   onSelectAgent,
   onSaveTopology,
+  onOpenLangGraphStudio,
   compact = false,
   showEdgeList = !compact,
   runtimeSnapshots = {},
@@ -876,6 +878,8 @@ export function TopologyGraph({
   const [hoveredAgentId, setHoveredAgentId] = useState<string | null>(null);
   const [expandedOpen, setExpandedOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [openingLangGraphStudio, setOpeningLangGraphStudio] = useState(false);
+  const [langGraphStudioError, setLangGraphStudioError] = useState<string | null>(null);
   const [selectedHistoryRecord, setSelectedHistoryRecord] = useState<SelectedHistoryRecord | null>(null);
   const [hoveredHistoryPreview, setHoveredHistoryPreview] = useState<HoveredHistoryPreview | null>(null);
   const mainViewportRef = useRef<HTMLDivElement | null>(null);
@@ -1442,6 +1446,18 @@ export function TopologyGraph({
     }
   }
 
+  async function openLangGraphStudio() {
+    setLangGraphStudioError(null);
+    setOpeningLangGraphStudio(true);
+    try {
+      await onOpenLangGraphStudio();
+    } catch (error) {
+      setLangGraphStudioError(error instanceof Error ? error.message : "打开 LangGraph UI 失败");
+    } finally {
+      setOpeningLangGraphStudio(false);
+    }
+  }
+
   async function setDownstreamTrigger(
     target: string,
     triggerOn: TopologyEdge["triggerOn"],
@@ -1488,6 +1504,16 @@ export function TopologyGraph({
                 type="button"
                 className={getPanelHeaderActionButtonClass()}
                 onClick={() => {
+                  void openLangGraphStudio();
+                }}
+                disabled={openingLangGraphStudio}
+              >
+                {openingLangGraphStudio ? "LangGraph 打开中..." : "LangGraph UI"}
+              </button>
+              <button
+                type="button"
+                className={getPanelHeaderActionButtonClass()}
+                onClick={() => {
                   setExpandedOpen(true);
                 }}
               >
@@ -1496,6 +1522,10 @@ export function TopologyGraph({
             </div>
           ) : null}
       </header>
+
+      {langGraphStudioError ? (
+        <div className="px-5 pt-2 text-xs text-[#a33f38]">{langGraphStudioError}</div>
+      ) : null}
 
       <div
         className={
@@ -1599,6 +1629,16 @@ export function TopologyGraph({
                   </Dialog.Description>
                 </div>
                 <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className={getPanelHeaderActionButtonClass("px-4", "py-2", "text-sm")}
+                    onClick={() => {
+                      void openLangGraphStudio();
+                    }}
+                    disabled={openingLangGraphStudio}
+                  >
+                    {openingLangGraphStudio ? "LangGraph 打开中..." : "LangGraph UI"}
+                  </button>
                   <Dialog.Close asChild>
                     <button
                       type="button"

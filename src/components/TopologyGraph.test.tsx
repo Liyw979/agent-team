@@ -91,6 +91,7 @@ function getTopologyHtml(messages: TaskSnapshot["messages"] = []) {
       selectedAgentId={null}
       onSelectAgent={() => undefined}
       onSaveTopology={async () => undefined}
+      onOpenLangGraphStudio={async () => undefined}
       compact={false}
       showEdgeList={true}
       runtimeSnapshots={{}}
@@ -139,4 +140,10 @@ test("TopologyGraph 历史记录会去掉 challenge 标签", () => {
   assert.match(html, /请继续补充实现依据。/);
   assert.doesNotMatch(html, /&lt;challenge&gt;/);
   assert.doesNotMatch(html, /&lt;\/challenge&gt;/);
+});
+
+test("TopologyGraph 顶部会渲染 LangGraph UI 按钮", () => {
+  const html = getTopologyHtml();
+
+  assert.match(html, /LangGraph UI/);
 });

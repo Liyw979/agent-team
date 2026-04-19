@@ -11,6 +11,7 @@ import type {
   DeleteAgentPayload,
   DeleteTaskPayload,
   GetTaskRuntimePayload,
+  OpenLangGraphStudioPayload,
   OpenTaskSessionPayload,
   ProjectSnapshot,
   ReadAgentFilePayload,
@@ -34,6 +35,7 @@ declare global {
       deleteProject: (payload: DeleteProjectPayload) => Promise<ProjectSnapshot[]>;
       deleteTask: (payload: DeleteTaskPayload) => Promise<ProjectSnapshot>;
       openTaskSession: (payload: OpenTaskSessionPayload) => Promise<void>;
+      openLangGraphStudio: (payload: OpenLangGraphStudioPayload) => Promise<string>;
       readAgentFile: (payload: ReadAgentFilePayload) => Promise<AgentFileRecord>;
       readBuiltinAgentTemplate: (payload: ReadBuiltinAgentTemplatePayload) => Promise<BuiltinAgentTemplateRecord>;
       saveAgentPrompt: (payload: SaveAgentPromptPayload) => Promise<ProjectSnapshot>;

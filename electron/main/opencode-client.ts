@@ -285,6 +285,32 @@ export class OpenCodeClient {
     };
   }
 
+  async recoverExecutionResultAfterTransportError(
+    projectPath: string,
+    sessionId: string,
+    startedAt: string,
+    errorMessage: string,
+    timeoutMs = 45_000,
+  ): Promise<OpenCodeExecutionResult | null> {
+    if (!this.isRecoverableTransportError(errorMessage)) {
+      return null;
+    }
+
+    const startedAtMs = Date.parse(startedAt);
+    const lowerBound = Number.isFinite(startedAtMs) ? startedAtMs - 2_000 : Date.now() - 2_000;
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+      const recovered = await this.findRecoveredAssistantReply(projectPath, sessionId, lowerBound);
+      if (recovered) {
+        return recovered;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+
+    return null;
+  }
+
   async getSessionRuntime(
     projectPath: string,
     sessionId: string,
@@ -894,6 +920,63 @@ export class OpenCodeClient {
     return null;
   }
 
+  private async findRecoveredAssistantReply(
+    projectPath: string,
+    sessionId: string,
+    lowerBoundMs: number,
+  ): Promise<OpenCodeExecutionResult | null> {
+    const messages = await this.listSessionMessages(projectPath, sessionId);
+    if (messages.length === 0) {
+      return null;
+    }
+
+    const normalizedRecords = messages.map((raw) => {
+      const envelope = this.asRecord(raw);
+      const info = this.asRecord(envelope.info ?? raw);
+      const normalized = this.normalizeMessageEnvelope(raw, "assistant");
+      return {
+        raw,
+        info,
+        normalized,
+        createdAtMs: Date.parse(normalized.timestamp),
+      };
+    });
+
+    const submittedMessage = normalizedRecords
+      .filter((record) =>
+        record.normalized.sender === "user"
+        && Number.isFinite(record.createdAtMs)
+        && record.createdAtMs >= lowerBoundMs)
+      .sort((left, right) => left.createdAtMs - right.createdAtMs)[0];
+    if (!submittedMessage) {
+      return null;
+    }
+
+    const finalReply = normalizedRecords
+      .filter((record) =>
+        this.extractParentMessageId(record.info) === submittedMessage.normalized.id
+        && this.isRecoverableReplyCandidate(record.info, record.normalized))
+      .sort((left, right) => {
+        const leftCompleted = Date.parse(left.normalized.completedAt ?? left.normalized.timestamp) || 0;
+        const rightCompleted = Date.parse(right.normalized.completedAt ?? right.normalized.timestamp) || 0;
+        return rightCompleted - leftCompleted;
+      })[0];
+    if (!finalReply) {
+      return null;
+    }
+
+    const runtime = await this.getSessionRuntime(projectPath, sessionId).catch(() => null);
+    const message = finalReply.normalized;
+    return {
+      status: message.error ? "error" : "completed",
+      finalMessage: message.content || message.error || "",
+      fallbackMessage: this.pickFallbackMessage(message.content || message.error || "", runtime?.activities ?? []),
+      messageId: message.id,
+      timestamp: message.completedAt ?? message.timestamp,
+      rawMessage: message,
+    };
+  }
+
   private async getSessionMessage(
     projectPath: string,
     sessionId: string,
@@ -1002,6 +1085,35 @@ export class OpenCodeClient {
       error: this.extractEventError(info.error ?? envelope.error),
       raw,
     };
+  }
+
+  private extractParentMessageId(info: Record<string, unknown>): string | null {
+    return typeof info.parentID === "string" && info.parentID.trim()
+      ? info.parentID
+      : null;
+  }
+
+  private isRecoverableReplyCandidate(
+    info: Record<string, unknown>,
+    message: OpenCodeNormalizedMessage,
+  ): boolean {
+    if (message.sender !== "assistant" && message.sender !== "system" && message.sender !== "unknown") {
+      return false;
+    }
+
+    if (message.error) {
+      return true;
+    }
+
+    if (message.content.trim()) {
+      return true;
+    }
+
+    return typeof info.finish === "string" && info.finish === "stop";
+  }
+
+  private isRecoverableTransportError(errorMessage: string): boolean {
+    return /\b(terminated|aborted)\b/i.test(errorMessage);
   }
 
   private buildRuntimeSnapshot(sessionId: string, messages: unknown[]): OpenCodeSessionRuntime {

@@ -1,36 +1,17 @@
 import { getTopologyEdgeId, type TopologyEdge, type TopologyRecord } from "@shared/types";
 
-export interface SchedulerAgentState {
+import type {
+  GatingAssociationDispatchBatchState,
+  GatingSchedulerRuntimeState,
+  GatingSourceRevisionState,
+} from "./gating-state";
+
+export interface GatingAgentState {
   name: string;
   status: "idle" | "running" | "completed" | "failed" | "needs_revision";
 }
 
-export interface SourceRevisionState {
-  currentRevision: number;
-  reviewerPassRevision: Map<string, number>;
-}
-
-export interface AssociationDispatchBatchState {
-  sourceAgentId: string;
-  sourceContent: string;
-  targets: string[];
-  pendingTargets: string[];
-  respondedTargets: string[];
-  sourceRevision: number;
-  failedTargets: string[];
-}
-
-export interface SchedulerRuntimeState {
-  completedEdges: Set<string>;
-  edgeTriggerVersion: Map<string, number>;
-  lastSignatureByAgent: Map<string, string>;
-  runningAgents: Set<string>;
-  queuedAgents: Set<string>;
-  sourceRevisionStateByAgent: Map<string, SourceRevisionState>;
-  activeAssociationBatchBySource: Map<string, AssociationDispatchBatchState>;
-}
-
-export interface SchedulerDispatchPlan {
+export interface GatingDispatchPlan {
   sourceAgentId: string;
   sourceContent: string;
   displayTargets: string[];
@@ -39,7 +20,7 @@ export interface SchedulerDispatchPlan {
   queuedTargets: string[];
 }
 
-export interface SchedulerBatchContinuation {
+export interface GatingBatchContinuation {
   matchedBatch: boolean;
   sourceAgentId: string;
   sourceContent: string;
@@ -48,7 +29,7 @@ export interface SchedulerBatchContinuation {
   redispatchTargets: string[];
 }
 
-export function createSchedulerRuntimeState(): SchedulerRuntimeState {
+export function createGatingSchedulerRuntimeState(): GatingSchedulerRuntimeState {
   return {
     completedEdges: new Set(),
     edgeTriggerVersion: new Map(),
@@ -60,10 +41,10 @@ export function createSchedulerRuntimeState(): SchedulerRuntimeState {
   };
 }
 
-export class OrchestratorScheduler {
+export class GatingScheduler {
   constructor(
     private readonly topology: TopologyRecord,
-    private readonly runtime: SchedulerRuntimeState,
+    private readonly runtime: GatingSchedulerRuntimeState,
   ) {}
 
   invalidateDownstreamTriggerSignatures(agentName: string) {
@@ -88,13 +69,13 @@ export class OrchestratorScheduler {
   planAssociationDispatch(
     sourceAgentId: string,
     sourceContent: string,
-    agentStates: SchedulerAgentState[],
+    agentStates: GatingAgentState[],
     options: {
       excludeTargets?: Set<string>;
       restrictTargets?: Set<string>;
       advanceSourceRevision?: boolean;
     } = {},
-  ): SchedulerDispatchPlan | null {
+  ): GatingDispatchPlan | null {
     const outgoing = this.getOutgoingEdges(sourceAgentId, "association");
     const excludeTargets = options.excludeTargets ?? new Set<string>();
     const restrictTargets = options.restrictTargets;
@@ -123,7 +104,7 @@ export class OrchestratorScheduler {
       sourceState.currentRevision += 1;
     }
 
-    const batch: AssociationDispatchBatchState = {
+    const batch: GatingAssociationDispatchBatchState = {
       sourceAgentId,
       sourceContent,
       targets: targetNames,
@@ -153,8 +134,8 @@ export class OrchestratorScheduler {
   planReviewPassDispatch(
     sourceAgentId: string,
     sourceContent: string,
-    agentStates: SchedulerAgentState[],
-  ): SchedulerDispatchPlan | null {
+    agentStates: GatingAgentState[],
+  ): GatingDispatchPlan | null {
     const outgoing = this.getOutgoingEdges(sourceAgentId, "review_pass");
     const completed = new Set(this.runtime.completedEdges);
 
@@ -191,8 +172,8 @@ export class OrchestratorScheduler {
   recordAssociationBatchResponse(
     responderAgentId: string,
     outcome: "pass" | "fail",
-    agentStates: SchedulerAgentState[],
-  ): SchedulerBatchContinuation | null {
+    agentStates: GatingAgentState[],
+  ): GatingBatchContinuation | null {
     for (const [sourceAgentId, batch] of this.runtime.activeAssociationBatchBySource.entries()) {
       if (!batch.pendingTargets.includes(responderAgentId)) {
         continue;
@@ -272,9 +253,9 @@ export class OrchestratorScheduler {
   }
 
   private claimBatchTargets(
-    batch: AssociationDispatchBatchState,
+    batch: GatingAssociationDispatchBatchState,
     completedEdges: Set<string>,
-    agentStates: SchedulerAgentState[],
+    agentStates: GatingAgentState[],
   ): {
     readyTargets: string[];
     queuedTargets: string[];
@@ -308,7 +289,7 @@ export class OrchestratorScheduler {
     };
   }
 
-  private getOrCreateSourceRevisionState(sourceAgentId: string): SourceRevisionState {
+  private getOrCreateSourceRevisionState(sourceAgentId: string): GatingSourceRevisionState {
     let state = this.runtime.sourceRevisionStateByAgent.get(sourceAgentId);
     if (!state) {
       state = {
@@ -327,7 +308,7 @@ export class OrchestratorScheduler {
   private canScheduleTarget(
     completedEdges: Set<string>,
     targetName: string,
-    agentStates: SchedulerAgentState[],
+    agentStates: GatingAgentState[],
   ): boolean {
     const agent = agentStates.find((item) => item.name === targetName);
     if (!agent) {

@@ -44,6 +44,7 @@
 - Project 一旦已有拓扑，后续运行时只认当前拓扑，不会再根据固定名字做调度判断。
 - Task 不再快照 Agent 的 prompt / permission 定义；运行时始终读取当前 Project 当前生效的自定义 Agent 配置，`.agentflow/state.json` 里的 `taskAgents` 只保留运行态字段。
 - 当前处于项目开发初期，不要求兼容历史数据；若现有 Project 状态、拓扑或运行数据与当前实现不一致，优先直接修正当前数据与实现，不额外为旧数据添加兼容分支。
+- LangGraph 现已接管 Task 调度运行时；每个 Task 都会以 `taskId` 作为 graph `thread_id` 持久化 checkpoint，并在恢复时以该 checkpoint 作为调度真源。
 
 ### 2.3 用户数据目录与日志
 
@@ -77,6 +78,7 @@
 
 ### 3.3 拓扑与调度
 
+- LangGraph 现作为唯一调度运行时核心；`TopologyRecord` 继续是产品真源，运行时会在主进程内把它编译为图状态与调度索引。
 - 拓扑边只保留一种触发语义：`success`，表示当前 Agent 审查通过或执行完成后自动触发下游。
 - 当某个 Agent 存在“直接下游通过 `association` 触发、且该下游会用 `review_fail` 直接回流给自己、同时该下游没有 `review_pass` 下游”的审查回路时，系统会先只放行这类直接审查回路；只有这些回路全部通过后，才会继续放行该 Agent 其余直接 `association` 下游，避免 Build 与单个审查 Agent 多轮对话时反复提前触发无关下游。
 - 同一轮里若某个 Agent 需要同时触发多个直接 `association` 下游 reviewer，这批 reviewer 会并发启动；只有当前整批 reviewer 都返回后，系统才会决定是否回流给上游修复，或继续补跑这一轮尚未确认通过的 reviewer，避免把并发批次错误串成“一次只放行一个”。
@@ -184,6 +186,7 @@ CLI 能力分组：
 - 自定义 Agent 配置位于用户数据目录下的 `custom-agents.json`。
 - 命令执行失败等诊断日志位于用户数据目录下的 `logs/agentflow.log`。
 - 每个 Project 自己的拓扑、Task、消息、panel 绑定等数据位于 `<project>/.agentflow/state.json`。
+- 每个 Task 的 LangGraph checkpoint 位于 `<project>/.agentflow/langgraph/`。
 - OpenCode runtime 和 pane runtime 也统一落到 `.agentflow/` 下，便于随 Project 一起迁移。
 
 ### 5.2 仓库结构
@@ -195,7 +198,13 @@ agentflow/
 │   │   └── index.ts
 │   ├── main/
 │   │   ├── index.ts
+│   │   ├── gating-state.ts
+│   │   ├── gating-router.ts
+│   │   ├── langgraph-host.ts
+│   │   ├── langgraph-runtime.ts
+│   │   ├── langgraph-studio-entry.ts
 │   │   ├── orchestrator.ts
+│   │   ├── topology-compiler.ts
 │   │   ├── store.ts
 │   │   ├── zellij-manager.ts
 │   │   ├── opencode-client.ts
@@ -217,6 +226,7 @@ agentflow/
 │   └── opencode.example.json
 ├── download/
 │   └── zellij.exe
+├── langgraph.json
 └── AGENTS.md
 ```
 

@@ -237,6 +237,10 @@ export interface OpenTaskSessionPayload {
   taskId: string;
 }
 
+export interface OpenLangGraphStudioPayload {
+  projectId: string;
+}
+
 export interface OpenAgentTerminalPayload {
   projectId: string;
   taskId: string;

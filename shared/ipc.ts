@@ -8,6 +8,7 @@ export const IPC_CHANNELS = {
   deleteTask: "agentflow/delete-task",
   openAgentTerminal: "agentflow/open-agent-terminal",
   openTaskSession: "agentflow/open-task-session",
+  openLangGraphStudio: "agentflow/open-langgraph-studio",
   readAgentFile: "agentflow/read-agent-file",
   readBuiltinAgentTemplate: "agentflow/read-builtin-agent-template",
   saveAgentPrompt: "agentflow/save-agent-prompt",

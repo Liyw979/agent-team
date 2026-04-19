@@ -9,6 +9,7 @@ import type {
   DeleteAgentPayload,
   DeleteTaskPayload,
   GetTaskRuntimePayload,
+  OpenLangGraphStudioPayload,
   OpenAgentTerminalPayload,
   OpenTaskSessionPayload,
   ProjectSnapshot,
@@ -40,6 +41,8 @@ const api = {
     ipcRenderer.invoke(IPC_CHANNELS.openAgentTerminal, payload),
   openTaskSession: (payload: OpenTaskSessionPayload): Promise<void> =>
     ipcRenderer.invoke(IPC_CHANNELS.openTaskSession, payload),
+  openLangGraphStudio: (payload: OpenLangGraphStudioPayload): Promise<string> =>
+    ipcRenderer.invoke(IPC_CHANNELS.openLangGraphStudio, payload),
   readAgentFile: (payload: ReadAgentFilePayload) =>
     ipcRenderer.invoke(IPC_CHANNELS.readAgentFile, payload),
   readBuiltinAgentTemplate: (payload: ReadBuiltinAgentTemplatePayload): Promise<BuiltinAgentTemplateRecord> =>

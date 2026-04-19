@@ -12,13 +12,18 @@ import type {
 import {
   buildDownstreamForwardedContextFromMessages,
   buildUserHistoryContent,
-  getPersistedCompletionSeedAgentNames,
   getInitialUserMessageContent,
+} from "./message-forwarding";
+import {
   resolveAgentStatusFromReview,
   resolveRevisionRequestContinuationAction,
   shouldStopTaskForUnhandledRevisionRequest,
+} from "./gating-rules";
+import {
+  getPersistedCompletionSeedAgentNames,
+  resolveStandaloneTaskStatusAfterAgentRun,
   shouldFinishTaskFromPersistedState,
-} from "./orchestrator-pure";
+} from "./task-lifecycle-rules";
 
 function createTopologyForTest(input: {
   projectId: string;
@@ -250,6 +255,42 @@ test("reviewer 缺少强制标签时应标记为 failed", () => {
   const status = resolveAgentStatusFromReview({
     reviewDecision: "invalid",
     reviewAgent: true,
+  });
+
+  assert.equal(status, "failed");
+});
+
+test("非拓扑驱动的单次执行后，仍有未完成 Agent 时任务进入 waiting", () => {
+  const status = resolveStandaloneTaskStatusAfterAgentRun({
+    latestAgentStatus: "completed",
+    agentStatuses: [
+      createAgent({ name: "Build", status: "completed", runCount: 1 }),
+      createAgent({ name: "QA", status: "idle", runCount: 0 }),
+    ],
+  });
+
+  assert.equal(status, "waiting");
+});
+
+test("非拓扑驱动的单次执行后，全部 Agent 已完成时任务进入 finished", () => {
+  const status = resolveStandaloneTaskStatusAfterAgentRun({
+    latestAgentStatus: "completed",
+    agentStatuses: [
+      createAgent({ name: "Build", status: "completed", runCount: 1 }),
+      createAgent({ name: "QA", status: "completed", runCount: 1 }),
+    ],
+  });
+
+  assert.equal(status, "finished");
+});
+
+test("非拓扑驱动的单次执行失败时任务直接进入 failed", () => {
+  const status = resolveStandaloneTaskStatusAfterAgentRun({
+    latestAgentStatus: "failed",
+    agentStatuses: [
+      createAgent({ name: "Build", status: "failed", runCount: 1 }),
+      createAgent({ name: "QA", status: "idle", runCount: 0 }),
+    ],
   });
 
   assert.equal(status, "failed");

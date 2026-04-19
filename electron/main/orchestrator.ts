@@ -19,10 +19,10 @@ import {
   type DeleteTaskPayload,
   type GetTaskRuntimePayload,
   type InitializeTaskPayload,
-  getTopologyEdgeId,
   getProjectNameFromPath,
   type MessageRecord,
   type OpenAgentTerminalPayload,
+  type OpenLangGraphStudioPayload,
   type OpenTaskSessionPayload,
   type ProjectRecord,
   type ProjectSnapshot,
@@ -59,24 +59,25 @@ import { OpenCodeRunner } from "./opencode-runner";
 import { StoreService } from "./store";
 import { ZellijManager } from "./zellij-manager";
 import {
-  OrchestratorScheduler,
-  createSchedulerRuntimeState,
-  type SchedulerAgentState,
-  type SchedulerBatchContinuation,
-  type SchedulerDispatchPlan,
-} from "./orchestrator-scheduler";
+  resolveAgentStatusFromReview,
+} from "./gating-rules";
 import {
   buildDownstreamForwardedContextFromMessages,
   buildUserHistoryContent as buildUserHistoryContentPure,
   contentContainsNormalized as contentContainsNormalizedPure,
   extractMention as extractMentionPure,
   getInitialUserMessageContent as getInitialUserMessageContentPure,
-  resolveAgentStatusFromReview,
-  resolveRevisionRequestContinuationAction,
-  shouldStopTaskForUnhandledRevisionRequest,
-  shouldFinishTaskFromPersistedState as shouldFinishTaskFromPersistedStatePure,
   stripTargetMention as stripTargetMentionPure,
-} from "./orchestrator-pure";
+} from "./message-forwarding";
+import {
+  resolveStandaloneTaskStatusAfterAgentRun,
+  shouldFinishTaskFromPersistedState as shouldFinishTaskFromPersistedStatePure,
+} from "./task-lifecycle-rules";
+import { LangGraphRuntime } from "./langgraph-runtime";
+import type { LangGraphTaskLoopHost } from "./langgraph-host";
+import { LangGraphStudioManager } from "./langgraph-studio";
+import type { GraphDispatchBatch, GraphAgentResult } from "./gating-router";
+import type { GraphTaskState } from "./gating-state";
 
 const execFileAsync = promisify(execFile);
 
@@ -105,23 +106,6 @@ interface ParsedReview {
 interface GitSummaryCommandResult {
   stdout: string;
   unavailable: boolean;
-}
-
-interface TaskRuntimeState {
-  completedEdges: Set<string>;
-  edgeTriggerVersion: Map<string, number>;
-  lastSignatureByAgent: Map<string, string>;
-  hasForwardedInitialTask: boolean;
-  runningAgents: Set<string>;
-  queuedAgents: Set<string>;
-  queuedPromptsByAgent: Map<string, AgentExecutionPrompt>;
-  associationBatchPromptBySource: Map<string, {
-    userMessage?: string;
-    agentMessage?: string;
-    gitDiffSummary?: string;
-  }>;
-  pendingRevisionRequestsByAgent: Map<string, ParsedReview>;
-  pendingAssociationRepairTargetsBySource: Map<string, string[]>;
 }
 
 type AgentExecutionPrompt =
@@ -156,13 +140,15 @@ export class Orchestrator {
   private readonly opencodeClient: OpenCodeClient;
   private readonly opencodeRunner: OpenCodeRunner;
   private readonly zellijManager: ZellijManager;
+  private readonly langGraphStudioManager: LangGraphStudioManager;
   private readonly events = new EventEmitter();
-  private readonly taskRuntime = new Map<string, TaskRuntimeState>();
+  private readonly langGraphRuntimes = new Map<string, LangGraphRuntime>();
   private readonly autoOpenTaskSession: boolean;
   private readonly enableEventStream: boolean;
   private readonly connectedEventProjects = new Set<string>();
   private readonly pendingRuntimeRefreshProjects = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly pendingEventReconnects = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly pendingTaskRuns = new Set<Promise<void>>();
   private readonly runtimeRefreshDebounceMs: number;
   private window: BrowserWindow | null = null;
 
@@ -175,6 +161,9 @@ export class Orchestrator {
     this.enableEventStream = options.enableEventStream ?? true;
     this.runtimeRefreshDebounceMs = options.runtimeRefreshDebounceMs ?? 120;
     this.zellijManager = options.zellijManager ?? new ZellijManager();
+    this.langGraphStudioManager = new LangGraphStudioManager({
+      runtimeRoot: path.join(options.userDataPath, "langgraph-studio"),
+    });
   }
 
   async initialize() {
@@ -198,6 +187,11 @@ export class Orchestrator {
     this.pendingRuntimeRefreshProjects.clear();
     this.pendingEventReconnects.forEach((timer) => clearTimeout(timer));
     this.pendingEventReconnects.clear();
+    if (this.pendingTaskRuns.size > 0) {
+      await Promise.allSettled([...this.pendingTaskRuns]);
+    }
+    this.langGraphRuntimes.clear();
+    await this.langGraphStudioManager.shutdownAll();
     await this.opencodeClient.shutdown();
   }
 
@@ -410,7 +404,7 @@ export class Orchestrator {
       throw new Error(`Task ${payload.taskId} 不属于 Project ${payload.projectId}`);
     }
 
-    this.taskRuntime.delete(task.id);
+    await this.deleteTaskGraphRuntime(task);
     await this.zellijManager.deleteTaskSession(task.zellijSessionId).catch(() => undefined);
     this.store.deleteTask(task.id);
 
@@ -428,7 +422,7 @@ export class Orchestrator {
     const tasks = this.store.listTasks(project.id);
 
     for (const task of tasks) {
-      this.taskRuntime.delete(task.id);
+      await this.deleteTaskGraphRuntime(task);
       await this.zellijManager.deleteTaskSession(task.zellijSessionId).catch(() => undefined);
     }
 
@@ -552,6 +546,13 @@ export class Orchestrator {
     const sessionName =
       task.zellijSessionId ?? `oap-${task.projectId.slice(0, 6)}-${task.id.slice(0, 6)}`;
     await this.zellijManager.openTaskSession(sessionName, task.cwd);
+  }
+
+  async openLangGraphStudio(payload: OpenLangGraphStudioPayload): Promise<string> {
+    const project = this.store.getProject(payload.projectId);
+    const agentFiles = this.listProjectAgents(project);
+    this.syncTopology(project, agentFiles);
+    return this.langGraphStudioManager.open(project.path);
   }
 
   async getTaskRuntime(payload: GetTaskRuntimePayload): Promise<AgentRuntimeSnapshot[]> {
@@ -682,15 +683,6 @@ export class Orchestrator {
       });
     }
 
-    this.taskRuntime.set(taskId, {
-      ...createSchedulerRuntimeState(),
-      hasForwardedInitialTask: false,
-      queuedPromptsByAgent: new Map(),
-      associationBatchPromptBySource: new Map(),
-      pendingRevisionRequestsByAgent: new Map(),
-      pendingAssociationRepairTargetsBySource: new Map(),
-    });
-
     const snapshot = this.hydrateTask(taskId);
     this.emit({
       type: "task-created",
@@ -739,37 +731,42 @@ export class Orchestrator {
 
     const forwardedContent = stripTargetMentionPure(content, targetAgent.name);
     const topology = this.store.getTopology(project.id);
-    const runPromise = this.dispatchAgentRun(project, task.id, targetAgent.name, {
-      mode: "raw",
-      from: "User",
-      content: forwardedContent,
-      allowDirectFallbackWhenNoBatch: this.getOutgoingEdges(topology, targetAgent.name, "review_fail").length > 0,
-    }, [message.id]);
-    void runPromise.catch((error) => {
-      console.error("[orchestrator] 后台发送任务失败", {
-        taskId: task.id,
-        agentName: targetAgent.name,
-        error: error instanceof Error ? error.message : String(error),
-      });
+    const runtime = this.getLangGraphRuntime(project);
+    this.trackBackgroundTask(runtime.resumeTask({
+      taskId: task.id,
+      projectId: project.id,
+      topology,
+      event: {
+        type: "user_message",
+        targetAgentName: targetAgent.name,
+        content: forwardedContent,
+      },
+    }), {
+      taskId: task.id,
+      agentName: targetAgent.name,
     });
     return this.hydrateTask(task.id);
   }
 
-  private async dispatchAgentRun(
-    project: ProjectRecord,
-    taskId: string,
-    agentName: string,
-    prompt: AgentExecutionPrompt,
-    behavior: AgentRunBehaviorOptions = {},
+  private trackBackgroundTask(
+    promise: Promise<unknown>,
+    context: {
+      taskId: string;
+      agentName: string;
+    },
   ) {
-    const runtime = this.getRuntime(taskId);
-    if (runtime.runningAgents.has(agentName)) {
-      runtime.queuedAgents.add(agentName);
-      runtime.queuedPromptsByAgent.set(agentName, prompt);
-      return;
-    }
-
-    await this.runAgent(project, this.store.getTask(taskId), agentName, prompt, behavior);
+    const tracked = promise
+      .catch((error) => {
+        console.error("[orchestrator] 后台发送任务失败", {
+          taskId: context.taskId,
+          agentName: context.agentName,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => {
+        this.pendingTaskRuns.delete(tracked);
+      });
+    this.pendingTaskRuns.add(tracked);
   }
 
   private createUserMessage(
@@ -841,661 +838,49 @@ export class Orchestrator {
     prompt: AgentExecutionPrompt,
     behavior: AgentRunBehaviorOptions = {},
   ) {
-    this.setInjectedConfigForProject(project);
-    const runtime = this.getRuntime(task.id);
-    runtime.runningAgents.add(agentName);
-    this.invalidateDownstreamTriggerSignatures(task.id, agentName);
-
-    this.store.updateTaskAgentRun(task.id, agentName, "running");
-    if (behavior.updateTaskStatusOnStart ?? true) {
-      this.store.updateTaskStatus(task.id, "running", null);
+    if (behavior.followTopology) {
+      throw new Error("runAgent 已不再负责拓扑调度；请通过 submitTask/continueTask 走 LangGraph runtime。");
     }
-    const currentAgent = this.store.listTaskAgents(task.id).find((item) => item.name === agentName);
-    if (!currentAgent) {
-      throw new Error(`Task ${task.id} 缺少 Agent ${agentName}`);
+
+    const result = await this.executeLangGraphAgentOnce(
+      project,
+      task,
+      agentName,
+      prompt,
+      1,
+    );
+    if (!(behavior.completeTaskOnFinish ?? true)) {
+      return;
     }
-    let panels: TaskPanelRecord[] = [];
 
-    try {
-      const currentTask = this.store.getTask(task.id);
-      await this.ensureTaskPanels(currentTask);
-      const agentSessionId = await this.ensureAgentSession(project, currentTask, currentAgent);
-      const latestAgentFile = this.findAgentFile(this.listProjectAgents(project), agentName);
-      if (!latestAgentFile) {
-        throw new Error(`当前 Project 缺少 Agent ${agentName}`);
-      }
-      panels = this.store.listTaskPanels(task.id);
-
-      this.emit({
-        type: "agent-status-changed",
-        projectId: project.id,
-        payload: {
-          taskId: task.id,
-          agentId: agentName,
-          status: "running",
-          runCount: currentAgent.runCount,
-        },
-      });
-      this.emit({
-        type: "task-updated",
-        projectId: project.id,
-        payload: this.hydrateTask(task.id),
-      });
-
-      const topology = this.store.getTopology(project.id);
-      const dispatchedContent = this.buildAgentExecutionPrompt(prompt);
-      const response = await this.opencodeRunner.run({
-        projectPath: project.path,
-        sessionId: agentSessionId,
-        content: dispatchedContent,
-        agent: agentName,
-        system: this.createSystemPrompt(latestAgentFile, topology, prompt),
-      });
-
-      if (response.status === "error") {
-        throw new Error(
-          response.rawMessage.error || response.finalMessage || `${agentName} 返回错误状态`,
-        );
-      }
-
-      const reviewAgent = this.isReviewAgent(latestAgentFile, topology);
-      const parsedReview = this.parseReview(response.finalMessage, reviewAgent);
-      const agentContextContent = this.resolveAgentContextContent(
-        parsedReview,
-        response.finalMessage,
-        response.fallbackMessage,
-      );
-      const taskMessage: MessageRecord = {
-        id: response.messageId,
-        projectId: project.id,
-        taskId: task.id,
-        content: this.createDisplayContent(parsedReview, response.fallbackMessage),
-        sender: agentName,
-        timestamp: response.timestamp,
-        meta: {
-          kind: "agent-final",
-          status: response.status,
-          finalMessage: agentContextContent,
-          reviewDecision: parsedReview.decision,
-          reviewOpinion: parsedReview.opinion ?? "",
-          rawResponse: response.finalMessage,
-          sessionId: agentSessionId,
-        },
-      };
-      this.store.insertMessage(taskMessage);
-
-      const directTargets = this.getOutgoingEdges(topology, agentName, "association");
-      const reviewFailureTargets =
-        parsedReview.decision === "needs_revision"
-          ? this.getOutgoingEdges(topology, agentName, "review_fail")
-          : [];
-      const agentStatus = resolveAgentStatusFromReview({
-        reviewDecision: parsedReview.decision,
-        reviewAgent,
-      });
-      this.store.updateTaskAgentStatus(task.id, agentName, agentStatus);
-      const scheduler = this.createScheduler(task.id, topology);
-      const batchContinuation = scheduler.recordAssociationBatchResponse(
-        agentName,
-        parsedReview.decision === "needs_revision" ? "fail" : "pass",
-        this.buildSchedulerAgentStates(task.id),
-      );
-      const revisionRequestAction =
-        parsedReview.decision === "needs_revision"
-          ? resolveRevisionRequestContinuationAction({
-              continuation: batchContinuation,
-              fallbackActionWhenNoBatch:
-                reviewFailureTargets.length > 0 && (prompt.allowDirectFallbackWhenNoBatch ?? false)
-                  ? "trigger_fallback_review"
-                  : "ignore",
-            })
-          : "ignore";
-      if (
-        parsedReview.decision === "needs_revision"
-        && reviewFailureTargets.length > 0
-        && revisionRequestAction !== "ignore"
-      ) {
-        runtime.pendingRevisionRequestsByAgent.set(agentName, parsedReview);
-      }
-      if (behavior.updateTaskStatusOnStart ?? true) {
-        this.updateTaskStatusIfActive(
-          task.id,
-          parsedReview.decision === "needs_revision" && reviewFailureTargets.length > 0
-            ? (batchContinuation?.pendingTargets.length ?? 0) > 0
-              ? "running"
-              : "needs_revision"
-            : agentStatus === "failed" && directTargets.length > 0 && !reviewAgent
-              ? "running"
-            : agentStatus === "failed"
-              ? "failed"
-              : "running",
-          null,
-        );
-      }
-
-      this.emit({
-        type: "message-created",
-        projectId: project.id,
-        payload: taskMessage,
-      });
-      this.emit({
-        type: "agent-status-changed",
-        projectId: project.id,
-        payload: {
-          taskId: task.id,
-          agentId: agentName,
-          status: agentStatus,
-          runCount:
-            this.store.listTaskAgents(task.id).find((item) => item.name === agentName)?.runCount ??
-            currentAgent.runCount,
-        },
-      });
-      this.emit({
-        type: "task-updated",
-        projectId: project.id,
-        payload: this.hydrateTask(task.id),
-      });
-
-      if (runtime.queuedAgents.has(agentName)) {
-        return;
-      }
-
-      const signal = this.parseSignal(response.finalMessage);
-      if (parsedReview.decision === "needs_revision") {
-        const batchTriggered = await this.continueAfterAssociationBatchResponse(
-          project,
-          task.id,
-          batchContinuation,
-          reviewFailureTargets.length > 0
-            ? {
-                agent: { name: agentName },
-                review: parsedReview,
-              }
-            : undefined,
-          prompt.allowDirectFallbackWhenNoBatch ?? false,
-        );
-        const hasOtherRunningAgents = [...runtime.runningAgents].some((runningAgent) => runningAgent !== agentName);
-        const hasQueuedAgents = runtime.queuedAgents.size > 0;
-        if (
-          shouldStopTaskForUnhandledRevisionRequest({
-            completeTaskOnFinish: behavior.completeTaskOnFinish ?? true,
-            continuationAction: revisionRequestAction,
-          })
-          && !hasOtherRunningAgents
-          && !hasQueuedAgents
-          && batchTriggered === 0
-        ) {
-          await this.completeTask(task.id, "failed");
-        }
-        this.emit({
-          type: "task-updated",
-          projectId: project.id,
-          payload: this.hydrateTask(task.id),
-        });
-        return;
-      }
-
-      if (parsedReview.decision === "invalid") {
-        await this.completeTask(task.id, "failed");
-        return;
-      }
-
-      const triggered =
-        behavior.followTopology ?? true
-          ? reviewAgent && parsedReview.decision === "pass"
-            ? await this.triggerReviewPassDownstream(project, task.id, agentName, agentContextContent)
-            : reviewAgent
-              ? 0
-              : await this.triggerAssociationDownstream(project, task.id, agentName, agentContextContent, signal)
-          : 0;
-      const batchTriggered = await this.continueAfterAssociationBatchResponse(
-        project,
-        task.id,
-        batchContinuation,
-      );
-      const totalTriggered = triggered + batchTriggered;
-      const hasOtherRunningAgents = [...runtime.runningAgents].some((runningAgent) => runningAgent !== agentName);
-      const hasQueuedAgents = runtime.queuedAgents.size > 0;
-
-      if (
-        (behavior.completeTaskOnFinish ?? true) &&
-        (
-          (!hasOtherRunningAgents && !hasQueuedAgents && signal.done) ||
-          (!hasOtherRunningAgents && !hasQueuedAgents && this.haveAllTaskAgentsCompleted(task.id)) ||
-          (!hasOtherRunningAgents &&
-            !hasQueuedAgents &&
-            totalTriggered === 0 &&
-            this.hasSatisfiedIncomingAssociation(topology, runtime.completedEdges, agentName) &&
-            this.hasSatisfiedOutgoingAssociation(topology, runtime.completedEdges, agentName))
-        )
-      ) {
-        await this.completeTask(task.id, "finished");
-      } else if (
-        (behavior.completeTaskOnFinish ?? true) &&
-        !hasOtherRunningAgents &&
-        !hasQueuedAgents &&
-        totalTriggered === 0
-      ) {
-        this.moveTaskToWaiting(project.id, task.id, agentName);
-      }
-    } catch (error) {
-      this.store.updateTaskAgentStatus(task.id, agentName, "failed");
-      const failedMessage: MessageRecord = {
-        id: randomUUID(),
-        projectId: project.id,
-        taskId: task.id,
-        content: `[${agentName}] 执行失败：${error instanceof Error ? error.message : "未知错误"}`,
-        sender: "system",
-        timestamp: new Date().toISOString(),
-      };
-      this.store.insertMessage(failedMessage);
-
-      const topology = this.store.getTopology(project.id);
-      const associationTargets = this.getOutgoingEdges(topology, agentName, "association");
-      const reviewAgent = this.isReviewAgent({ name: agentName }, topology);
-      if (behavior.updateTaskStatusOnStart ?? true) {
-        this.updateTaskStatusIfActive(
-          task.id,
-          associationTargets.length > 0 && !reviewAgent
-            ? "running"
-            : "failed",
-          null,
-        );
-      }
-
-      this.emit({
-        type: "message-created",
-        projectId: project.id,
-        payload: failedMessage,
-      });
-      this.emit({
-        type: "agent-status-changed",
-        projectId: project.id,
-        payload: {
-          taskId: task.id,
-          agentId: agentName,
-          status: "failed",
-          runCount: this.store.listTaskAgents(task.id).find((item) => item.name === agentName)?.runCount ?? 0,
-        },
-      });
-      this.emit({
-        type: "task-updated",
-        projectId: project.id,
-        payload: this.hydrateTask(task.id),
-      });
-
-      if (behavior.completeTaskOnFinish ?? true) {
+    const latestTask = this.store.getTask(task.id);
+    if (isTerminalTaskStatus(latestTask.status)) {
+      if (latestTask.status === "failed" && latestTask.completedAt === null) {
         await this.completeTask(task.id, "failed");
       }
-    } finally {
-      runtime.runningAgents.delete(agentName);
-
-      const latestTask = this.store.getTask(task.id);
-      if (isTerminalTaskStatus(latestTask.status)) {
-        return;
-      }
-
-      const shouldRerun = runtime.queuedAgents.delete(agentName);
-      const queuedPrompt = runtime.queuedPromptsByAgent.get(agentName);
-      runtime.queuedPromptsByAgent.delete(agentName);
-      if (!shouldRerun || !queuedPrompt) {
-        await this.reconcileTaskCompletionAfterAgentSettles(task.id);
-        return;
-      }
-
-      void this.dispatchAgentRun(
-        project,
-        task.id,
-        agentName,
-        queuedPrompt,
-      ).catch((queuedError) => {
-        console.error("[orchestrator] 排队 Agent 重跑失败", {
-          taskId: task.id,
-          agentName,
-          error: queuedError instanceof Error ? queuedError.message : String(queuedError),
-        });
-      });
-    }
-  }
-
-  private async triggerAssociationDownstream(
-    project: ProjectRecord,
-    taskId: string,
-    sourceAgentId: string,
-    sourceContent: string,
-    _signal: ParsedSignal,
-    options: {
-      excludeTargets?: Set<string>;
-      restrictTargets?: Set<string>;
-      advanceSourceRevision?: boolean;
-      suppressSourceContentInDispatchMessage?: boolean;
-    } = {},
-  ): Promise<number> {
-    const topology = this.store.getTopology(project.id);
-    const scheduler = this.createScheduler(taskId, topology);
-    const runtime = this.getRuntime(taskId);
-    const pendingRepairTargets = runtime.pendingAssociationRepairTargetsBySource.get(sourceAgentId);
-    const restrictTargets = pendingRepairTargets
-      ? new Set(pendingRepairTargets)
-      : options.restrictTargets;
-    const plan = scheduler.planAssociationDispatch(
-      sourceAgentId,
-      sourceContent,
-      this.buildSchedulerAgentStates(taskId),
-      {
-        ...options,
-        restrictTargets,
-      },
-    );
-    if (!plan) {
-      return 0;
-    }
-    if (pendingRepairTargets) {
-      runtime.pendingAssociationRepairTargetsBySource.delete(sourceAgentId);
+      return;
     }
 
-    if (!this.shouldSuppressDuplicateDispatchMessage(project.id, taskId, sourceAgentId, plan.triggerTargets)) {
-      const triggerMessage: MessageRecord = {
-        id: randomUUID(),
-        projectId: project.id,
-        taskId,
-        sender: sourceAgentId,
-        timestamp: new Date().toISOString(),
-        content: this.buildDispatchMessageContent(
-          plan.displayTargets,
-          options.suppressSourceContentInDispatchMessage ? "" : sourceContent,
-        ),
-        meta: {
-          kind: "agent-dispatch",
-          sourceAgentId,
-          targetAgentIds: plan.triggerTargets.join(","),
-        },
-      };
-      this.store.insertMessage(triggerMessage);
-      this.emit({
-        type: "message-created",
-        projectId: project.id,
-        payload: triggerMessage,
-      });
+    if (latestTask.status === "needs_revision") {
+      return;
     }
 
-    const currentTask = this.store.getTask(taskId);
-    const gitDiffSummary = await this.buildProjectGitDiffSummary(currentTask.cwd);
-    const includeInitialTask = this.consumeInitialTaskForwardingAllowance(taskId);
-    const forwardedContext = buildDownstreamForwardedContextFromMessages(
-      this.store.listMessages(currentTask.projectId, taskId),
-      sourceContent,
-      includeInitialTask,
-    );
-
-    runtime.associationBatchPromptBySource.set(sourceAgentId, {
-      userMessage: forwardedContext.userMessage,
-      agentMessage: forwardedContext.agentMessage,
-      gitDiffSummary,
+    const nextTaskStatus = resolveStandaloneTaskStatusAfterAgentRun({
+      latestAgentStatus: result.agentStatus,
+      agentStatuses: this.store.listTaskAgents(task.id),
     });
 
-    const dispatchTargets = [...plan.readyTargets, ...plan.queuedTargets];
-    if (dispatchTargets.length === 0) {
-      return 0;
+    if (nextTaskStatus === "finished") {
+      await this.completeTask(task.id, "finished");
+      return;
     }
 
-    await Promise.all(
-      dispatchTargets.map(async (targetName) => {
-        await this.dispatchAssociationBatchTarget(project, taskId, sourceAgentId, targetName);
-      }),
-    );
-
-    return plan.triggerTargets.length;
-  }
-
-  private async triggerReviewPassDownstream(
-    project: ProjectRecord,
-    taskId: string,
-    sourceAgentId: string,
-    sourceContent: string,
-  ): Promise<number> {
-    const topology = this.store.getTopology(project.id);
-    const scheduler = this.createScheduler(taskId, topology);
-    const agentStates = this.buildSchedulerAgentStates(taskId);
-    const plans: SchedulerDispatchPlan[] = [];
-    const selfPlan = scheduler.planReviewPassDispatch(sourceAgentId, sourceContent, agentStates);
-    if (selfPlan) {
-      plans.push(selfPlan);
+    if (nextTaskStatus === "failed") {
+      await this.completeTask(task.id, "failed");
+      return;
     }
 
-    const runPlan = async (plan: SchedulerDispatchPlan) => {
-      if (!this.shouldSuppressDuplicateDispatchMessage(project.id, taskId, plan.sourceAgentId, plan.triggerTargets)) {
-        const triggerMessage: MessageRecord = {
-          id: randomUUID(),
-          projectId: project.id,
-          taskId,
-          sender: plan.sourceAgentId,
-          timestamp: new Date().toISOString(),
-          content: this.buildDispatchMessageContent(plan.displayTargets, plan.sourceContent),
-          meta: {
-            kind: "agent-dispatch",
-            sourceAgentId: plan.sourceAgentId,
-            targetAgentIds: plan.triggerTargets.join(","),
-          },
-        };
-        this.store.insertMessage(triggerMessage);
-        this.emit({
-          type: "message-created",
-          projectId: project.id,
-          payload: triggerMessage,
-        });
-      }
-
-      const currentTask = this.store.getTask(taskId);
-      const gitDiffSummary = await this.buildProjectGitDiffSummary(currentTask.cwd);
-      const includeInitialTask = this.consumeInitialTaskForwardingAllowance(taskId);
-      const forwardedContext = buildDownstreamForwardedContextFromMessages(
-        this.store.listMessages(currentTask.projectId, taskId),
-        plan.sourceContent,
-        includeInitialTask,
-      );
-
-      await Promise.all(
-        plan.readyTargets.map(async (targetName) => {
-          await this.dispatchAgentRun(project, taskId, targetName, {
-            mode: "structured",
-            from: plan.sourceAgentId,
-            userMessage: forwardedContext.userMessage,
-            agentMessage: forwardedContext.agentMessage,
-            gitDiffSummary: this.shouldAttachGitDiffSummary(topology, targetName) ? gitDiffSummary : undefined,
-          });
-        }),
-      );
-    };
-
-    for (const plan of plans) {
-      await runPlan(plan);
-    }
-
-    return plans.reduce((total, plan) => total + plan.triggerTargets.length, 0);
-  }
-
-  private async triggerReviewDownstream(
-    project: ProjectRecord,
-    taskId: string,
-    sourceAgent: Pick<AgentFileRecord, "name">,
-    parsedReview: ParsedReview,
-  ): Promise<number> {
-    const topology = this.store.getTopology(project.id);
-    const reviewTargets = [...new Set(
-      this.getOutgoingEdges(topology, sourceAgent.name, "review_fail")
-        .map((edge) => edge.target)
-        .filter((targetName) => targetName !== sourceAgent.name),
-    )];
-    if (reviewTargets.length === 0) {
-      return 0;
-    }
-
-    const opinion = parsedReview.opinion?.trim()
-      || "请直接回应当前内容，给出你的判断、补充、澄清、反驳或修改方案。";
-    const reviewContent = opinion;
-    const currentTask = this.store.getTask(taskId);
-    const taskMessages = this.store.listMessages(currentTask.projectId, taskId);
-    const initialUserContent = getInitialUserMessageContentPure(taskMessages);
-    const includeInitialTask = this.consumeInitialTaskForwardingAllowance(taskId);
-    const userMessage = includeInitialTask
-      && initialUserContent
-      && !contentContainsNormalizedPure(reviewContent, initialUserContent)
-      ? initialUserContent
-      : undefined;
-    const gitDiffSummary = await this.buildProjectGitDiffSummary(currentTask.cwd);
-
-    for (const targetName of reviewTargets) {
-      const remediationMessage: MessageRecord = {
-        id: randomUUID(),
-        projectId: project.id,
-        taskId,
-        sender: sourceAgent.name,
-        timestamp: new Date().toISOString(),
-        content: formatRevisionRequestContent(opinion, targetName),
-        meta: {
-          kind: "revision-request",
-          sourceAgentId: sourceAgent.name,
-          targetAgentId: targetName,
-        },
-      };
-      this.store.insertMessage(remediationMessage);
-      this.emit({
-        type: "message-created",
-        projectId: project.id,
-        payload: remediationMessage,
-      });
-    }
-
-    this.updateTaskStatusIfActive(taskId, "needs_revision", null);
-    this.emit({
-      type: "task-updated",
-      projectId: project.id,
-      payload: this.hydrateTask(taskId),
-    });
-
-    await Promise.all(
-      reviewTargets.map(async (targetName) => {
-        const targetAgent = this.findAgentFile(
-          this.customAgentConfig.listProjectAgents(project.path),
-          targetName,
-        );
-        if (!targetAgent) {
-          return;
-        }
-        await this.dispatchAgentRun(
-          project,
-          taskId,
-          targetName,
-          {
-            mode: "structured",
-            from: sourceAgent.name,
-            userMessage,
-            agentMessage: reviewContent,
-            gitDiffSummary: this.shouldAttachGitDiffSummary(topology, targetName) ? gitDiffSummary : undefined,
-            allowDirectFallbackWhenNoBatch: true,
-          },
-        );
-      }),
-    );
-
-    return reviewTargets.length;
-  }
-
-  private async dispatchAssociationBatchTarget(
-    project: ProjectRecord,
-    taskId: string,
-    sourceAgentId: string,
-    targetName: string,
-  ): Promise<number> {
-    const task = this.store.getTask(taskId);
-    const topology = this.store.getTopology(project.id);
-    const prompt = this.getRuntime(taskId).associationBatchPromptBySource.get(sourceAgentId);
-    if (!prompt) {
-      return 0;
-    }
-
-    await this.dispatchAgentRun(project, taskId, targetName, {
-      mode: "structured",
-      from: sourceAgentId,
-      userMessage: prompt.userMessage,
-      agentMessage: prompt.agentMessage,
-      gitDiffSummary: this.shouldAttachGitDiffSummary(topology, targetName) ? prompt.gitDiffSummary : undefined,
-    });
-
-    return 1;
-  }
-
-  private async continueAfterAssociationBatchResponse(
-    project: ProjectRecord,
-    taskId: string,
-    continuation: SchedulerBatchContinuation | null,
-    directRevisionRequestSource?: {
-      agent: Pick<AgentFileRecord, "name">;
-      review: ParsedReview;
-    },
-    allowDirectFallbackWhenNoBatch = false,
-  ): Promise<number> {
-    if (this.isTaskTerminal(taskId)) {
-      return 0;
-    }
-
-    const action = resolveRevisionRequestContinuationAction({
-      continuation,
-      fallbackActionWhenNoBatch:
-        directRevisionRequestSource && allowDirectFallbackWhenNoBatch
-          ? "trigger_fallback_review"
-          : "ignore",
-    });
-
-    if (action === "wait_pending_reviewers" || action === "ignore") {
-      return 0;
-    }
-
-    if (action === "trigger_repair_review" && continuation?.repairReviewerAgentId) {
-      const runtime = this.getRuntime(taskId);
-      const storedReview = runtime.pendingRevisionRequestsByAgent.get(continuation.repairReviewerAgentId);
-      if (!storedReview) {
-        return 0;
-      }
-      runtime.pendingAssociationRepairTargetsBySource.set(
-        continuation.sourceAgentId,
-        [continuation.repairReviewerAgentId],
-      );
-      runtime.pendingRevisionRequestsByAgent.delete(continuation.repairReviewerAgentId);
-      return this.triggerReviewDownstream(
-        project,
-        taskId,
-        { name: continuation.repairReviewerAgentId },
-        storedReview,
-      );
-    }
-
-    if (action === "redispatch_reviewers" && continuation && continuation.redispatchTargets.length > 0) {
-      return this.triggerAssociationDownstream(
-        project,
-        taskId,
-        continuation.sourceAgentId,
-        continuation.sourceContent,
-        { done: false },
-        {
-          restrictTargets: new Set(continuation.redispatchTargets),
-          advanceSourceRevision: false,
-          suppressSourceContentInDispatchMessage: true,
-        },
-      );
-    }
-
-    if (action === "trigger_fallback_review" && directRevisionRequestSource) {
-      return this.triggerReviewDownstream(
-        project,
-        taskId,
-        directRevisionRequestSource.agent,
-        directRevisionRequestSource.review,
-      );
-    }
-
-    return 0;
+    this.moveTaskToWaiting(project.id, task.id, agentName);
   }
 
   private shouldSuppressDuplicateDispatchMessage(
@@ -1543,37 +928,6 @@ export class Orchestrator {
     return targetAgentName !== BUILD_AGENT_NAME && !this.isReviewAgent({ name: targetAgentName }, topology);
   }
 
-  private hasSatisfiedIncomingAssociation(
-    topology: TopologyRecord,
-    completedEdges: Set<string>,
-    agentName: string,
-  ): boolean {
-    const incomingEdges = this.getIncomingEdges(topology, agentName, "association")
-      .concat(this.getIncomingEdges(topology, agentName, "review_pass"));
-    return incomingEdges.every((edge) => completedEdges.has(getTopologyEdgeId(edge)));
-  }
-
-  private hasSatisfiedOutgoingAssociation(
-    topology: TopologyRecord,
-    completedEdges: Set<string>,
-    agentName: string,
-  ): boolean {
-    const outgoingEdges = this.getOutgoingEdges(topology, agentName, "association")
-      .concat(this.getOutgoingEdges(topology, agentName, "review_pass"));
-    return outgoingEdges.every((edge) => completedEdges.has(getTopologyEdgeId(edge)));
-  }
-
-  private invalidateDownstreamTriggerSignatures(taskId: string, agentName: string) {
-    const task = this.store.getTask(taskId);
-    const topology = this.store.getTopology(task.projectId);
-    this.createScheduler(taskId, topology).invalidateDownstreamTriggerSignatures(agentName);
-  }
-
-  private haveAllTaskAgentsCompleted(taskId: string): boolean {
-    const agents = this.store.listTaskAgents(taskId);
-    return agents.length > 0 && agents.every((agent) => agent.status === "completed");
-  }
-
   private isTaskTerminal(taskId: string): boolean {
     return isTerminalTaskStatus(this.store.getTask(taskId).status);
   }
@@ -1588,24 +942,6 @@ export class Orchestrator {
     }
     this.store.updateTaskStatus(taskId, status, completedAt);
     return true;
-  }
-
-  private async reconcileTaskCompletionAfterAgentSettles(taskId: string) {
-    const task = this.store.getTask(taskId);
-    if (isTerminalTaskStatus(task.status)) {
-      return;
-    }
-
-    const runtime = this.getRuntime(taskId);
-    if (runtime.runningAgents.size > 0 || runtime.queuedAgents.size > 0) {
-      return;
-    }
-
-    if (!this.haveAllTaskAgentsCompleted(taskId)) {
-      return;
-    }
-
-    await this.completeTask(taskId, "finished");
   }
 
   private async reconcilePersistedTaskStatus(taskId: string) {
@@ -1813,15 +1149,6 @@ export class Orchestrator {
     ];
 
     return candidates.find((item) => item.length > 0) ?? "";
-  }
-
-  private consumeInitialTaskForwardingAllowance(taskId: string): boolean {
-    const runtime = this.getRuntime(taskId);
-    if (runtime.hasForwardedInitialTask) {
-      return false;
-    }
-    runtime.hasForwardedInitialTask = true;
-    return true;
   }
 
   private buildDispatchMessageContent(targetAgentIds: string[], content: string): string {
@@ -2238,9 +1565,381 @@ export class Orchestrator {
         .map((task) => task.id);
 
       for (const taskId of staleTaskIds) {
-        this.taskRuntime.delete(taskId);
+        const task = this.store.getTask(taskId);
+        await this.deleteTaskGraphRuntime(task);
         this.store.deleteTask(taskId);
       }
+    }
+  }
+
+  private getLangGraphRuntime(project: ProjectRecord): LangGraphRuntime {
+    let runtime = this.langGraphRuntimes.get(project.id);
+    if (runtime) {
+      return runtime;
+    }
+
+    const host: LangGraphTaskLoopHost = {
+      createBatchRunners: async ({ taskId, state, batch }) =>
+        this.createLangGraphBatchRunners(project, taskId, state, batch),
+      moveTaskToWaiting: async ({ taskId, state }) =>
+        this.moveTaskToWaiting(
+          project.id,
+          taskId,
+          this.resolveWaitingSourceAgentId(taskId, state),
+        ),
+      completeTask: async ({ taskId, status }) =>
+        this.completeTask(taskId, status),
+    };
+    runtime = new LangGraphRuntime({
+      checkpointDir: path.join(project.path, ".agentflow", "langgraph"),
+      host,
+    });
+    this.langGraphRuntimes.set(project.id, runtime);
+    return runtime;
+  }
+
+  private async deleteTaskGraphRuntime(task: Pick<TaskRecord, "id" | "projectId">) {
+    const project = this.store.getProject(task.projectId);
+    await this.getLangGraphRuntime(project).deleteTask(task.id);
+  }
+
+  private resolveWaitingSourceAgentId(taskId: string, state: GraphTaskState): string {
+    const latestAgentMessage = [...this.store.listMessages(state.projectId, taskId)]
+      .reverse()
+      .find((message) => message.meta?.kind === "agent-final");
+    return latestAgentMessage?.sender ?? state.topology.nodes[0] ?? "Orchestrator";
+  }
+
+  private consumeInitialTaskForwardingAllowanceFromGraphState(state: GraphTaskState): boolean {
+    if (state.hasForwardedInitialTask) {
+      return false;
+    }
+    state.hasForwardedInitialTask = true;
+    return true;
+  }
+
+  private async createLangGraphBatchRunners(
+    project: ProjectRecord,
+    taskId: string,
+    state: GraphTaskState,
+    batch: GraphDispatchBatch,
+  ) {
+    const task = this.store.getTask(taskId);
+    const topology = this.store.getTopology(project.id);
+    const batchSize = batch.jobs.length;
+
+    if (batch.jobs.every((job) => job.kind === "association" || job.kind === "review_pass")) {
+      const sourceAgentId = batch.sourceAgentId ?? "System";
+      if (!this.shouldSuppressDuplicateDispatchMessage(project.id, taskId, sourceAgentId, batch.triggerTargets)) {
+        const triggerMessage: MessageRecord = {
+          id: randomUUID(),
+          projectId: project.id,
+          taskId,
+          sender: sourceAgentId,
+          timestamp: new Date().toISOString(),
+          content: this.buildDispatchMessageContent(
+            batch.triggerTargets,
+            batch.sourceContent ?? "",
+          ),
+          meta: {
+            kind: "agent-dispatch",
+            sourceAgentId,
+            targetAgentIds: batch.triggerTargets.join(","),
+          },
+        };
+        this.store.insertMessage(triggerMessage);
+        this.emit({
+          type: "message-created",
+          projectId: project.id,
+          payload: triggerMessage,
+        });
+      }
+    }
+
+    const gitDiffSummary = await this.buildProjectGitDiffSummary(task.cwd);
+    const shouldForwardInitialTask = batch.jobs.some((job) => job.kind !== "raw");
+    const includeInitialTask = shouldForwardInitialTask
+      ? this.consumeInitialTaskForwardingAllowanceFromGraphState(state)
+      : false;
+    const forwardedContext = batch.sourceAgentId
+      ? buildDownstreamForwardedContextFromMessages(
+        this.store.listMessages(task.projectId, taskId),
+        batch.sourceContent ?? "",
+        includeInitialTask,
+      )
+      : null;
+    const initialUserContent = includeInitialTask
+      ? getInitialUserMessageContentPure(this.store.listMessages(task.projectId, taskId))
+      : "";
+
+    return batch.jobs.map((job, index) => {
+      let prompt: AgentExecutionPrompt;
+      if (job.kind === "raw") {
+        prompt = {
+          mode: "raw",
+          from: "User",
+          content: batch.sourceContent ?? "",
+          allowDirectFallbackWhenNoBatch:
+            this.getOutgoingEdges(topology, job.agentName, "review_fail").length > 0,
+        };
+      } else if (job.kind === "revision_request") {
+        const revisionContent =
+          batch.sourceContent?.trim()
+          || "请直接回应当前内容，给出你的判断、补充、澄清、反驳或修改方案。";
+        prompt = {
+          mode: "structured",
+          from: batch.sourceAgentId ?? "Reviewer",
+          userMessage:
+            initialUserContent
+            && !contentContainsNormalizedPure(revisionContent, initialUserContent)
+              ? initialUserContent
+              : undefined,
+          agentMessage: revisionContent,
+          gitDiffSummary: this.shouldAttachGitDiffSummary(topology, job.agentName) ? gitDiffSummary : undefined,
+          allowDirectFallbackWhenNoBatch: true,
+        };
+        const remediationMessage: MessageRecord = {
+          id: randomUUID(),
+          projectId: project.id,
+          taskId,
+          sender: batch.sourceAgentId ?? "Reviewer",
+          timestamp: new Date().toISOString(),
+          content: formatRevisionRequestContent(
+            revisionContent,
+            job.agentName,
+          ),
+          meta: {
+            kind: "revision-request",
+            sourceAgentId: batch.sourceAgentId ?? "Reviewer",
+            targetAgentId: job.agentName,
+          },
+        };
+        this.store.insertMessage(remediationMessage);
+        this.emit({
+          type: "message-created",
+          projectId: project.id,
+          payload: remediationMessage,
+        });
+      } else {
+        prompt = {
+          mode: "structured",
+          from: batch.sourceAgentId ?? "System",
+          userMessage: forwardedContext?.userMessage,
+          agentMessage: forwardedContext?.agentMessage,
+          gitDiffSummary: this.shouldAttachGitDiffSummary(topology, job.agentName) ? gitDiffSummary : undefined,
+        };
+      }
+
+      return {
+        id: `${batch.sourceAgentId ?? "user"}:${job.agentName}:${index}:${Date.now()}`,
+        agentName: job.agentName,
+        promise: this.executeLangGraphAgentOnce(
+          project,
+          task,
+          job.agentName,
+          prompt,
+          batchSize,
+        ),
+      };
+    });
+  }
+
+  private async executeLangGraphAgentOnce(
+    project: ProjectRecord,
+    task: TaskRecord,
+    agentName: string,
+    prompt: AgentExecutionPrompt,
+    concurrentBatchSize: number,
+  ): Promise<GraphAgentResult> {
+    this.setInjectedConfigForProject(project);
+    this.store.updateTaskAgentRun(task.id, agentName, "running");
+    this.updateTaskStatusIfActive(task.id, "running", null);
+    const currentAgent = this.store.listTaskAgents(task.id).find((item) => item.name === agentName);
+    if (!currentAgent) {
+      return {
+        agentName,
+        status: "failed",
+        reviewAgent: false,
+        reviewDecision: "invalid",
+        agentStatus: "failed",
+        agentContextContent: "",
+        opinion: null,
+        allowDirectFallbackWhenNoBatch: false,
+        signalDone: false,
+        errorMessage: `Task ${task.id} 缺少 Agent ${agentName}`,
+      };
+    }
+
+    try {
+      const currentTask = this.store.getTask(task.id);
+      await this.ensureTaskPanels(currentTask);
+      const agentSessionId = await this.ensureAgentSession(project, currentTask, currentAgent);
+      const latestAgentFile = this.findAgentFile(this.listProjectAgents(project), agentName);
+      if (!latestAgentFile) {
+        throw new Error(`当前 Project 缺少 Agent ${agentName}`);
+      }
+
+      this.emit({
+        type: "agent-status-changed",
+        projectId: project.id,
+        payload: {
+          taskId: task.id,
+          agentId: agentName,
+          status: "running",
+          runCount: currentAgent.runCount,
+        },
+      });
+      this.emit({
+        type: "task-updated",
+        projectId: project.id,
+        payload: this.hydrateTask(task.id),
+      });
+
+      const topology = this.store.getTopology(project.id);
+      const dispatchedContent = this.buildAgentExecutionPrompt(prompt);
+      const response = await this.opencodeRunner.run({
+        projectPath: project.path,
+        sessionId: agentSessionId,
+        content: dispatchedContent,
+        agent: agentName,
+        system: this.createSystemPrompt(latestAgentFile, topology, prompt),
+      });
+
+      if (response.status === "error") {
+        throw new Error(
+          response.rawMessage.error || response.finalMessage || `${agentName} 返回错误状态`,
+        );
+      }
+
+      const reviewAgent = this.isReviewAgent(latestAgentFile, topology);
+      const parsedReview = this.parseReview(response.finalMessage, reviewAgent);
+      const agentContextContent = this.resolveAgentContextContent(
+        parsedReview,
+        response.finalMessage,
+        response.fallbackMessage,
+      );
+      const taskMessage: MessageRecord = {
+        id: response.messageId,
+        projectId: project.id,
+        taskId: task.id,
+        content: this.createDisplayContent(parsedReview, response.fallbackMessage),
+        sender: agentName,
+        timestamp: response.timestamp,
+        meta: {
+          kind: "agent-final",
+          status: response.status,
+          finalMessage: agentContextContent,
+          reviewDecision: parsedReview.decision,
+          reviewOpinion: parsedReview.opinion ?? "",
+          rawResponse: response.finalMessage,
+          sessionId: agentSessionId,
+        },
+      };
+      this.store.insertMessage(taskMessage);
+
+      const reviewFailureTargets =
+        parsedReview.decision === "needs_revision"
+          ? this.getOutgoingEdges(topology, agentName, "review_fail")
+          : [];
+      const agentStatus = resolveAgentStatusFromReview({
+        reviewDecision: parsedReview.decision,
+        reviewAgent,
+      });
+      this.store.updateTaskAgentStatus(task.id, agentName, agentStatus);
+      if (parsedReview.decision === "needs_revision" && reviewFailureTargets.length > 0) {
+        this.updateTaskStatusIfActive(
+          task.id,
+          concurrentBatchSize > 1 ? "running" : "needs_revision",
+          null,
+        );
+      } else if (agentStatus === "failed") {
+        this.updateTaskStatusIfActive(task.id, "failed", null);
+      } else {
+        this.updateTaskStatusIfActive(task.id, "running", null);
+      }
+
+      this.emit({
+        type: "message-created",
+        projectId: project.id,
+        payload: taskMessage,
+      });
+      this.emit({
+        type: "agent-status-changed",
+        projectId: project.id,
+        payload: {
+          taskId: task.id,
+          agentId: agentName,
+          status: agentStatus,
+          runCount:
+            this.store.listTaskAgents(task.id).find((item) => item.name === agentName)?.runCount ??
+            currentAgent.runCount,
+        },
+      });
+      this.emit({
+        type: "task-updated",
+        projectId: project.id,
+        payload: this.hydrateTask(task.id),
+      });
+
+      const signal = this.parseSignal(response.finalMessage);
+      return {
+        agentName,
+        status: "completed",
+        reviewAgent,
+        reviewDecision: parsedReview.decision,
+        agentStatus,
+        agentContextContent,
+        opinion: parsedReview.opinion,
+        allowDirectFallbackWhenNoBatch: prompt.allowDirectFallbackWhenNoBatch ?? false,
+        signalDone: signal.done,
+      };
+    } catch (error) {
+      const topology = this.store.getTopology(project.id);
+      const reviewAgent = this.isReviewAgent({ name: agentName }, topology);
+      this.store.updateTaskAgentStatus(task.id, agentName, "failed");
+      const failedMessage: MessageRecord = {
+        id: randomUUID(),
+        projectId: project.id,
+        taskId: task.id,
+        content: `[${agentName}] 执行失败：${error instanceof Error ? error.message : "未知错误"}`,
+        sender: "system",
+        timestamp: new Date().toISOString(),
+      };
+      this.store.insertMessage(failedMessage);
+      this.updateTaskStatusIfActive(task.id, "failed", null);
+      this.emit({
+        type: "message-created",
+        projectId: project.id,
+        payload: failedMessage,
+      });
+      this.emit({
+        type: "agent-status-changed",
+        projectId: project.id,
+        payload: {
+          taskId: task.id,
+          agentId: agentName,
+          status: "failed",
+          runCount: this.store.listTaskAgents(task.id).find((item) => item.name === agentName)?.runCount ?? 0,
+        },
+      });
+      this.emit({
+        type: "task-updated",
+        projectId: project.id,
+        payload: this.hydrateTask(task.id),
+      });
+
+      return {
+        agentName,
+        status: "failed",
+        reviewAgent,
+        reviewDecision: "invalid",
+        agentStatus: "failed",
+        agentContextContent: "",
+        opinion: null,
+        allowDirectFallbackWhenNoBatch: false,
+        signalDone: false,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      };
     }
   }
 
@@ -2299,33 +1998,6 @@ export class Orchestrator {
     });
   }
 
-  private getRuntime(taskId: string): TaskRuntimeState {
-    let runtime = this.taskRuntime.get(taskId);
-    if (!runtime) {
-      runtime = {
-        ...createSchedulerRuntimeState(),
-        hasForwardedInitialTask: false,
-        queuedPromptsByAgent: new Map(),
-        associationBatchPromptBySource: new Map(),
-        pendingRevisionRequestsByAgent: new Map(),
-        pendingAssociationRepairTargetsBySource: new Map(),
-      };
-      this.taskRuntime.set(taskId, runtime);
-    }
-    return runtime;
-  }
-
-  private createScheduler(taskId: string, topology: TopologyRecord): OrchestratorScheduler {
-    return new OrchestratorScheduler(topology, this.getRuntime(taskId));
-  }
-
-  private buildSchedulerAgentStates(taskId: string): SchedulerAgentState[] {
-    return this.store.listTaskAgents(taskId).map((agent) => ({
-      name: agent.name,
-      status: agent.status,
-    }));
-  }
-
   private getOutgoingEdges(
     topology: TopologyRecord,
     sourceAgentId: string,
@@ -2333,16 +2005,6 @@ export class Orchestrator {
   ) {
     return topology.edges.filter(
       (edge) => edge.source === sourceAgentId && edge.triggerOn === triggerOn,
-    );
-  }
-
-  private getIncomingEdges(
-    topology: TopologyRecord,
-    targetAgentId: string,
-    triggerOn: "association" | "review_pass" | "review_fail",
-  ) {
-    return topology.edges.filter(
-      (edge) => edge.target === targetAgentId && edge.triggerOn === triggerOn,
     );
   }
 

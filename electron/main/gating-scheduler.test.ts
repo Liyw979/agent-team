@@ -4,9 +4,9 @@ import assert from "node:assert/strict";
 import type { TopologyRecord } from "@shared/types";
 
 import {
-  OrchestratorScheduler,
-  createSchedulerRuntimeState,
-} from "./orchestrator-scheduler";
+  GatingScheduler,
+  createGatingSchedulerRuntimeState,
+} from "./gating-scheduler";
 
 function createTopology(): TopologyRecord {
   return {
@@ -33,7 +33,7 @@ function createAgentStates() {
 }
 
 test("association 首轮派发会一次放行整批 reviewer", () => {
-  const scheduler = new OrchestratorScheduler(createTopology(), createSchedulerRuntimeState());
+  const scheduler = new GatingScheduler(createTopology(), createGatingSchedulerRuntimeState());
 
   const plan = scheduler.planAssociationDispatch(
     "Build",
@@ -49,7 +49,7 @@ test("association 首轮派发会一次放行整批 reviewer", () => {
 });
 
 test("association 批次在 reviewer 未收齐前不会提前推进下一位 reviewer 或回流修复", () => {
-  const scheduler = new OrchestratorScheduler(createTopology(), createSchedulerRuntimeState());
+  const scheduler = new GatingScheduler(createTopology(), createGatingSchedulerRuntimeState());
 
   const plan = scheduler.planAssociationDispatch(
     "Build",

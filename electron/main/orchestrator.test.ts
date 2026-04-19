@@ -391,6 +391,37 @@ test("OpenCode 事件会触发 runtime-updated 前端事件", async () => {
   assert.equal(runtimeUpdatedEvent?.payload?.sessionId, "session-build-1");
 });
 
+test("打开 LangGraph Studio 时会为当前 Project 返回可用的 Studio URL", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  const orchestrator = createTestOrchestrator({
+    userDataPath,
+    enableEventStream: false,
+  });
+  const typed = orchestrator as unknown as Orchestrator & {
+    langGraphStudioManager: {
+      open: (projectPath: string) => Promise<string>;
+    };
+  };
+
+  let openedProjectPath = "";
+  typed.langGraphStudioManager.open = async (inputProjectPath) => {
+    openedProjectPath = inputProjectPath;
+    return "https://smith.langchain.com/studio/?baseUrl=http%3A%2F%2F127.0.0.1%3A2024";
+  };
+
+  const project = await orchestrator.createProject({ path: projectPath });
+  const url = await orchestrator.openLangGraphStudio({
+    projectId: project.project.id,
+  });
+
+  assert.equal(openedProjectPath, projectPath);
+  assert.equal(
+    url,
+    "https://smith.langchain.com/studio/?baseUrl=http%3A%2F%2F127.0.0.1%3A2024",
+  );
+});
+
 test("内置模板可按 Project 单独覆盖且不会直接写入 agentFiles", async () => {
   const userDataPath = createTempDir();
   const projectAPath = createTempDir();
