@@ -1,6 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import { getProjectNameFromPath } from "@shared/types";
+import {
+  getProjectNameFromPath,
+  normalizeNeedsRevisionMaxRounds,
+} from "@shared/types";
 import type {
   MessageRecord,
   ProjectRecord,
@@ -569,6 +572,7 @@ export class StoreService {
                       source: typeof edge.source === "string" ? edge.source : "",
                       target: typeof edge.target === "string" ? edge.target : "",
                       triggerOn: edge.triggerOn,
+                      maxRevisionRounds: edge.maxRevisionRounds,
                     }))
                     .filter(
                       (edge): edge is ProjectStateFile["topology"]["edges"][number] =>
@@ -584,6 +588,11 @@ export class StoreService {
                       source: edge.source,
                       target: edge.target,
                       triggerOn: edge.triggerOn,
+                      ...(edge.triggerOn === "needs_revision"
+                        ? {
+                            maxRevisionRounds: normalizeNeedsRevisionMaxRounds(edge.maxRevisionRounds),
+                          }
+                        : {}),
                     }))
                 : [],
             }

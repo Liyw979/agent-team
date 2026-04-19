@@ -24,6 +24,7 @@ import {
   resolveStandaloneTaskStatusAfterAgentRun,
   shouldFinishTaskFromPersistedState,
 } from "./task-lifecycle-rules";
+import { buildTaskCompletionMessageContent } from "./task-completion-message";
 
 function createTopologyForTest(input: {
   projectId: string;
@@ -294,4 +295,14 @@ test("非拓扑驱动的单次执行失败时任务直接进入 failed", () => {
   });
 
   assert.equal(status, "failed");
+});
+
+test("任务失败完成消息优先展示明确失败原因", () => {
+  const content = buildTaskCompletionMessageContent({
+    status: "failed",
+    taskTitle: "演示任务",
+    failureReason: "UnitTest -> Build 连续回流已达到 4 轮上限，任务已终止以避免无限循环",
+  });
+
+  assert.equal(content, "UnitTest -> Build 连续回流已达到 4 轮上限，任务已终止以避免无限循环");
 });

@@ -26,5 +26,6 @@ export interface LangGraphTaskLoopHost {
   completeTask(input: {
     taskId: string;
     status: "finished" | "failed";
+    failureReason?: string | null;
   }): Promise<void>;
 }

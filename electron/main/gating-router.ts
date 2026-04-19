@@ -1,4 +1,8 @@
-import type { AgentStatus } from "@shared/types";
+import {
+  DEFAULT_NEEDS_REVISION_MAX_ROUNDS,
+  getNeedsRevisionEdgeLoopLimit,
+  type AgentStatus,
+} from "@shared/types";
 
 import { resolveRevisionRequestContinuationAction } from "./gating-rules";
 import {
@@ -16,8 +20,6 @@ import {
   type GraphTaskState,
 } from "./gating-state";
 import { compileTopology } from "./topology-compiler";
-
-const MAX_REVIEW_FAIL_LOOP_COUNT = 4;
 
 export interface GraphDispatchJob {
   agentName: string;
@@ -458,17 +460,22 @@ function enforceNeedsRevisionLoopLimit(
   sourceAgentId: string,
   targetAgentId: string,
 ): GraphRoutingDecision | null {
+  const maxRevisionRounds = getNeedsRevisionEdgeLoopLimit(
+    state.topology,
+    sourceAgentId,
+    targetAgentId,
+  );
   const edgeKey = buildNeedsRevisionLoopEdgeKey(sourceAgentId, targetAgentId);
   const nextCount = (state.needsRevisionLoopCountByEdge[edgeKey] ?? 0) + 1;
   state.needsRevisionLoopCountByEdge[edgeKey] = nextCount;
-  if (nextCount <= MAX_REVIEW_FAIL_LOOP_COUNT) {
+  if (nextCount <= maxRevisionRounds) {
     return null;
   }
 
   state.taskStatus = "failed";
   return {
     type: "failed",
-    errorMessage: `${sourceAgentId} -> ${targetAgentId} 连续回流已达到 ${MAX_REVIEW_FAIL_LOOP_COUNT} 轮上限，任务已终止以避免无限循环`,
+    errorMessage: `${sourceAgentId} -> ${targetAgentId} 连续回流已达到 ${maxRevisionRounds || DEFAULT_NEEDS_REVISION_MAX_ROUNDS} 轮上限，任务已终止以避免无限循环`,
   };
 }
 

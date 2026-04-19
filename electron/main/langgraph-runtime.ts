@@ -376,6 +376,7 @@ export class LangGraphRuntime {
         await this.options.host.completeTask({
           taskId: currentState.taskId,
           status: "failed",
+          failureReason: currentDecision.errorMessage,
         });
         return {
           graphState: currentState,

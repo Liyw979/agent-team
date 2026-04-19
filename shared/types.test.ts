@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_BUILTIN_AGENT_TEMPLATES,
   createDefaultTopology,
+  getNeedsRevisionEdgeLoopLimit,
   isReviewAgentInTopology,
   type TopologyAgentSeed,
   type TopologyRecord,
@@ -60,6 +61,29 @@ test("存在 review 出边时 isReviewAgentInTopology 返回 true", () => {
 
   assert.equal(isReviewAgentInTopology(topology, "TaskReview"), true);
   assert.equal(isReviewAgentInTopology(topology, "Build"), false);
+});
+
+test("needs_revision 边默认回流上限为 4，且支持按边单独覆盖", () => {
+  const topology: TopologyRecord = {
+    projectId: "project-loop-limit",
+    nodes: ["Build", "UnitTest", "TaskReview"],
+    edges: [
+      {
+        source: "UnitTest",
+        target: "Build",
+        triggerOn: "needs_revision",
+      },
+      {
+        source: "TaskReview",
+        target: "Build",
+        triggerOn: "needs_revision",
+        maxRevisionRounds: 7,
+      },
+    ],
+  };
+
+  assert.equal(getNeedsRevisionEdgeLoopLimit(topology, "UnitTest", "Build"), 4);
+  assert.equal(getNeedsRevisionEdgeLoopLimit(topology, "TaskReview", "Build"), 7);
 });
 
 test("BA 默认模板要求结合当前代码现状给出实施建议", () => {
