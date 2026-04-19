@@ -46,6 +46,7 @@ interface ParsedScenario {
   repliesByAgent: Map<string, ParsedReply[]>;
   agentOrder: string[];
   validAgents: Set<string>;
+  normalizeAgentRef: (name: string) => string;
 }
 
 export interface AssertSchedulerScriptOptions {
@@ -62,11 +63,11 @@ export async function assertSchedulerScript(
   const reviewFailTargets = buildTriggeredTargets(options.topology, "review_fail");
   const sourceStates = new Map<string, SourceState>();
   for (const agentName of parsed.agentOrder) {
-    sourceStates.set(agentName, {
-      defaultTargets: associationTargets.get(agentName) ?? [],
-      currentRevision: 0,
-      reviewerPassRevision: new Map(),
-      expectedNextTargets: null,
+      sourceStates.set(agentName, {
+        defaultTargets: associationTargets.get(agentName) ?? [],
+        currentRevision: 0,
+        reviewerPassRevision: new Map(),
+        expectedNextTargets: null,
     });
   }
 
@@ -146,14 +147,15 @@ export async function assertSchedulerScript(
       const expectedTargets = sourceState.expectedNextTargets;
       if (expectedTargets) {
         assert.deepEqual(
-          reply.targets,
+          reply.targets.map(parsed.normalizeAgentRef),
           expectedTargets,
           `${agentName} 的 @ 目标与预期不一致`,
         );
       } else if (reply.targets.length > 0) {
         const directReviewFailTargets = reviewFailTargets.get(agentName) ?? [];
-        const matchesAssociationTargets = areSameOrderedTargets(reply.targets, sourceState.defaultTargets);
-        const matchesDirectReviewFailTargets = areSameOrderedTargets(reply.targets, directReviewFailTargets);
+        const normalizedTargets = reply.targets.map(parsed.normalizeAgentRef);
+        const matchesAssociationTargets = areSameOrderedTargets(normalizedTargets, sourceState.defaultTargets);
+        const matchesDirectReviewFailTargets = areSameOrderedTargets(normalizedTargets, directReviewFailTargets);
         assert.equal(
           matchesAssociationTargets || matchesDirectReviewFailTargets,
           true,
@@ -173,21 +175,24 @@ export async function assertSchedulerScript(
         return;
       }
 
+      const normalizedReplyTargets = reply.targets.map(parsed.normalizeAgentRef);
+
       if (reply.body) {
         sourceState.currentRevision += 1;
       }
 
       for (const target of reply.targets) {
+        const normalizedTarget = parsed.normalizeAgentRef(target);
         assert.ok(
-          (outgoingTargets.get(agentName) ?? new Set()).has(target),
+          (outgoingTargets.get(agentName) ?? new Set()).has(normalizedTarget),
           `脚本里的派发 ${agentName}: @${target} 没有对应的拓扑边`,
         );
       }
 
       activeBatches.push({
         source: agentName,
-        targets: [...reply.targets],
-        remainingTargets: [...reply.targets],
+        targets: [...normalizedReplyTargets],
+        remainingTargets: [...normalizedReplyTargets],
         responses: [],
         sourceRevision: sourceState.currentRevision,
         sourceHadBody: reply.body.length > 0,
@@ -198,7 +203,7 @@ export async function assertSchedulerScript(
     const currentSource = currentBatch.source;
     const failTargets = reviewFailTargets.get(agentName) ?? [];
     const isFail = reply.targets.length === 1
-      && reply.targets[0] === currentSource
+      && parsed.normalizeAgentRef(reply.targets[0] ?? "") === currentSource
       && failTargets.includes(currentSource);
 
     currentBatch.responses.push({
@@ -222,9 +227,12 @@ export async function assertSchedulerScript(
     }
 
     if (!isFail && reply.targets.length > 0) {
+      const normalizedReplyTargets = reply.targets.map(parsed.normalizeAgentRef);
+
       for (const target of reply.targets) {
+        const normalizedTarget = parsed.normalizeAgentRef(target);
         assert.ok(
-          (outgoingTargets.get(agentName) ?? new Set()).has(target),
+          (outgoingTargets.get(agentName) ?? new Set()).has(normalizedTarget),
           `脚本里的派发 ${agentName}: @${target} 没有对应的拓扑边`,
         );
       }
@@ -238,8 +246,8 @@ export async function assertSchedulerScript(
 
       activeBatches.push({
         source: agentName,
-        targets: [...reply.targets],
-        remainingTargets: [...reply.targets],
+        targets: [...normalizedReplyTargets],
+        remainingTargets: [...normalizedReplyTargets],
         responses: [],
         sourceRevision: nestedSourceState.currentRevision,
         sourceHadBody: reply.body.length > 0,
@@ -257,7 +265,7 @@ export async function assertSchedulerScript(
     const currentBatch = activeBatches[activeBatches.length - 1] ?? null;
     if (currentBatch) {
       const nextLine = parsed.lines[actualScript.length];
-      const nextAgent = nextLine?.sender;
+      const nextAgent = nextLine ? parsed.normalizeAgentRef(nextLine.sender) : undefined;
       assert.notEqual(nextAgent, undefined, `批次 ${currentBatch.source} 缺少下一个回应者`);
       processReplyLine(nextAgent);
       continue;
@@ -284,6 +292,7 @@ export async function assertSchedulerScript(
 }
 
 function parseScenario(topology: TopologyRecord, script: string[]): ParsedScenario {
+  const normalizeAgentRef = createAgentRefNormalizer(topology);
   const lines = script
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
@@ -293,7 +302,7 @@ function parseScenario(topology: TopologyRecord, script: string[]): ParsedScenar
   const firstLine = lines[0];
   assert.equal(firstLine?.sender, "user", "第一条脚本必须是 user: @Agent ...");
 
-  const startAgent = extractLeadingMention(firstLine.content);
+  const startAgent = normalizeAgentRef(extractLeadingMention(firstLine.content) ?? "");
   assert.notEqual(startAgent, undefined, "第一条脚本必须以 @Agent 开头");
   const validAgents = new Set(topology.nodes);
   assert.ok(validAgents.size > 0, "topology.nodes 至少要包含一个 Agent");
@@ -305,14 +314,18 @@ function parseScenario(topology: TopologyRecord, script: string[]): ParsedScenar
 
   const repliesByAgent = new Map<string, ParsedReply[]>();
   for (const line of lines.slice(1)) {
-    assert.ok(validAgents.has(line.sender), `脚本里出现了 topology 中不存在的 Agent：${line.sender}`);
+    const normalizedSender = normalizeAgentRef(line.sender);
+    assert.ok(validAgents.has(normalizedSender), `脚本里出现了 topology 中不存在的 Agent：${line.sender}`);
     const parsedReply = parseReply(line);
     for (const target of parsedReply.targets) {
-      assert.ok(validAgents.has(target), `脚本里 @ 了 topology 中不存在的 Agent：${target}`);
+      assert.ok(validAgents.has(normalizeAgentRef(target)), `脚本里 @ 了 topology 中不存在的 Agent：${target}`);
     }
-    const currentReplies = repliesByAgent.get(line.sender) ?? [];
-    currentReplies.push(parsedReply);
-    repliesByAgent.set(line.sender, currentReplies);
+    const currentReplies = repliesByAgent.get(normalizedSender) ?? [];
+    currentReplies.push({
+      ...parsedReply,
+      sender: normalizedSender,
+    });
+    repliesByAgent.set(normalizedSender, currentReplies);
   }
 
   return {
@@ -322,6 +335,25 @@ function parseScenario(topology: TopologyRecord, script: string[]): ParsedScenar
     repliesByAgent,
     agentOrder,
     validAgents,
+    normalizeAgentRef,
+  };
+}
+
+function createAgentRefNormalizer(topology: TopologyRecord): (name: string) => string {
+  const spawnTemplateNames = new Set(
+    (topology.nodeRecords ?? [])
+      .filter((node) => node.kind === "spawn")
+      .map((node) => node.templateName),
+  );
+
+  return (name: string) => {
+    const trimmed = name.trim();
+    const match = trimmed.match(/^(.+)-(\d+)$/u);
+    if (!match) {
+      return trimmed;
+    }
+    const templateName = match[1]?.trim() ?? trimmed;
+    return spawnTemplateNames.has(templateName) ? templateName : trimmed;
   };
 }
 

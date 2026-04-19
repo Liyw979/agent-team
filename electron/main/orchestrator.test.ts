@@ -627,6 +627,132 @@ test("保存拓扑后 state.json 不再持久化 startAgentId", async () => {
   );
 });
 
+test("保存拓扑后会持久化动态 spawn 团队配置", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  const orchestrator = createTestOrchestrator({
+    userDataPath,
+    enableEventStream: false,
+  });
+
+  let project = await orchestrator.createProject({ path: projectPath });
+  project = await addBuiltinAgents(orchestrator, project.project.id, ["Build"]);
+  project = await addCustomAgent(orchestrator, project.project.id, "初筛", "你是初筛。");
+  project = await addCustomAgent(orchestrator, project.project.id, "正方模板", "你是正方。");
+  project = await addCustomAgent(orchestrator, project.project.id, "反方模板", "你是反方。");
+  project = await addCustomAgent(orchestrator, project.project.id, "Summary模板", "你是总结。");
+
+  const saved = await orchestrator.saveTopology({
+    projectId: project.project.id,
+    topology: {
+      ...project.topology,
+      nodes: ["Build", "初筛", "正方模板", "反方模板", "Summary模板"],
+      edges: [{ source: "Build", target: "初筛", triggerOn: "association" }],
+      nodeRecords: [
+        { id: "Build", kind: "agent", templateName: "Build" },
+        { id: "初筛", kind: "agent", templateName: "初筛" },
+        { id: "正方模板", kind: "agent", templateName: "正方模板" },
+        { id: "反方模板", kind: "agent", templateName: "反方模板" },
+        { id: "Summary模板", kind: "agent", templateName: "Summary模板" },
+        { id: "疑点辩论工厂", kind: "spawn", templateName: "正方模板", spawnRuleId: "finding-debate" },
+      ],
+      spawnRules: [
+        {
+          id: "finding-debate",
+          name: "漏洞疑点辩论",
+          sourceTemplateName: "初筛",
+          itemKey: "findings",
+          entryRole: "pro",
+          spawnedAgents: [
+            { role: "pro", templateName: "正方模板" },
+            { role: "con", templateName: "反方模板" },
+            { role: "summary", templateName: "Summary模板" },
+          ],
+          edges: [
+            { sourceRole: "pro", targetRole: "con", triggerOn: "review_fail" },
+            { sourceRole: "con", targetRole: "pro", triggerOn: "review_fail" },
+            { sourceRole: "pro", targetRole: "summary", triggerOn: "review_pass" },
+            { sourceRole: "con", targetRole: "summary", triggerOn: "review_pass" },
+          ],
+          exitWhen: "one_side_agrees",
+          reportToTemplateName: "初筛",
+        },
+      ],
+    },
+  });
+
+  assert.equal(saved.topology.spawnRules?.length, 1);
+  assert.equal(saved.topology.nodeRecords?.some((node) => node.kind === "spawn"), true);
+
+  const statePath = path.join(projectPath, ".agentflow", "state.json");
+  const persisted = JSON.parse(fs.readFileSync(statePath, "utf8")) as {
+    topology?: {
+      spawnRules?: Array<{ id?: string }>;
+      nodeRecords?: Array<{ id?: string; kind?: string }>;
+    };
+  };
+  assert.equal(persisted.topology?.spawnRules?.[0]?.id, "finding-debate");
+  assert.equal(
+    persisted.topology?.nodeRecords?.some((node) => node.id === "疑点辩论工厂" && node.kind === "spawn"),
+    true,
+  );
+});
+
+test("保存拓扑后会保留 spawnEnabled 标记，避免 GUI 点击后回读丢失", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  const orchestrator = createTestOrchestrator({
+    userDataPath,
+    enableEventStream: false,
+  });
+
+  let project = await orchestrator.createProject({ path: projectPath });
+  project = await addBuiltinAgents(orchestrator, project.project.id, ["Build"]);
+  project = await addCustomAgent(orchestrator, project.project.id, "UnitTest", "你是 UnitTest。");
+  project = await addCustomAgent(orchestrator, project.project.id, "BA", "你是 BA。");
+
+  const saved = await orchestrator.saveTopology({
+    projectId: project.project.id,
+    topology: {
+      ...project.topology,
+      nodes: ["Build", "UnitTest", "BA"],
+      edges: [{ source: "Build", target: "UnitTest", triggerOn: "association" }],
+      nodeRecords: [
+        { id: "Build", kind: "agent", templateName: "Build" },
+        { id: "UnitTest", kind: "spawn", templateName: "UnitTest", spawnRuleId: "spawn-rule:UnitTest", spawnEnabled: true },
+        { id: "BA", kind: "agent", templateName: "BA" },
+      ],
+      spawnRules: [
+        {
+          id: "spawn-rule:UnitTest",
+          name: "UnitTest",
+          sourceTemplateName: "Build",
+          itemKey: "spawn_items",
+          entryRole: "entry",
+          spawnedAgents: [
+            { role: "entry", templateName: "UnitTest" },
+          ],
+          edges: [],
+          exitWhen: "one_side_agrees",
+          reportToTemplateName: "UnitTest",
+        },
+      ],
+    },
+  });
+
+  assert.equal(
+    saved.topology.nodeRecords?.find((node) => node.id === "UnitTest")?.spawnEnabled,
+    true,
+  );
+
+  const rehydrated = await orchestrator.bootstrap();
+  const matchedProject = rehydrated.find((item) => item.project.id === project.project.id);
+  assert.equal(
+    matchedProject?.topology.nodeRecords?.find((node) => node.id === "UnitTest")?.spawnEnabled,
+    true,
+  );
+});
+
 test("为不同 Project 初始化 Task 时会切换 OpenCode 注入配置", async () => {
   const userDataPath = createTempDir();
   const projectAPath = createTempDir();

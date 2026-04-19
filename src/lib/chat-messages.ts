@@ -14,6 +14,7 @@ import {
 export interface ChatMessageItem {
   id: string;
   sender: string;
+  senderDisplayName?: string;
   timestamp: string;
   content: string;
   kinds: string[];
@@ -253,7 +254,13 @@ export function mergeTaskChatMessages(messages: MessageRecord[]): ChatMessageIte
 
     merged.push({
       id: message.id,
-      sender: message.sender,
+      sender: typeof message.meta?.senderDisplayName === "string" && message.meta.senderDisplayName.trim()
+        ? message.meta.senderDisplayName.trim()
+        : message.sender,
+      senderDisplayName:
+        typeof message.meta?.senderDisplayName === "string" && message.meta.senderDisplayName.trim()
+          ? message.meta.senderDisplayName.trim()
+          : undefined,
       timestamp: message.timestamp,
       content: getDisplayContent(message),
       kinds: message.meta?.kind ? [message.meta.kind] : [],

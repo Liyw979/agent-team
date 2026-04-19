@@ -112,8 +112,7 @@ test("router 会保留 CodeReview 嵌套链路可先于外层 association 批次
     signalDone: false,
   });
   assert.deepEqual(afterUnitTest.decision, {
-    type: "waiting",
-    waitingReason: "no_runnable_agents",
+    type: "finished",
   });
 });
 
@@ -319,7 +318,235 @@ test("同一 reviewer 连续 4 次回流后，只要第 5 次改为通过，流�
     signalDone: false,
   });
   assert.deepEqual(afterUnitTestPass.decision, {
-    type: "waiting",
-    waitingReason: "no_runnable_agents",
+    type: "finished",
   });
+});
+
+test("用户消息命中 spawn 节点时会自动生成实例组并启动入口角色", () => {
+  const topology: TopologyRecord = {
+    projectId: "router-spawn-project",
+    nodes: ["初筛", "正方模板", "反方模板", "Summary模板"],
+    nodeRecords: [
+      { id: "初筛", kind: "agent", templateName: "初筛" },
+      { id: "正方模板", kind: "agent", templateName: "正方模板" },
+      { id: "反方模板", kind: "agent", templateName: "反方模板" },
+      { id: "Summary模板", kind: "agent", templateName: "Summary模板" },
+      { id: "疑点辩论工厂", kind: "spawn", templateName: "正方模板", spawnRuleId: "finding-debate" },
+    ],
+    edges: [],
+    spawnRules: [
+      {
+        id: "finding-debate",
+        name: "漏洞疑点辩论",
+        sourceTemplateName: "初筛",
+        itemKey: "findings",
+        entryRole: "pro",
+        spawnedAgents: [
+          { role: "pro", templateName: "正方模板" },
+          { role: "con", templateName: "反方模板" },
+          { role: "summary", templateName: "Summary模板" },
+        ],
+        edges: [
+          { sourceRole: "pro", targetRole: "con", triggerOn: "review_fail" },
+          { sourceRole: "con", targetRole: "pro", triggerOn: "review_fail" },
+          { sourceRole: "pro", targetRole: "summary", triggerOn: "review_pass" },
+          { sourceRole: "con", targetRole: "summary", triggerOn: "review_pass" },
+        ],
+        exitWhen: "one_side_agrees",
+        reportToTemplateName: "初筛",
+      },
+    ],
+  };
+  const state = createGraphTaskState({
+    taskId: "task-spawn-router",
+    projectId: topology.projectId,
+    topology,
+  });
+
+  const decision = createUserDispatchDecision(state, {
+    targetAgentName: "疑点辩论工厂",
+    content: "发现上传文件名被直接拼到目标路径。",
+  });
+
+  assert.equal(decision.type, "execute_batch");
+  assert.deepEqual(
+    decision.batch.jobs.map((job) => job.agentName),
+    ["pro#finding-debate:finding-debate-0001"],
+  );
+  assert.equal(state.spawnBundles.length, 1);
+  assert.equal(
+    state.runtimeNodes.some((node) => node.id === "con#finding-debate:finding-debate-0001"),
+    true,
+  );
+});
+
+test("自动 association 命中 spawn 节点时，会实例化动态团队并派发入口角色，而不是停在 spawn 模板节点", () => {
+  const topology: TopologyRecord = {
+    projectId: "router-auto-spawn-project",
+    nodes: ["Build", "UnitTest", "TaskReview", "CodeReview"],
+    nodeRecords: [
+      { id: "Build", kind: "agent", templateName: "Build" },
+      { id: "UnitTest", kind: "spawn", templateName: "UnitTest", spawnRuleId: "spawn-rule:UnitTest", spawnEnabled: true },
+      { id: "TaskReview", kind: "spawn", templateName: "TaskReview", spawnRuleId: "spawn-rule:TaskReview", spawnEnabled: true },
+      { id: "CodeReview", kind: "spawn", templateName: "CodeReview", spawnRuleId: "spawn-rule:CodeReview", spawnEnabled: true },
+    ],
+    edges: [
+      { source: "Build", target: "UnitTest", triggerOn: "association" },
+      { source: "Build", target: "TaskReview", triggerOn: "association" },
+      { source: "Build", target: "CodeReview", triggerOn: "association" },
+    ],
+    spawnRules: [
+      {
+        id: "spawn-rule:UnitTest",
+        name: "UnitTest",
+        sourceTemplateName: "Build",
+        itemKey: "spawn_items",
+        entryRole: "entry",
+        spawnedAgents: [{ role: "entry", templateName: "UnitTest" }],
+        edges: [],
+        exitWhen: "one_side_agrees",
+        reportToTemplateName: "Build",
+      },
+      {
+        id: "spawn-rule:TaskReview",
+        name: "TaskReview",
+        sourceTemplateName: "Build",
+        itemKey: "spawn_items",
+        entryRole: "entry",
+        spawnedAgents: [{ role: "entry", templateName: "TaskReview" }],
+        edges: [],
+        exitWhen: "one_side_agrees",
+        reportToTemplateName: "Build",
+      },
+      {
+        id: "spawn-rule:CodeReview",
+        name: "CodeReview",
+        sourceTemplateName: "Build",
+        itemKey: "spawn_items",
+        entryRole: "entry",
+        spawnedAgents: [{ role: "entry", templateName: "CodeReview" }],
+        edges: [],
+        exitWhen: "one_side_agrees",
+        reportToTemplateName: "Build",
+      },
+    ],
+  };
+  const state = createGraphTaskState({
+    taskId: "task-auto-spawn-router",
+    projectId: topology.projectId,
+    topology,
+  });
+
+  const afterBuild = applyAgentResultToGraphState(state, {
+    agentName: "Build",
+    status: "completed",
+    reviewAgent: false,
+    reviewDecision: "pass",
+    agentStatus: "completed",
+    agentContextContent: "Build 已完成",
+    opinion: null,
+    allowDirectFallbackWhenNoBatch: false,
+    signalDone: false,
+  });
+
+  assert.equal(afterBuild.decision.type, "execute_batch");
+  assert.deepEqual(
+    afterBuild.decision.batch.jobs.map((job) => job.agentName),
+    [
+      "entry#spawn-rule:UnitTest:spawn-rule:UnitTest-0001",
+      "entry#spawn-rule:TaskReview:spawn-rule:TaskReview-0001",
+      "entry#spawn-rule:CodeReview:spawn-rule:CodeReview-0001",
+    ],
+  );
+  assert.equal(afterBuild.state.spawnBundles.length, 3);
+});
+
+test("最后一个叶子节点完成后，router 会直接判定 finished，而不是错误停在 waiting", () => {
+  const topology: TopologyRecord = {
+    projectId: "router-finish-leaf",
+    nodes: ["BA", "Build", "QA"],
+    edges: [
+      { source: "BA", target: "Build", triggerOn: "association" },
+      { source: "Build", target: "QA", triggerOn: "association" },
+    ],
+  };
+  const state = createGraphTaskState({
+    taskId: "task-finish-leaf",
+    projectId: topology.projectId,
+    topology,
+  });
+
+  const afterBa = applyAgentResultToGraphState(state, {
+    agentName: "BA",
+    status: "completed",
+    reviewAgent: false,
+    reviewDecision: "pass",
+    agentStatus: "completed",
+    agentContextContent: "需求已澄清",
+    opinion: null,
+    allowDirectFallbackWhenNoBatch: false,
+    signalDone: false,
+  });
+  assert.equal(afterBa.decision.type, "execute_batch");
+  assert.deepEqual(afterBa.decision.batch.jobs.map((job) => job.agentName), ["Build"]);
+
+  const afterBuild = applyAgentResultToGraphState(afterBa.state, {
+    agentName: "Build",
+    status: "completed",
+    reviewAgent: false,
+    reviewDecision: "pass",
+    agentStatus: "completed",
+    agentContextContent: "实现已完成",
+    opinion: null,
+    allowDirectFallbackWhenNoBatch: false,
+    signalDone: false,
+  });
+  assert.equal(afterBuild.decision.type, "execute_batch");
+  assert.deepEqual(afterBuild.decision.batch.jobs.map((job) => job.agentName), ["QA"]);
+
+  const afterQa = applyAgentResultToGraphState(afterBuild.state, {
+    agentName: "QA",
+    status: "completed",
+    reviewAgent: false,
+    reviewDecision: "pass",
+    agentStatus: "completed",
+    agentContextContent: "验证已完成",
+    opinion: null,
+    allowDirectFallbackWhenNoBatch: false,
+    signalDone: false,
+  });
+  assert.deepEqual(afterQa.decision, {
+    type: "finished",
+  });
+});
+
+test("单一路径上游完成后，router 会继续派发下一个 association 下游，而不是错误 waiting", () => {
+  const topology: TopologyRecord = {
+    projectId: "router-simple-chain",
+    nodes: ["BA", "Build", "QA"],
+    edges: [
+      { source: "BA", target: "Build", triggerOn: "association" },
+      { source: "Build", target: "QA", triggerOn: "association" },
+    ],
+  };
+  const state = createGraphTaskState({
+    taskId: "task-simple-chain",
+    projectId: topology.projectId,
+    topology,
+  });
+
+  const afterBa = applyAgentResultToGraphState(state, {
+    agentName: "BA",
+    status: "completed",
+    reviewAgent: false,
+    reviewDecision: "pass",
+    agentStatus: "completed",
+    agentContextContent: "需求已澄清",
+    opinion: null,
+    allowDirectFallbackWhenNoBatch: false,
+    signalDone: false,
+  });
+
+  assert.equal(afterBa.decision.type, "execute_batch");
+  assert.deepEqual(afterBa.decision.batch.jobs.map((job) => job.agentName), ["Build"]);
 });

@@ -90,6 +90,39 @@ export interface TopologyAgentSeed {
   name: string;
 }
 
+export type TopologyNodeKind = "agent" | "spawn";
+
+export type SpawnedAgentRole = "pro" | "con" | "summary" | string;
+
+export interface SpawnedAgentTemplate {
+  role: SpawnedAgentRole;
+  templateName: string;
+}
+
+export interface SpawnRule {
+  id: string;
+  name: string;
+  sourceTemplateName: string;
+  itemKey: string;
+  entryRole: SpawnedAgentRole;
+  spawnedAgents: SpawnedAgentTemplate[];
+  edges: Array<{
+    sourceRole: SpawnedAgentRole;
+    targetRole: SpawnedAgentRole;
+    triggerOn: TopologyEdgeTrigger;
+  }>;
+  exitWhen: "one_side_agrees";
+  reportToTemplateName: string;
+}
+
+export interface TopologyNodeRecord {
+  id: string;
+  kind: TopologyNodeKind;
+  templateName: string;
+  spawnRuleId?: string;
+  spawnEnabled?: boolean;
+}
+
 export interface TaskAgentRecord {
   id: string;
   taskId: string;
@@ -123,6 +156,37 @@ export interface TopologyRecord {
   projectId: string;
   nodes: string[];
   edges: TopologyEdge[];
+  nodeRecords?: TopologyNodeRecord[];
+  spawnRules?: SpawnRule[];
+}
+
+export interface RuntimeTopologyNode {
+  id: string;
+  templateName: string;
+  displayName: string;
+  sourceNodeId: string;
+  groupId: string | null;
+  role: SpawnedAgentRole | null;
+}
+
+export interface RuntimeTopologyEdge {
+  source: string;
+  target: string;
+  triggerOn: TopologyEdgeTrigger;
+}
+
+export interface SpawnItemPayload {
+  id: string;
+  title: string;
+}
+
+export interface SpawnBundleInstantiation {
+  groupId: string;
+  sourceTemplateName: string;
+  reportToTemplateName: string;
+  item: SpawnItemPayload;
+  nodes: RuntimeTopologyNode[];
+  edges: RuntimeTopologyEdge[];
 }
 
 export interface MessageRecord {
@@ -423,5 +487,39 @@ export function createDefaultTopology(
     projectId,
     nodes,
     edges,
+    nodeRecords: nodes.map((name) => ({
+      id: name,
+      kind: "agent",
+      templateName: name,
+    })),
+    spawnRules: [],
   };
+}
+
+export function getTopologyNodeRecords(topology: TopologyRecord): TopologyNodeRecord[] {
+  const explicit = topology.nodeRecords?.filter(
+    (node): node is TopologyNodeRecord =>
+      typeof node?.id === "string"
+      && node.id.length > 0
+      && typeof node.templateName === "string"
+      && node.templateName.length > 0
+      && (node.kind === "agent" || node.kind === "spawn"),
+  );
+  if (explicit && explicit.length > 0) {
+    return explicit.map((node) => ({ ...node }));
+  }
+
+  return topology.nodes.map((name) => ({
+    id: name,
+    kind: "agent",
+    templateName: name,
+  }));
+}
+
+export function getSpawnRules(topology: TopologyRecord): SpawnRule[] {
+  return (topology.spawnRules ?? []).map((rule) => ({
+    ...rule,
+    spawnedAgents: rule.spawnedAgents.map((agent) => ({ ...agent })),
+    edges: rule.edges.map((edge) => ({ ...edge })),
+  }));
 }

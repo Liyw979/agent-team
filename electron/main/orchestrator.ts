@@ -82,6 +82,7 @@ import type { LangGraphTaskLoopHost } from "./langgraph-host";
 import { LangGraphStudioManager } from "./langgraph-studio";
 import type { GraphDispatchBatch, GraphAgentResult } from "./gating-router";
 import type { GraphTaskState } from "./gating-state";
+import { getRuntimeNode, getRuntimeTemplateName } from "./runtime-topology-graph";
 
 const execFileAsync = promisify(execFile);
 
@@ -825,6 +826,26 @@ export class Orchestrator {
     this.store.updateTaskAgentCount(task.id, agentFiles.length);
   }
 
+  private ensureRuntimeTaskAgent(
+    task: TaskRecord,
+    runtimeAgentName: string,
+  ): void {
+    const existing = this.store.listTaskAgents(task.id).find((item) => item.name === runtimeAgentName);
+    if (existing) {
+      return;
+    }
+    this.store.insertTaskAgent({
+      id: randomUUID(),
+      taskId: task.id,
+      projectId: task.projectId,
+      name: runtimeAgentName,
+      opencodeSessionId: null,
+      status: "idle",
+      runCount: 0,
+    });
+    this.store.updateTaskAgentCount(task.id, this.store.listTaskAgents(task.id).length);
+  }
+
   private async runAgent(
     project: ProjectRecord,
     task: TaskRecord,
@@ -839,6 +860,8 @@ export class Orchestrator {
     const result = await this.executeLangGraphAgentOnce(
       project,
       task,
+      null,
+      agentName,
       agentName,
       prompt,
       1,
@@ -1410,6 +1433,34 @@ export class Orchestrator {
     return agentFiles.find((agent) => agent.name === name);
   }
 
+  private resolveExecutableAgentName(
+    project: ProjectRecord,
+    state: GraphTaskState | null,
+    runtimeAgentName: string,
+  ): string {
+    const projectAgentFiles = this.listProjectAgents(project);
+    if (projectAgentFiles.some((agent) => agent.name === runtimeAgentName)) {
+      return runtimeAgentName;
+    }
+
+    const templateName = state ? getRuntimeTemplateName(state, runtimeAgentName) : null;
+    if (templateName && projectAgentFiles.some((agent) => agent.name === templateName)) {
+      return templateName;
+    }
+
+    return runtimeAgentName;
+  }
+
+  private resolveMessageSenderDisplayName(
+    state: GraphTaskState | null,
+    runtimeAgentName: string,
+  ): string {
+    if (!state) {
+      return runtimeAgentName;
+    }
+    return getRuntimeNode(state, runtimeAgentName)?.displayName ?? runtimeAgentName;
+  }
+
   private hydrateProject(projectId: string, forceSyncTopology = false): ProjectSnapshot {
     const project = this.store.getProject(projectId);
     const agentFiles = this.listProjectAgents(project);
@@ -1512,11 +1563,41 @@ export class Orchestrator {
       agentFiles.map((file) => ({ name: file.name })),
       topology.nodes.filter((item) => validNames.has(item)),
     );
+    const nodeRecords = topology.nodeRecords?.filter(
+      (node) =>
+        node.id
+        && node.templateName
+        && (node.kind === "spawn" || validNames.has(node.templateName)),
+    ).map((node) => ({
+      id: node.id,
+      kind: node.kind,
+      templateName: node.templateName,
+      spawnRuleId: node.spawnRuleId,
+      spawnEnabled: node.spawnEnabled === true,
+    }));
+    const spawnRules = topology.spawnRules?.filter(
+      (rule) =>
+        rule.id
+        && rule.name
+        && rule.sourceTemplateName
+        && rule.itemKey
+        && rule.entryRole
+        && rule.reportToTemplateName
+        && validNames.has(rule.sourceTemplateName)
+        && validNames.has(rule.reportToTemplateName)
+        && rule.spawnedAgents.every((agent) => agent.role && validNames.has(agent.templateName)),
+    ).map((rule) => ({
+      ...rule,
+      spawnedAgents: rule.spawnedAgents.map((agent) => ({ ...agent })),
+      edges: rule.edges.map((edge) => ({ ...edge })),
+    }));
 
     return {
       projectId,
       nodes,
       edges,
+      nodeRecords,
+      spawnRules,
     };
   }
 
@@ -1618,6 +1699,7 @@ export class Orchestrator {
             kind: "agent-dispatch",
             sourceAgentId,
             targetAgentIds: batch.triggerTargets.join(","),
+            senderDisplayName: this.resolveMessageSenderDisplayName(state, sourceAgentId),
           },
         };
         this.store.insertMessage(triggerMessage);
@@ -1646,6 +1728,8 @@ export class Orchestrator {
       : "";
 
     return batch.jobs.map((job, index) => {
+      this.ensureRuntimeTaskAgent(task, job.agentName);
+      const executableAgentName = this.resolveExecutableAgentName(project, state, job.agentName);
       let prompt: AgentExecutionPrompt;
       if (job.kind === "raw") {
         prompt = {
@@ -1668,7 +1752,7 @@ export class Orchestrator {
               ? initialUserContent
               : undefined,
           agentMessage: revisionContent,
-          gitDiffSummary: this.shouldAttachGitDiffSummary(topology, job.agentName) ? gitDiffSummary : undefined,
+          gitDiffSummary: this.shouldAttachGitDiffSummary(topology, executableAgentName) ? gitDiffSummary : undefined,
           allowDirectFallbackWhenNoBatch: true,
         };
         const remediationMessage: MessageRecord = {
@@ -1685,6 +1769,10 @@ export class Orchestrator {
             kind: "revision-request",
             sourceAgentId: batch.sourceAgentId ?? "Reviewer",
             targetAgentId: job.agentName,
+            senderDisplayName:
+              batch.sourceAgentId
+                ? this.resolveMessageSenderDisplayName(state, batch.sourceAgentId)
+                : "Reviewer",
           },
         };
         this.store.insertMessage(remediationMessage);
@@ -1699,7 +1787,7 @@ export class Orchestrator {
           from: batch.sourceAgentId ?? "System",
           userMessage: forwardedContext?.userMessage,
           agentMessage: forwardedContext?.agentMessage,
-          gitDiffSummary: this.shouldAttachGitDiffSummary(topology, job.agentName) ? gitDiffSummary : undefined,
+          gitDiffSummary: this.shouldAttachGitDiffSummary(topology, executableAgentName) ? gitDiffSummary : undefined,
         };
       }
 
@@ -1709,7 +1797,9 @@ export class Orchestrator {
         promise: this.executeLangGraphAgentOnce(
           project,
           task,
+          state,
           job.agentName,
+          executableAgentName,
           prompt,
           batchSize,
         ),
@@ -1720,17 +1810,19 @@ export class Orchestrator {
   private async executeLangGraphAgentOnce(
     project: ProjectRecord,
     task: TaskRecord,
-    agentName: string,
+    state: GraphTaskState | null,
+    runtimeAgentName: string,
+    executableAgentName: string,
     prompt: AgentExecutionPrompt,
     concurrentBatchSize: number,
   ): Promise<GraphAgentResult> {
     this.setInjectedConfigForProject(project);
-    this.store.updateTaskAgentRun(task.id, agentName, "running");
+    this.store.updateTaskAgentRun(task.id, runtimeAgentName, "running");
     this.updateTaskStatusIfActive(task.id, "running", null);
-    const currentAgent = this.store.listTaskAgents(task.id).find((item) => item.name === agentName);
+    const currentAgent = this.store.listTaskAgents(task.id).find((item) => item.name === runtimeAgentName);
     if (!currentAgent) {
       return {
-        agentName,
+        agentName: runtimeAgentName,
         status: "failed",
         reviewAgent: false,
         reviewDecision: "invalid",
@@ -1739,7 +1831,7 @@ export class Orchestrator {
         opinion: null,
         allowDirectFallbackWhenNoBatch: false,
         signalDone: false,
-        errorMessage: `Task ${task.id} 缺少 Agent ${agentName}`,
+        errorMessage: `Task ${task.id} 缺少 Agent ${runtimeAgentName}`,
       };
     }
 
@@ -1747,9 +1839,9 @@ export class Orchestrator {
       const currentTask = this.store.getTask(task.id);
       await this.ensureTaskPanels(currentTask);
       const agentSessionId = await this.ensureAgentSession(project, currentTask, currentAgent);
-      const latestAgentFile = this.findAgentFile(this.listProjectAgents(project), agentName);
+      const latestAgentFile = this.findAgentFile(this.listProjectAgents(project), executableAgentName);
       if (!latestAgentFile) {
-        throw new Error(`当前 Project 缺少 Agent ${agentName}`);
+        throw new Error(`当前 Project 缺少 Agent ${executableAgentName}`);
       }
 
       this.emit({
@@ -1757,7 +1849,7 @@ export class Orchestrator {
         projectId: project.id,
         payload: {
           taskId: task.id,
-          agentId: agentName,
+          agentId: runtimeAgentName,
           status: "running",
           runCount: currentAgent.runCount,
         },
@@ -1774,13 +1866,13 @@ export class Orchestrator {
         projectPath: project.path,
         sessionId: agentSessionId,
         content: dispatchedContent,
-        agent: agentName,
+        agent: executableAgentName,
         system: this.createSystemPrompt(latestAgentFile, topology, prompt),
       });
 
       if (response.status === "error") {
         throw new Error(
-          response.rawMessage.error || response.finalMessage || `${agentName} 返回错误状态`,
+          response.rawMessage.error || response.finalMessage || `${runtimeAgentName} 返回错误状态`,
         );
       }
 
@@ -1796,7 +1888,7 @@ export class Orchestrator {
         projectId: project.id,
         taskId: task.id,
         content: this.createDisplayContent(parsedReview, response.fallbackMessage),
-        sender: agentName,
+        sender: runtimeAgentName,
         timestamp: response.timestamp,
         meta: {
           kind: "agent-final",
@@ -1806,19 +1898,20 @@ export class Orchestrator {
           reviewOpinion: parsedReview.opinion ?? "",
           rawResponse: response.finalMessage,
           sessionId: agentSessionId,
+          senderDisplayName: this.resolveMessageSenderDisplayName(state, runtimeAgentName),
         },
       };
       this.store.insertMessage(taskMessage);
 
       const reviewFailureTargets =
         parsedReview.decision === "needs_revision"
-          ? this.getOutgoingEdges(topology, agentName, "review_fail")
+          ? this.getOutgoingEdges(topology, runtimeAgentName, "review_fail")
           : [];
       const agentStatus = resolveAgentStatusFromReview({
         reviewDecision: parsedReview.decision,
         reviewAgent,
       });
-      this.store.updateTaskAgentStatus(task.id, agentName, agentStatus);
+      this.store.updateTaskAgentStatus(task.id, runtimeAgentName, agentStatus);
       if (parsedReview.decision === "needs_revision" && reviewFailureTargets.length > 0) {
         this.updateTaskStatusIfActive(
           task.id,
@@ -1841,10 +1934,10 @@ export class Orchestrator {
         projectId: project.id,
         payload: {
           taskId: task.id,
-          agentId: agentName,
+          agentId: runtimeAgentName,
           status: agentStatus,
           runCount:
-            this.store.listTaskAgents(task.id).find((item) => item.name === agentName)?.runCount ??
+            this.store.listTaskAgents(task.id).find((item) => item.name === runtimeAgentName)?.runCount ??
             currentAgent.runCount,
         },
       });
@@ -1856,7 +1949,7 @@ export class Orchestrator {
 
       const signal = this.parseSignal(response.finalMessage);
       return {
-        agentName,
+        agentName: runtimeAgentName,
         status: "completed",
         reviewAgent,
         reviewDecision: parsedReview.decision,
@@ -1868,13 +1961,13 @@ export class Orchestrator {
       };
     } catch (error) {
       const topology = this.store.getTopology(project.id);
-      const reviewAgent = this.isReviewAgent({ name: agentName }, topology);
-      this.store.updateTaskAgentStatus(task.id, agentName, "failed");
+      const reviewAgent = this.isReviewAgent({ name: runtimeAgentName }, topology);
+      this.store.updateTaskAgentStatus(task.id, runtimeAgentName, "failed");
       const failedMessage: MessageRecord = {
         id: randomUUID(),
         projectId: project.id,
         taskId: task.id,
-        content: `[${agentName}] 执行失败：${error instanceof Error ? error.message : "未知错误"}`,
+        content: `[${runtimeAgentName}] 执行失败：${error instanceof Error ? error.message : "未知错误"}`,
         sender: "system",
         timestamp: new Date().toISOString(),
       };
@@ -1890,9 +1983,9 @@ export class Orchestrator {
         projectId: project.id,
         payload: {
           taskId: task.id,
-          agentId: agentName,
+          agentId: runtimeAgentName,
           status: "failed",
-          runCount: this.store.listTaskAgents(task.id).find((item) => item.name === agentName)?.runCount ?? 0,
+          runCount: this.store.listTaskAgents(task.id).find((item) => item.name === runtimeAgentName)?.runCount ?? 0,
         },
       });
       this.emit({
@@ -1902,7 +1995,7 @@ export class Orchestrator {
       });
 
       return {
-        agentName,
+        agentName: runtimeAgentName,
         status: "failed",
         reviewAgent,
         reviewDecision: "invalid",
