@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 
 import type { TopologyRecord } from "@shared/types";
 
+const MAX_REVIEW_FAIL_LOOP_COUNT = 4;
+
 interface ParsedScriptLine {
   sender: string;
   content: string;
@@ -71,6 +73,7 @@ export async function assertSchedulerScript(
   const actualScript: string[] = [];
   const replyIndexByAgent = new Map<string, number>();
   const activeBatches: ActiveBatch[] = [];
+  const reviewFailLoopCountByEdge = new Map<string, number>();
 
   const appendLine = (line: string) => {
     actualScript.push(line);
@@ -204,9 +207,18 @@ export async function assertSchedulerScript(
     });
 
     if (!isFail) {
+      clearReviewFailLoopCountsForReviewer(reviewFailLoopCountByEdge, agentName);
       const sourceState = sourceStates.get(currentSource);
       assert.notEqual(sourceState, undefined, `缺少 SourceState：${currentSource}`);
       sourceState.reviewerPassRevision.set(agentName, currentBatch.sourceRevision);
+    } else {
+      const edgeKey = buildReviewFailLoopEdgeKey(agentName, currentSource);
+      const nextLoopCount = (reviewFailLoopCountByEdge.get(edgeKey) ?? 0) + 1;
+      reviewFailLoopCountByEdge.set(edgeKey, nextLoopCount);
+      assert.ok(
+        nextLoopCount <= MAX_REVIEW_FAIL_LOOP_COUNT,
+        `${agentName} -> ${currentSource} 连续回流已超过 ${MAX_REVIEW_FAIL_LOOP_COUNT} 轮上限`,
+      );
     }
 
     if (!isFail && reply.targets.length > 0) {
@@ -430,4 +442,19 @@ function formatScriptLine(sender: string, content: string): string {
 
 function areSameOrderedTargets(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((target, index) => target === right[index]);
+}
+
+function buildReviewFailLoopEdgeKey(sourceAgentId: string, targetAgentId: string): string {
+  return `${sourceAgentId}->${targetAgentId}`;
+}
+
+function clearReviewFailLoopCountsForReviewer(
+  reviewFailLoopCountByEdge: Map<string, number>,
+  reviewerAgentId: string,
+): void {
+  for (const edgeKey of reviewFailLoopCountByEdge.keys()) {
+    if (edgeKey.startsWith(`${reviewerAgentId}->`)) {
+      reviewFailLoopCountByEdge.delete(edgeKey);
+    }
+  }
 }

@@ -17,6 +17,8 @@ import {
 } from "./gating-state";
 import { compileTopology } from "./topology-compiler";
 
+const MAX_REVIEW_FAIL_LOOP_COUNT = 4;
+
 export interface GraphDispatchJob {
   agentName: string;
   sourceAgentId: string | null;
@@ -131,6 +133,8 @@ export function applyAgentResultToGraphState(
     };
   }
 
+  clearReviewFailLoopCountsForReviewer(nextState, result.agentName);
+
   if (result.reviewDecision === "invalid") {
     nextState.taskStatus = "failed";
     return {
@@ -198,6 +202,14 @@ function handleNeedsRevision(
   }
 
   if (continuationAction === "trigger_repair_review" && continuation?.repairReviewerAgentId) {
+    const loopLimitDecision = enforceReviewFailLoopLimit(
+      state,
+      result.agentName,
+      continuation.sourceAgentId,
+    );
+    if (loopLimitDecision) {
+      return loopLimitDecision;
+    }
     const storedReview = state.pendingRevisionRequestsByAgent[continuation.repairReviewerAgentId];
     if (!storedReview) {
       return {
@@ -221,6 +233,23 @@ function handleNeedsRevision(
   }
 
   if (continuationAction === "trigger_fallback_review") {
+    const reviewFailTargets = topologyIndex.reviewFailTargetsBySource[result.agentName] ?? [];
+    const fallbackTarget = reviewFailTargets[0];
+    if (!fallbackTarget) {
+      state.taskStatus = "failed";
+      return {
+        type: "failed",
+        errorMessage: `${result.agentName} 给出了 needs_revision，但没有可继续推进的 review_fail 链路`,
+      };
+    }
+    const loopLimitDecision = enforceReviewFailLoopLimit(
+      state,
+      result.agentName,
+      fallbackTarget,
+    );
+    if (loopLimitDecision) {
+      return loopLimitDecision;
+    }
     const storedReview = state.pendingRevisionRequestsByAgent[result.agentName];
     return triggerRevisionRequestDownstream(
       state,
@@ -257,6 +286,14 @@ function continueAfterAssociationBatchResponse(
   });
 
   if (action === "trigger_repair_review" && continuation?.repairReviewerAgentId) {
+    const loopLimitDecision = enforceReviewFailLoopLimit(
+      state,
+      continuation.repairReviewerAgentId,
+      continuation.sourceAgentId,
+    );
+    if (loopLimitDecision) {
+      return loopLimitDecision;
+    }
     const storedReview = state.pendingRevisionRequestsByAgent[continuation.repairReviewerAgentId];
     if (!storedReview) {
       return {
@@ -414,4 +451,35 @@ function buildGatingAgentStates(state: GraphTaskState): GatingAgentState[] {
     name,
     status: state.agentStatusesByName[name] ?? "idle",
   }));
+}
+
+function enforceReviewFailLoopLimit(
+  state: GraphTaskState,
+  sourceAgentId: string,
+  targetAgentId: string,
+): GraphRoutingDecision | null {
+  const edgeKey = buildReviewFailLoopEdgeKey(sourceAgentId, targetAgentId);
+  const nextCount = (state.reviewFailLoopCountByEdge[edgeKey] ?? 0) + 1;
+  state.reviewFailLoopCountByEdge[edgeKey] = nextCount;
+  if (nextCount <= MAX_REVIEW_FAIL_LOOP_COUNT) {
+    return null;
+  }
+
+  state.taskStatus = "failed";
+  return {
+    type: "failed",
+    errorMessage: `${sourceAgentId} -> ${targetAgentId} 连续回流已达到 ${MAX_REVIEW_FAIL_LOOP_COUNT} 轮上限，任务已终止以避免无限循环`,
+  };
+}
+
+function buildReviewFailLoopEdgeKey(sourceAgentId: string, targetAgentId: string): string {
+  return `${sourceAgentId}->${targetAgentId}`;
+}
+
+function clearReviewFailLoopCountsForReviewer(state: GraphTaskState, reviewerAgentId: string): void {
+  for (const edgeKey of Object.keys(state.reviewFailLoopCountByEdge)) {
+    if (edgeKey.startsWith(`${reviewerAgentId}->`)) {
+      delete state.reviewFailLoopCountByEdge[edgeKey];
+    }
+  }
 }
