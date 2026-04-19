@@ -113,16 +113,41 @@ export interface TaskPanelRecord {
 
 export type TopologyEdgeTrigger = "association" | "approved" | "needs_revision";
 
+export const DEFAULT_NEEDS_REVISION_MAX_ROUNDS = 4;
+
 export interface TopologyEdge {
   source: string;
   target: string;
   triggerOn: TopologyEdgeTrigger;
+  maxRevisionRounds?: number;
 }
 
 export interface TopologyRecord {
   projectId: string;
   nodes: string[];
   edges: TopologyEdge[];
+}
+
+export function normalizeNeedsRevisionMaxRounds(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_NEEDS_REVISION_MAX_ROUNDS;
+  }
+
+  return Math.max(1, Math.floor(value));
+}
+
+export function getNeedsRevisionEdgeLoopLimit(
+  topology: Pick<TopologyRecord, "edges">,
+  sourceAgentId: string,
+  targetAgentId: string,
+): number {
+  const edge = topology.edges.find(
+    (item) =>
+      item.source === sourceAgentId
+      && item.target === targetAgentId
+      && item.triggerOn === "needs_revision",
+  );
+  return normalizeNeedsRevisionMaxRounds(edge?.maxRevisionRounds);
 }
 
 export interface MessageRecord {
@@ -414,6 +439,11 @@ export function createDefaultTopology(
       source,
       target,
       triggerOn,
+      ...(triggerOn === "needs_revision"
+        ? {
+            maxRevisionRounds: DEFAULT_NEEDS_REVISION_MAX_ROUNDS,
+          }
+        : {}),
     });
   };
 

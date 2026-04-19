@@ -80,7 +80,7 @@ function getTopologyHtml(messages: TaskSnapshot["messages"] = []) {
       { source: "BA", target: "Build", triggerOn: "association" },
       { source: "Build", target: "TaskReview", triggerOn: "association" },
       { source: "TaskReview", target: "BA", triggerOn: "approved" },
-      { source: "TaskReview", target: "Build", triggerOn: "needs_revision" },
+      { source: "TaskReview", target: "Build", triggerOn: "needs_revision", maxRevisionRounds: 6 },
     ],
   };
 
@@ -146,4 +146,17 @@ test("TopologyGraph 顶部会渲染 LangGraph UI 按钮", () => {
   const html = getTopologyHtml();
 
   assert.match(html, /LangGraph UI/);
+});
+
+test("TopologyGraph 源码包含 needs_revision 单独配置最大反驳次数的输入控件", () => {
+  assert.match(TOPOLOGY_GRAPH_SOURCE, /maxRevisionRounds/);
+  assert.match(TOPOLOGY_GRAPH_SOURCE, /最大反驳次数/);
+  assert.match(TOPOLOGY_GRAPH_SOURCE, /type="number"/);
+});
+
+test("TopologyGraph 边关系列表会展示 needs_revision 的最大反驳次数", () => {
+  const html = getTopologyHtml();
+
+  assert.match(html, /审视不通过/);
+  assert.match(html, /最大反驳次数 6/);
 });

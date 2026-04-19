@@ -12,6 +12,7 @@ import {
   type BuiltinAgentTemplateRecord,
   BUILD_AGENT_NAME,
   createDefaultTopology,
+  normalizeNeedsRevisionMaxRounds,
   type AgentFileRecord,
   type CreateProjectPayload,
   type DeleteProjectPayload,
@@ -82,6 +83,7 @@ import type { LangGraphTaskLoopHost } from "./langgraph-host";
 import { LangGraphStudioManager } from "./langgraph-studio";
 import type { GraphDispatchBatch, GraphAgentResult } from "./gating-router";
 import type { GraphTaskState } from "./gating-state";
+import { buildTaskCompletionMessageContent } from "./task-completion-message";
 
 const execFileAsync = promisify(execFile);
 
@@ -1503,6 +1505,11 @@ export class Orchestrator {
         source: edge.source,
         target: edge.target,
         triggerOn: edge.triggerOn,
+        ...(edge.triggerOn === "needs_revision"
+          ? {
+              maxRevisionRounds: normalizeNeedsRevisionMaxRounds(edge.maxRevisionRounds),
+            }
+          : {}),
       }));
     const nodes = resolveTopologyAgentOrder(
       agentFiles.map((file) => ({ name: file.name })),
@@ -1556,8 +1563,8 @@ export class Orchestrator {
           taskId,
           this.resolveWaitingSourceAgentId(taskId, state),
         ),
-      completeTask: async ({ taskId, status }) =>
-        this.completeTask(taskId, status),
+      completeTask: async ({ taskId, status, failureReason }) =>
+        this.completeTask(taskId, status, failureReason),
     };
     runtime = new LangGraphRuntime({
       checkpointDir: path.join(project.path, ".agentflow", "langgraph"),
@@ -1912,7 +1919,11 @@ export class Orchestrator {
     }
   }
 
-  private async completeTask(taskId: string, status: TaskRecord["status"]) {
+  private async completeTask(
+    taskId: string,
+    status: TaskRecord["status"],
+    failureReason?: string | null,
+  ) {
     const currentTask = this.store.getTask(taskId);
     if (currentTask.status === status && currentTask.completedAt) {
       return;
@@ -1945,10 +1956,11 @@ export class Orchestrator {
       taskId,
       sender: "system",
       timestamp: new Date().toISOString(),
-      content:
-        status === "finished"
-          ? "所有Agent任务已完成"
-          : `Task「${snapshot.task.title}」已结束，本轮结果未通过检查，或执行过程已中断。请直接查看群聊中最近一条失败消息，并继续处理状态为“审视不通过”或“执行失败”的 Agent。`,
+      content: buildTaskCompletionMessageContent({
+        status,
+        taskTitle: snapshot.task.title,
+        failureReason,
+      }),
       meta: {
         kind: "task-completed",
         status,

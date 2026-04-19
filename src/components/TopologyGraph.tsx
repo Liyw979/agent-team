@@ -16,7 +16,13 @@ import {
 import { getAgentColorToken } from "@/lib/agent-colors";
 import { getPanelHeaderActionButtonClass } from "@/lib/panel-header-action-button";
 import { stripReviewResponseMarkup } from "@shared/review-response";
-import { isReviewAgentInTopology, resolveTopologyAgentOrder } from "@shared/types";
+import {
+  DEFAULT_NEEDS_REVISION_MAX_ROUNDS,
+  getNeedsRevisionEdgeLoopLimit,
+  isReviewAgentInTopology,
+  normalizeNeedsRevisionMaxRounds,
+  resolveTopologyAgentOrder,
+} from "@shared/types";
 import type {
   AgentRole,
   AgentRuntimeSnapshot,
@@ -192,6 +198,14 @@ function getEdgeTriggerDescription(triggerOn: TopologyEdge["triggerOn"]) {
     default:
       return "";
   }
+}
+
+function getEdgeSupplementaryLabel(edge: TopologyEdge) {
+  if (edge.triggerOn !== "needs_revision") {
+    return null;
+  }
+
+  return `最大反驳次数 ${normalizeNeedsRevisionMaxRounds(edge.maxRevisionRounds)}`;
 }
 
 function getEdgeTriggerAppearance(triggerOn: TopologyEdge["triggerOn"]) {
@@ -1432,6 +1446,21 @@ export function TopologyGraph({
     }
     return next;
   }, [draft, editingAgentId]);
+  const needsRevisionRoundsByTarget = useMemo(() => {
+    if (!draft || !editingAgentId) {
+      return new Map<string, number>();
+    }
+    const next = new Map<string, number>();
+    for (const edge of draft.edges) {
+      if (
+        edge.source === editingAgentId
+        && edge.triggerOn === "needs_revision"
+      ) {
+        next.set(edge.target, normalizeNeedsRevisionMaxRounds(edge.maxRevisionRounds));
+      }
+    }
+    return next;
+  }, [draft, editingAgentId]);
 
   async function saveDraft(next: TopologyRecord) {
     if (!project) {
@@ -1477,9 +1506,41 @@ export function TopologyGraph({
             source: editingAgentId,
             target,
             triggerOn,
+            ...(triggerOn === "needs_revision"
+              ? {
+                  maxRevisionRounds: needsRevisionRoundsByTarget.get(target) ?? DEFAULT_NEEDS_REVISION_MAX_ROUNDS,
+                }
+              : {}),
           },
         ]
       : retained;
+
+    await saveDraft({
+      ...draft,
+      edges: nextEdges,
+    });
+  }
+
+  async function setNeedsRevisionMaxRounds(target: string, value: number) {
+    if (!draft || !editingAgentId) {
+      return;
+    }
+
+    const normalizedValue = normalizeNeedsRevisionMaxRounds(value);
+    const nextEdges = draft.edges.map((edge) => {
+      if (
+        edge.source === editingAgentId
+        && edge.target === target
+        && edge.triggerOn === "needs_revision"
+      ) {
+        return {
+          ...edge,
+          maxRevisionRounds: normalizedValue,
+        };
+      }
+
+      return edge;
+    });
 
     await saveDraft({
       ...draft,
@@ -1604,9 +1665,16 @@ export function TopologyGraph({
                   <span className="truncate">
                     {getAgentDisplayName(edge.source)} {"->"} {getAgentDisplayName(edge.target)}
                   </span>
-                  <span className="rounded-[6px] bg-muted px-2.5 py-1 text-[11px]">
-                    {getEdgeTriggerLabel(edge.triggerOn)}
-                  </span>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {getEdgeSupplementaryLabel(edge) ? (
+                      <span className="rounded-[6px] bg-[#fff3e6] px-2.5 py-1 text-[11px] text-[#935f1f]">
+                        {getEdgeSupplementaryLabel(edge)}
+                      </span>
+                    ) : null}
+                    <span className="rounded-[6px] bg-muted px-2.5 py-1 text-[11px]">
+                      {getEdgeTriggerLabel(edge.triggerOn)}
+                    </span>
+                  </div>
                 </button>
               ))}
             </div>
@@ -1724,8 +1792,32 @@ export function TopologyGraph({
                             已启用：{selectedLabels.join(" / ")}
                           </p>
                         ) : null}
+                        {selectedTriggers.has("needs_revision") ? (
+                          <p className="mt-1 text-xs text-[#935f1f]">
+                            最大反驳次数：{getNeedsRevisionEdgeLoopLimit(draft, editingAgentId ?? "", agent.name)}
+                          </p>
+                        ) : null}
                       </div>
-                      <div className="flex min-w-[220px] flex-wrap justify-end gap-2">
+                      <div className="flex min-w-[220px] flex-col items-end gap-2">
+                        {selectedTriggers.has("needs_revision") ? (
+                          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <span>最大反驳次数</span>
+                            <input
+                              type="number"
+                              min={1}
+                              step={1}
+                              value={getNeedsRevisionEdgeLoopLimit(draft, editingAgentId ?? "", agent.name)}
+                              onChange={(event) => {
+                                void setNeedsRevisionMaxRounds(
+                                  agent.name,
+                                  Number(event.currentTarget.value),
+                                );
+                              }}
+                              className="w-20 rounded-[8px] border border-border bg-white px-2 py-1 text-sm text-foreground"
+                            />
+                          </label>
+                        ) : null}
+                        <div className="flex flex-wrap justify-end gap-2">
                         {(["association", "approved", "needs_revision"] as TopologyEdge["triggerOn"][]).map((trigger) => {
                           const selected = selectedTriggers.has(trigger);
                           return (
@@ -1746,6 +1838,7 @@ export function TopologyGraph({
                             </button>
                           );
                         })}
+                        </div>
                       </div>
                     </div>
                   );
