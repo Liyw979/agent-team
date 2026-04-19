@@ -59,7 +59,7 @@ export async function assertSchedulerScript(
   const parsed = parseScenario(options.topology, options.script);
   const associationTargets = buildAssociationTargets(options.topology);
   const outgoingTargets = buildOutgoingTargets(options.topology);
-  const reviewFailTargets = buildTriggeredTargets(options.topology, "review_fail");
+  const needsRevisionTargets = buildTriggeredTargets(options.topology, "needs_revision");
   const sourceStates = new Map<string, SourceState>();
   for (const agentName of parsed.agentOrder) {
     sourceStates.set(agentName, {
@@ -73,7 +73,7 @@ export async function assertSchedulerScript(
   const actualScript: string[] = [];
   const replyIndexByAgent = new Map<string, number>();
   const activeBatches: ActiveBatch[] = [];
-  const reviewFailLoopCountByEdge = new Map<string, number>();
+  const needsRevisionLoopCountByEdge = new Map<string, number>();
 
   const appendLine = (line: string) => {
     actualScript.push(line);
@@ -151,13 +151,13 @@ export async function assertSchedulerScript(
           `${agentName} 的 @ 目标与预期不一致`,
         );
       } else if (reply.targets.length > 0) {
-        const directReviewFailTargets = reviewFailTargets.get(agentName) ?? [];
+        const directNeedsRevisionTargets = needsRevisionTargets.get(agentName) ?? [];
         const matchesAssociationTargets = areSameOrderedTargets(reply.targets, sourceState.defaultTargets);
-        const matchesDirectReviewFailTargets = areSameOrderedTargets(reply.targets, directReviewFailTargets);
+        const matchesDirectNeedsRevisionTargets = areSameOrderedTargets(reply.targets, directNeedsRevisionTargets);
         assert.equal(
-          matchesAssociationTargets || matchesDirectReviewFailTargets,
+          matchesAssociationTargets || matchesDirectNeedsRevisionTargets,
           true,
-          `${agentName} 的初始/全量派发目标必须等于 topology.association 默认顺序，或匹配其 direct review_fail 下游`,
+          `${agentName} 的初始/全量派发目标必须等于 topology.association 默认顺序，或匹配其 direct needs_revision 下游`,
         );
       }
     }
@@ -196,7 +196,7 @@ export async function assertSchedulerScript(
     }
 
     const currentSource = currentBatch.source;
-    const failTargets = reviewFailTargets.get(agentName) ?? [];
+    const failTargets = needsRevisionTargets.get(agentName) ?? [];
     const isFail = reply.targets.length === 1
       && reply.targets[0] === currentSource
       && failTargets.includes(currentSource);
@@ -207,14 +207,14 @@ export async function assertSchedulerScript(
     });
 
     if (!isFail) {
-      clearReviewFailLoopCountsForReviewer(reviewFailLoopCountByEdge, agentName);
+      clearNeedsRevisionLoopCountsForReviewer(needsRevisionLoopCountByEdge, agentName);
       const sourceState = sourceStates.get(currentSource);
       assert.notEqual(sourceState, undefined, `缺少 SourceState：${currentSource}`);
       sourceState.reviewerPassRevision.set(agentName, currentBatch.sourceRevision);
     } else {
-      const edgeKey = buildReviewFailLoopEdgeKey(agentName, currentSource);
-      const nextLoopCount = (reviewFailLoopCountByEdge.get(edgeKey) ?? 0) + 1;
-      reviewFailLoopCountByEdge.set(edgeKey, nextLoopCount);
+      const edgeKey = buildNeedsRevisionLoopEdgeKey(agentName, currentSource);
+      const nextLoopCount = (needsRevisionLoopCountByEdge.get(edgeKey) ?? 0) + 1;
+      needsRevisionLoopCountByEdge.set(edgeKey, nextLoopCount);
       assert.ok(
         nextLoopCount <= MAX_REVIEW_FAIL_LOOP_COUNT,
         `${agentName} -> ${currentSource} 连续回流已超过 ${MAX_REVIEW_FAIL_LOOP_COUNT} 轮上限`,
@@ -375,7 +375,7 @@ function buildOutgoingTargets(topology: TopologyRecord): Map<string, Set<string>
 
 function buildTriggeredTargets(
   topology: TopologyRecord,
-  triggerOn: "review_fail" | "review_pass",
+  triggerOn: "needs_revision" | "approved",
 ): Map<string, string[]> {
   const map = new Map<string, string[]>();
   for (const edge of topology.edges) {
@@ -444,17 +444,17 @@ function areSameOrderedTargets(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((target, index) => target === right[index]);
 }
 
-function buildReviewFailLoopEdgeKey(sourceAgentId: string, targetAgentId: string): string {
+function buildNeedsRevisionLoopEdgeKey(sourceAgentId: string, targetAgentId: string): string {
   return `${sourceAgentId}->${targetAgentId}`;
 }
 
-function clearReviewFailLoopCountsForReviewer(
-  reviewFailLoopCountByEdge: Map<string, number>,
+function clearNeedsRevisionLoopCountsForReviewer(
+  needsRevisionLoopCountByEdge: Map<string, number>,
   reviewerAgentId: string,
 ): void {
-  for (const edgeKey of reviewFailLoopCountByEdge.keys()) {
+  for (const edgeKey of needsRevisionLoopCountByEdge.keys()) {
     if (edgeKey.startsWith(`${reviewerAgentId}->`)) {
-      reviewFailLoopCountByEdge.delete(edgeKey);
+      needsRevisionLoopCountByEdge.delete(edgeKey);
     }
   }
 }

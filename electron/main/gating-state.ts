@@ -61,7 +61,7 @@ export interface GraphTaskState {
   activeAssociationBatchBySource: Record<string, GraphAssociationBatchState>;
   pendingRevisionRequestsByAgent: Record<string, GraphRevisionRequest>;
   pendingAssociationRepairTargetsBySource: Record<string, string[]>;
-  reviewFailLoopCountByEdge: Record<string, number>;
+  needsRevisionLoopCountByEdge: Record<string, number>;
   hasForwardedInitialTask: boolean;
 }
 
@@ -86,7 +86,7 @@ export function createEmptyGraphTaskState(input: {
     activeAssociationBatchBySource: {},
     pendingRevisionRequestsByAgent: {},
     pendingAssociationRepairTargetsBySource: {},
-    reviewFailLoopCountByEdge: {},
+    needsRevisionLoopCountByEdge: {},
     hasForwardedInitialTask: false,
   };
 }
@@ -143,7 +143,7 @@ export function cloneGraphTaskState(state: GraphTaskState): GraphTaskState {
         [...targets],
       ]),
     ),
-    reviewFailLoopCountByEdge: { ...state.reviewFailLoopCountByEdge },
+    needsRevisionLoopCountByEdge: { ...state.needsRevisionLoopCountByEdge },
   };
 }
 

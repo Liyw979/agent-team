@@ -90,8 +90,8 @@ export function loadStudioTopologyFromEnv(): TopologyRecord {
       && typeof edge?.target === "string"
       && (
         edge.triggerOn === "association"
-        || edge.triggerOn === "review_pass"
-        || edge.triggerOn === "review_fail"
+        || edge.triggerOn === "approved"
+        || edge.triggerOn === "needs_revision"
       ))
     : [];
 

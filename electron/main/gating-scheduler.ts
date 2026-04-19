@@ -49,7 +49,7 @@ export class GatingScheduler {
 
   invalidateDownstreamTriggerSignatures(agentName: string) {
     const downstreamTargets = this.getOutgoingEdges(agentName, "association")
-      .concat(this.getOutgoingEdges(agentName, "review_pass"))
+      .concat(this.getOutgoingEdges(agentName, "approved"))
       .map((edge) => edge.target);
 
     for (const targetName of downstreamTargets) {
@@ -131,12 +131,12 @@ export class GatingScheduler {
     };
   }
 
-  planReviewPassDispatch(
+  planApprovedDispatch(
     sourceAgentId: string,
     sourceContent: string,
     agentStates: GatingAgentState[],
   ): GatingDispatchPlan | null {
-    const outgoing = this.getOutgoingEdges(sourceAgentId, "review_pass");
+    const outgoing = this.getOutgoingEdges(sourceAgentId, "approved");
     const completed = new Set(this.runtime.completedEdges);
 
     for (const edge of outgoing) {
@@ -171,7 +171,7 @@ export class GatingScheduler {
 
   recordAssociationBatchResponse(
     responderAgentId: string,
-    outcome: "pass" | "fail",
+    outcome: "approved" | "fail",
     agentStates: GatingAgentState[],
   ): GatingBatchContinuation | null {
     for (const [sourceAgentId, batch] of this.runtime.activeAssociationBatchBySource.entries()) {
@@ -180,7 +180,7 @@ export class GatingScheduler {
       }
 
       const sourceState = this.getOrCreateSourceRevisionState(sourceAgentId);
-      if (outcome === "pass") {
+      if (outcome === "approved") {
         sourceState.reviewerPassRevision.set(responderAgentId, batch.sourceRevision);
       } else if (!batch.failedTargets.includes(responderAgentId)) {
         batch.failedTargets.push(responderAgentId);
@@ -242,13 +242,13 @@ export class GatingScheduler {
 
   hasSatisfiedIncomingAssociation(agentName: string): boolean {
     const incomingEdges = this.getIncomingEdges(agentName, "association")
-      .concat(this.getIncomingEdges(agentName, "review_pass"));
+      .concat(this.getIncomingEdges(agentName, "approved"));
     return incomingEdges.every((edge) => this.runtime.completedEdges.has(getTopologyEdgeId(edge)));
   }
 
   hasSatisfiedOutgoingAssociation(agentName: string): boolean {
     const outgoingEdges = this.getOutgoingEdges(agentName, "association")
-      .concat(this.getOutgoingEdges(agentName, "review_pass"));
+      .concat(this.getOutgoingEdges(agentName, "approved"));
     return outgoingEdges.every((edge) => this.runtime.completedEdges.has(getTopologyEdgeId(edge)));
   }
 
@@ -316,7 +316,7 @@ export class GatingScheduler {
     }
 
     const incomingSuccessEdges = this.getIncomingEdges(targetName, "association")
-      .concat(this.getIncomingEdges(targetName, "review_pass"));
+      .concat(this.getIncomingEdges(targetName, "approved"));
     if (incomingSuccessEdges.some((edge) => !completedEdges.has(getTopologyEdgeId(edge)))) {
       return false;
     }
@@ -338,7 +338,7 @@ export class GatingScheduler {
       .filter(
         (edge) =>
           edge.target === targetName &&
-          (edge.triggerOn === "association" || edge.triggerOn === "review_pass") &&
+          (edge.triggerOn === "association" || edge.triggerOn === "approved") &&
           completedEdges.has(getTopologyEdgeId(edge)),
       )
       .map((edge) => {

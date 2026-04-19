@@ -659,8 +659,8 @@ function buildHelp() {
 
   topology show [--cwd <path>]
   topology set-downstream <sourceAgent> [targetAgent... ] [--cwd <path>]
-  topology allow <sourceAgent> <targetAgent> [--relation <association|review_pass|review_fail>] [--cwd <path>]
-  topology deny <sourceAgent> <targetAgent> [--relation <association|review_pass|review_fail>] [--cwd <path>]
+  topology allow <sourceAgent> <targetAgent> [--relation <association|approved|needs_revision>] [--cwd <path>]
+  topology deny <sourceAgent> <targetAgent> [--relation <association|approved|needs_revision>] [--cwd <path>]
 
   panel focus <taskId> <agentName> [--cwd <path>]
 
@@ -672,8 +672,8 @@ function buildHelp() {
 
 关系语义：
   association     当前 Agent 正常完成本轮任务后，直接传递到下游
-  review_pass     当前 Agent 给出审查通过结论后，才传递到下游
-  review_fail     当前 Agent 给出需要修改结论后，才传递到下游
+  approved     当前 Agent 给出审查通过结论后，才传递到下游
+  needs_revision     当前 Agent 给出需要修改结论后，才传递到下游
 
   说明：
   - CLI 会直接复用 Orchestrator、文件存储、OpenCode client、Zellij manager 这套主逻辑。
@@ -947,13 +947,10 @@ function parseTopologyRelation(parsed: ParsedArgv): TopologyEdge["triggerOn"] {
   if (!relation) {
     return "association";
   }
-  if (relation === "association" || relation === "review_pass" || relation === "review_fail") {
+  if (relation === "association" || relation === "approved" || relation === "needs_revision") {
     return relation;
   }
-  if (relation === "review") {
-    return "review_fail";
-  }
-  fail(`未知关系类型：${relation}。可选值：association / review_pass / review_fail`);
+  fail(`未知关系类型：${relation}。可选值：association / approved / needs_revision`);
 }
 
 async function saveTopology(
@@ -1013,7 +1010,7 @@ async function handleTopology(context: CliContext, parsed: ParsedArgv) {
     assertPositionals(
       parsed,
       4,
-      `topology ${action} <sourceAgent> <targetAgent> [--relation <association|review_pass|review_fail>] [--cwd <path>]`,
+      `topology ${action} <sourceAgent> <targetAgent> [--relation <association|approved|needs_revision>] [--cwd <path>]`,
     );
     const sourceAgent = parsed.positionals[2] ?? "";
     const targetAgent = parsed.positionals[3] ?? "";

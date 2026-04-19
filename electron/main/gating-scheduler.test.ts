@@ -16,9 +16,9 @@ function createTopology(): TopologyRecord {
       { source: "Build", target: "UnitTest", triggerOn: "association" },
       { source: "Build", target: "TaskReview", triggerOn: "association" },
       { source: "Build", target: "CodeReview", triggerOn: "association" },
-      { source: "UnitTest", target: "Build", triggerOn: "review_fail" },
-      { source: "TaskReview", target: "Build", triggerOn: "review_fail" },
-      { source: "CodeReview", target: "Build", triggerOn: "review_fail" },
+      { source: "UnitTest", target: "Build", triggerOn: "needs_revision" },
+      { source: "TaskReview", target: "Build", triggerOn: "needs_revision" },
+      { source: "CodeReview", target: "Build", triggerOn: "needs_revision" },
     ],
   };
 }

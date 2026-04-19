@@ -22,7 +22,7 @@ const MAX_REVIEW_FAIL_LOOP_COUNT = 4;
 export interface GraphDispatchJob {
   agentName: string;
   sourceAgentId: string | null;
-  kind: "raw" | "association" | "review_pass" | "revision_request";
+  kind: "raw" | "association" | "approved" | "revision_request";
 }
 
 export interface GraphDispatchBatch {
@@ -53,7 +53,7 @@ export interface GraphAgentResult {
   agentName: string;
   status: "completed" | "failed";
   reviewAgent: boolean;
-  reviewDecision: "pass" | "needs_revision" | "invalid";
+  reviewDecision: "approved" | "needs_revision" | "invalid";
   agentStatus: AgentStatus;
   agentContextContent: string;
   opinion: string | null;
@@ -121,7 +121,7 @@ export function applyAgentResultToGraphState(
   const scheduler = new GatingScheduler(nextState.topology, runtime);
   const batchContinuation = scheduler.recordAssociationBatchResponse(
     result.agentName,
-    result.reviewDecision === "needs_revision" ? "fail" : "pass",
+    result.reviewDecision === "needs_revision" ? "fail" : "approved",
     buildGatingAgentStates(nextState),
   );
   applySchedulerRuntimeToGraphState(nextState, runtime);
@@ -133,7 +133,7 @@ export function applyAgentResultToGraphState(
     };
   }
 
-  clearReviewFailLoopCountsForReviewer(nextState, result.agentName);
+  clearNeedsRevisionLoopCountsForReviewer(nextState, result.agentName);
 
   if (result.reviewDecision === "invalid") {
     nextState.taskStatus = "failed";
@@ -147,7 +147,7 @@ export function applyAgentResultToGraphState(
   }
 
   const primaryDecision = result.reviewAgent
-    ? triggerReviewPassDownstream(nextState, result.agentName, result.agentContextContent)
+    ? triggerApprovedDownstream(nextState, result.agentName, result.agentContextContent)
     : triggerAssociationDownstream(nextState, result.agentName, result.agentContextContent);
   if (primaryDecision.type === "execute_batch") {
     return { state: nextState, decision: primaryDecision };
@@ -178,15 +178,15 @@ function handleNeedsRevision(
   continuation: GatingBatchContinuation | null,
 ): GraphRoutingDecision {
   const topologyIndex = compileTopology(state.topology);
-  const reviewFailureTargets = topologyIndex.reviewFailTargetsBySource[result.agentName] ?? [];
+  const needsRevisionTargets = topologyIndex.needsRevisionTargetsBySource[result.agentName] ?? [];
   const continuationAction = resolveRevisionRequestContinuationAction({
     continuation,
     fallbackActionWhenNoBatch:
-      reviewFailureTargets.length > 0 && result.allowDirectFallbackWhenNoBatch
+      needsRevisionTargets.length > 0 && result.allowDirectFallbackWhenNoBatch
         ? "trigger_fallback_review"
         : "ignore",
   });
-  if (reviewFailureTargets.length > 0 && continuationAction !== "ignore") {
+  if (needsRevisionTargets.length > 0 && continuationAction !== "ignore") {
     state.pendingRevisionRequestsByAgent[result.agentName] = {
       opinion: result.opinion,
       agentContextContent: result.agentContextContent,
@@ -202,7 +202,7 @@ function handleNeedsRevision(
   }
 
   if (continuationAction === "trigger_repair_review" && continuation?.repairReviewerAgentId) {
-    const loopLimitDecision = enforceReviewFailLoopLimit(
+    const loopLimitDecision = enforceNeedsRevisionLoopLimit(
       state,
       result.agentName,
       continuation.sourceAgentId,
@@ -233,16 +233,16 @@ function handleNeedsRevision(
   }
 
   if (continuationAction === "trigger_fallback_review") {
-    const reviewFailTargets = topologyIndex.reviewFailTargetsBySource[result.agentName] ?? [];
-    const fallbackTarget = reviewFailTargets[0];
+    const needsRevisionTargets = topologyIndex.needsRevisionTargetsBySource[result.agentName] ?? [];
+    const fallbackTarget = needsRevisionTargets[0];
     if (!fallbackTarget) {
       state.taskStatus = "failed";
       return {
         type: "failed",
-        errorMessage: `${result.agentName} 给出了 needs_revision，但没有可继续推进的 review_fail 链路`,
+        errorMessage: `${result.agentName} 给出了 needs_revision，但没有可继续推进的 needs_revision 链路`,
       };
     }
-    const loopLimitDecision = enforceReviewFailLoopLimit(
+    const loopLimitDecision = enforceNeedsRevisionLoopLimit(
       state,
       result.agentName,
       fallbackTarget,
@@ -266,7 +266,7 @@ function handleNeedsRevision(
     state.taskStatus = "failed";
     return {
       type: "failed",
-      errorMessage: `${result.agentName} 给出了 needs_revision，但没有可继续推进的 review_fail 链路`,
+      errorMessage: `${result.agentName} 给出了 needs_revision，但没有可继续推进的 needs_revision 链路`,
     };
   }
 
@@ -286,7 +286,7 @@ function continueAfterAssociationBatchResponse(
   });
 
   if (action === "trigger_repair_review" && continuation?.repairReviewerAgentId) {
-    const loopLimitDecision = enforceReviewFailLoopLimit(
+    const loopLimitDecision = enforceNeedsRevisionLoopLimit(
       state,
       continuation.repairReviewerAgentId,
       continuation.sourceAgentId,
@@ -345,13 +345,13 @@ function triggerRevisionRequestDownstream(
   revisionContent?: string,
 ): GraphRoutingDecision {
   const topologyIndex = compileTopology(state.topology);
-  const targets = (topologyIndex.reviewFailTargetsBySource[sourceAgentId] ?? []).filter(
+  const targets = (topologyIndex.needsRevisionTargetsBySource[sourceAgentId] ?? []).filter(
     (targetName) => targetName !== sourceAgentId,
   );
   if (targets.length === 0) {
     return {
       type: "failed",
-      errorMessage: `${sourceAgentId} 没有可用的 review_fail 下游`,
+      errorMessage: `${sourceAgentId} 没有可用的 needs_revision 下游`,
     };
   }
 
@@ -403,20 +403,20 @@ function triggerAssociationDownstream(
   return planToDecision(plan, "association");
 }
 
-function triggerReviewPassDownstream(
+function triggerApprovedDownstream(
   state: GraphTaskState,
   sourceAgentId: string,
   sourceContent: string,
 ): GraphRoutingDecision {
   const runtime = graphStateToSchedulerRuntime(state);
   const scheduler = new GatingScheduler(state.topology, runtime);
-  const plan = scheduler.planReviewPassDispatch(
+  const plan = scheduler.planApprovedDispatch(
     sourceAgentId,
     sourceContent,
     buildGatingAgentStates(state),
   );
   applySchedulerRuntimeToGraphState(state, runtime);
-  return planToDecision(plan, "review_pass");
+  return planToDecision(plan, "approved");
 }
 
 function planToDecision(
@@ -453,14 +453,14 @@ function buildGatingAgentStates(state: GraphTaskState): GatingAgentState[] {
   }));
 }
 
-function enforceReviewFailLoopLimit(
+function enforceNeedsRevisionLoopLimit(
   state: GraphTaskState,
   sourceAgentId: string,
   targetAgentId: string,
 ): GraphRoutingDecision | null {
-  const edgeKey = buildReviewFailLoopEdgeKey(sourceAgentId, targetAgentId);
-  const nextCount = (state.reviewFailLoopCountByEdge[edgeKey] ?? 0) + 1;
-  state.reviewFailLoopCountByEdge[edgeKey] = nextCount;
+  const edgeKey = buildNeedsRevisionLoopEdgeKey(sourceAgentId, targetAgentId);
+  const nextCount = (state.needsRevisionLoopCountByEdge[edgeKey] ?? 0) + 1;
+  state.needsRevisionLoopCountByEdge[edgeKey] = nextCount;
   if (nextCount <= MAX_REVIEW_FAIL_LOOP_COUNT) {
     return null;
   }
@@ -472,14 +472,14 @@ function enforceReviewFailLoopLimit(
   };
 }
 
-function buildReviewFailLoopEdgeKey(sourceAgentId: string, targetAgentId: string): string {
+function buildNeedsRevisionLoopEdgeKey(sourceAgentId: string, targetAgentId: string): string {
   return `${sourceAgentId}->${targetAgentId}`;
 }
 
-function clearReviewFailLoopCountsForReviewer(state: GraphTaskState, reviewerAgentId: string): void {
-  for (const edgeKey of Object.keys(state.reviewFailLoopCountByEdge)) {
+function clearNeedsRevisionLoopCountsForReviewer(state: GraphTaskState, reviewerAgentId: string): void {
+  for (const edgeKey of Object.keys(state.needsRevisionLoopCountByEdge)) {
     if (edgeKey.startsWith(`${reviewerAgentId}->`)) {
-      delete state.reviewFailLoopCountByEdge[edgeKey];
+      delete state.needsRevisionLoopCountByEdge[edgeKey];
     }
   }
 }

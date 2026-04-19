@@ -31,7 +31,7 @@ export function shouldStopTaskForUnhandledRevisionRequest(input: {
 }
 
 export function resolveAgentStatusFromReview(input: {
-  reviewDecision: "pass" | "needs_revision" | "invalid";
+  reviewDecision: "approved" | "needs_revision" | "invalid";
   reviewAgent: boolean;
 }): AgentStatus {
   if (input.reviewDecision === "invalid") {

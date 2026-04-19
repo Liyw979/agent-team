@@ -576,15 +576,14 @@ export class StoreService {
                         && Boolean(edge.target)
                         && (
                           edge.triggerOn === "association"
-                          || edge.triggerOn === "review_pass"
-                          || edge.triggerOn === "review_fail"
-                          || edge.triggerOn === "review"
+                          || edge.triggerOn === "approved"
+                          || edge.triggerOn === "needs_revision"
                         ),
                     )
                     .map((edge) => ({
                       source: edge.source,
                       target: edge.target,
-                      triggerOn: edge.triggerOn === "review" ? "review_fail" : edge.triggerOn,
+                      triggerOn: edge.triggerOn,
                     }))
                 : [],
             }

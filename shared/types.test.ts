@@ -27,7 +27,7 @@ test("默认拓扑只生成首节点到次节点的 association 边", () => {
     triggerOn: "association",
   });
   assert.equal(
-    topology.edges.some((edge) => edge.triggerOn === "review_pass" || edge.triggerOn === "review_fail"),
+    topology.edges.some((edge) => edge.triggerOn === "approved" || edge.triggerOn === "needs_revision"),
     false,
   );
 });
@@ -53,7 +53,7 @@ test("存在 review 出边时 isReviewAgentInTopology 返回 true", () => {
       {
         source: "TaskReview",
         target: "Build",
-        triggerOn: "review_fail",
+        triggerOn: "needs_revision",
       },
     ],
   };

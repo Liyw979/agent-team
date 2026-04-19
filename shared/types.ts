@@ -111,7 +111,7 @@ export interface TaskPanelRecord {
   order: number;
 }
 
-export type TopologyEdgeTrigger = "association" | "review_pass" | "review_fail";
+export type TopologyEdgeTrigger = "association" | "approved" | "needs_revision";
 
 export interface TopologyEdge {
   source: string;
@@ -333,7 +333,7 @@ export function isReviewAgentInTopology(
   return topology.edges.some(
     (edge) =>
       edge.source === agentName &&
-      (edge.triggerOn === "review_pass" || edge.triggerOn === "review_fail"),
+      (edge.triggerOn === "approved" || edge.triggerOn === "needs_revision"),
   );
 }
 

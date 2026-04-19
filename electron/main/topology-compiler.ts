@@ -2,15 +2,15 @@ import type { TopologyEdgeTrigger, TopologyRecord } from "@shared/types";
 
 export interface TopologyIndex {
   associationTargetsBySource: Record<string, string[]>;
-  reviewPassTargetsBySource: Record<string, string[]>;
-  reviewFailTargetsBySource: Record<string, string[]>;
+  approvedTargetsBySource: Record<string, string[]>;
+  needsRevisionTargetsBySource: Record<string, string[]>;
 }
 
 export function compileTopology(topology: TopologyRecord): TopologyIndex {
   return {
     associationTargetsBySource: buildTargets(topology, "association"),
-    reviewPassTargetsBySource: buildTargets(topology, "review_pass"),
-    reviewFailTargetsBySource: buildTargets(topology, "review_fail"),
+    approvedTargetsBySource: buildTargets(topology, "approved"),
+    needsRevisionTargetsBySource: buildTargets(topology, "needs_revision"),
   };
 }
 

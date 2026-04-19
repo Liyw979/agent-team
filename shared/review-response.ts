@@ -1,26 +1,26 @@
-export const REVIEW_CHALLENGE_LABEL = "<challenge>";
-export const REVIEW_CHALLENGE_END_LABEL = "</challenge>";
-export const REVIEW_AGREE_LABEL = "<agree>";
-export const REVIEW_AGREE_END_LABEL = "</agree>";
+export const REVIEW_NEEDS_REVISION_LABEL = "<needs_revision>";
+export const REVIEW_NEEDS_REVISION_END_LABEL = "</needs_revision>";
+export const REVIEW_APPROVED_LABEL = "<approved>";
+export const REVIEW_APPROVED_END_LABEL = "</approved>";
 
-export type ReviewSignalKind = "challenge" | "agree";
+export type ReviewSignalKind = "needs_revision" | "approved";
 
-const REVIEW_SIGNAL_TAG_PATTERN = /<\/?(?:challenge|agree)>/gu;
+const REVIEW_SIGNAL_TAG_PATTERN = /<\/?(?:needs_revision|approved)>/gu;
 
 const REVIEW_SIGNAL_TOKENS: Record<ReviewSignalKind, { start: string; end: string }> = {
-  challenge: {
-    start: REVIEW_CHALLENGE_LABEL,
-    end: REVIEW_CHALLENGE_END_LABEL,
+  needs_revision: {
+    start: REVIEW_NEEDS_REVISION_LABEL,
+    end: REVIEW_NEEDS_REVISION_END_LABEL,
   },
-  agree: {
-    start: REVIEW_AGREE_LABEL,
-    end: REVIEW_AGREE_END_LABEL,
+  approved: {
+    start: REVIEW_APPROVED_LABEL,
+    end: REVIEW_APPROVED_END_LABEL,
   },
 };
 
 export function formatReviewResponseBlock(
   content: string,
-  kind: ReviewSignalKind = "challenge",
+  kind: ReviewSignalKind = "needs_revision",
 ): string {
   const normalized = content.trim();
   const token = REVIEW_SIGNAL_TOKENS[kind];
@@ -42,7 +42,7 @@ export function extractTrailingReviewSignalBlock(content: string): {
   kind: ReviewSignalKind;
 } | null {
   const trimmed = content.trim();
-  const pattern = /<(challenge|agree)>([\s\S]*?)<\/\1>/gu;
+  const pattern = /<(needs_revision|approved)>([\s\S]*?)<\/\1>/gu;
   let lastMatch: RegExpExecArray | null = null;
   let match: RegExpExecArray | null = pattern.exec(trimmed);
 
@@ -52,7 +52,7 @@ export function extractTrailingReviewSignalBlock(content: string): {
   }
 
   if (lastMatch && typeof lastMatch.index === "number") {
-    const kind = lastMatch[1] === "agree" ? "agree" : "challenge";
+    const kind = lastMatch[1] === "approved" ? "approved" : "needs_revision";
     const rawBlock = lastMatch[0].trim();
     const response = (lastMatch[2] ?? "").trim();
     const markerIndex = lastMatch.index;
@@ -102,8 +102,8 @@ function findLastSignalStart(content: string): { index: number; kind: ReviewSign
   let last: { index: number; kind: ReviewSignalKind } | null = null;
 
   const tokens: Array<{ kind: ReviewSignalKind; start: string }> = [
-    { kind: "challenge", start: REVIEW_CHALLENGE_LABEL },
-    { kind: "agree", start: REVIEW_AGREE_LABEL },
+    { kind: "needs_revision", start: REVIEW_NEEDS_REVISION_LABEL },
+    { kind: "approved", start: REVIEW_APPROVED_LABEL },
   ];
 
   for (const token of tokens) {

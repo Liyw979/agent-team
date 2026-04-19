@@ -1185,7 +1185,7 @@ export class Orchestrator {
     if (parsedReview.decision === "invalid") {
       return parsedReview.validationError ?? "（该 Agent 返回了无效的审查结果。）";
     }
-    if (parsedReview.decision === "pass") {
+    if (parsedReview.decision === "approved") {
       return "通过";
     }
     return "（该 Agent 未返回可展示的结果正文。）";
@@ -1476,15 +1476,11 @@ export class Orchestrator {
     const seenEdges = new Set<string>();
     const seenPairs = new Set<string>();
     const edges = topology.edges
-      .map((edge) => ({
-        ...edge,
-        triggerOn: edge.triggerOn === "review" ? "review_fail" : edge.triggerOn,
-      }))
       .filter(
         (edge) =>
           edge.triggerOn === "association" ||
-          edge.triggerOn === "review_pass" ||
-          edge.triggerOn === "review_fail",
+          edge.triggerOn === "approved" ||
+          edge.triggerOn === "needs_revision",
       )
       .filter((edge) => validNames.has(edge.source) && validNames.has(edge.target))
       .filter((edge) => {
@@ -1601,7 +1597,7 @@ export class Orchestrator {
     const topology = this.store.getTopology(project.id);
     const batchSize = batch.jobs.length;
 
-    if (batch.jobs.every((job) => job.kind === "association" || job.kind === "review_pass")) {
+    if (batch.jobs.every((job) => job.kind === "association" || job.kind === "approved")) {
       const sourceAgentId = batch.sourceAgentId ?? "System";
       if (!this.shouldSuppressDuplicateDispatchMessage(project.id, taskId, sourceAgentId, batch.triggerTargets)) {
         const triggerMessage: MessageRecord = {
@@ -1653,7 +1649,7 @@ export class Orchestrator {
           from: "User",
           content: batch.sourceContent ?? "",
           allowDirectFallbackWhenNoBatch:
-            this.getOutgoingEdges(topology, job.agentName, "review_fail").length > 0,
+            this.getOutgoingEdges(topology, job.agentName, "needs_revision").length > 0,
         };
       } else if (job.kind === "revision_request") {
         const revisionContent =
@@ -1810,16 +1806,16 @@ export class Orchestrator {
       };
       this.store.insertMessage(taskMessage);
 
-      const reviewFailureTargets =
+      const needsRevisionureTargets =
         parsedReview.decision === "needs_revision"
-          ? this.getOutgoingEdges(topology, agentName, "review_fail")
+          ? this.getOutgoingEdges(topology, agentName, "needs_revision")
           : [];
       const agentStatus = resolveAgentStatusFromReview({
         reviewDecision: parsedReview.decision,
         reviewAgent,
       });
       this.store.updateTaskAgentStatus(task.id, agentName, agentStatus);
-      if (parsedReview.decision === "needs_revision" && reviewFailureTargets.length > 0) {
+      if (parsedReview.decision === "needs_revision" && needsRevisionureTargets.length > 0) {
         this.updateTaskStatusIfActive(
           task.id,
           concurrentBatchSize > 1 ? "running" : "needs_revision",
@@ -1974,7 +1970,7 @@ export class Orchestrator {
   private getOutgoingEdges(
     topology: TopologyRecord,
     sourceAgentId: string,
-    triggerOn: "association" | "review_pass" | "review_fail",
+    triggerOn: "association" | "approved" | "needs_revision",
   ) {
     return topology.edges.filter(
       (edge) => edge.source === sourceAgentId && edge.triggerOn === triggerOn,

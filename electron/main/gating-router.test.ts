@@ -18,8 +18,8 @@ function createTopology(): TopologyRecord {
       { source: "Build", target: "CodeReview", triggerOn: "association" },
       { source: "Build", target: "UnitTest", triggerOn: "association" },
       { source: "Build", target: "TaskReview", triggerOn: "association" },
-      { source: "CodeReview", target: "Build", triggerOn: "review_fail" },
-      { source: "CodeReview", target: "TaskReview", triggerOn: "review_pass" },
+      { source: "CodeReview", target: "Build", triggerOn: "needs_revision" },
+      { source: "CodeReview", target: "TaskReview", triggerOn: "approved" },
     ],
   };
 }
@@ -43,7 +43,7 @@ test("router 会保留 CodeReview 嵌套链路可先于外层 association 批次
     agentName: "BA",
     status: "completed",
     reviewAgent: false,
-    reviewDecision: "pass",
+    reviewDecision: "approved",
     agentStatus: "completed",
     agentContextContent: "需求已澄清",
     opinion: null,
@@ -57,7 +57,7 @@ test("router 会保留 CodeReview 嵌套链路可先于外层 association 批次
     agentName: "Build",
     status: "completed",
     reviewAgent: false,
-    reviewDecision: "pass",
+    reviewDecision: "approved",
     agentStatus: "completed",
     agentContextContent: "Build 首轮已完成",
     opinion: null,
@@ -70,25 +70,25 @@ test("router 会保留 CodeReview 嵌套链路可先于外层 association 批次
     ["CodeReview", "UnitTest"],
   );
 
-  const afterReviewPass = applyAgentResultToGraphState(afterBuildFirst.state, {
+  const afterApproved = applyAgentResultToGraphState(afterBuildFirst.state, {
     agentName: "CodeReview",
     status: "completed",
     reviewAgent: true,
-    reviewDecision: "pass",
+    reviewDecision: "approved",
     agentStatus: "completed",
     agentContextContent: "CodeReview 已通过",
     opinion: null,
     allowDirectFallbackWhenNoBatch: false,
     signalDone: false,
   });
-  assert.equal(afterReviewPass.decision.type, "execute_batch");
-  assert.deepEqual(afterReviewPass.decision.batch.jobs.map((job) => job.agentName), ["TaskReview"]);
+  assert.equal(afterApproved.decision.type, "execute_batch");
+  assert.deepEqual(afterApproved.decision.batch.jobs.map((job) => job.agentName), ["TaskReview"]);
 
-  const afterTaskReview = applyAgentResultToGraphState(afterReviewPass.state, {
+  const afterTaskReview = applyAgentResultToGraphState(afterApproved.state, {
     agentName: "TaskReview",
     status: "completed",
     reviewAgent: true,
-    reviewDecision: "pass",
+    reviewDecision: "approved",
     agentStatus: "completed",
     agentContextContent: "TaskReview 已收到最新结果",
     opinion: null,
@@ -104,7 +104,7 @@ test("router 会保留 CodeReview 嵌套链路可先于外层 association 批次
     agentName: "UnitTest",
     status: "completed",
     reviewAgent: true,
-    reviewDecision: "pass",
+    reviewDecision: "approved",
     agentStatus: "completed",
     agentContextContent: "UnitTest 已收到最新结果",
     opinion: null,
@@ -125,9 +125,9 @@ test("router 会在并发 reviewer 未收齐前保持等待，不会提前回流
       { source: "Build", target: "UnitTest", triggerOn: "association" },
       { source: "Build", target: "TaskReview", triggerOn: "association" },
       { source: "Build", target: "CodeReview", triggerOn: "association" },
-      { source: "UnitTest", target: "Build", triggerOn: "review_fail" },
-      { source: "TaskReview", target: "Build", triggerOn: "review_fail" },
-      { source: "CodeReview", target: "Build", triggerOn: "review_fail" },
+      { source: "UnitTest", target: "Build", triggerOn: "needs_revision" },
+      { source: "TaskReview", target: "Build", triggerOn: "needs_revision" },
+      { source: "CodeReview", target: "Build", triggerOn: "needs_revision" },
     ],
   };
   const state = createGraphTaskState({
@@ -140,7 +140,7 @@ test("router 会在并发 reviewer 未收齐前保持等待，不会提前回流
     agentName: "Build",
     status: "completed",
     reviewAgent: false,
-    reviewDecision: "pass",
+    reviewDecision: "approved",
     agentStatus: "completed",
     agentContextContent: "Build 已完成",
     opinion: null,
@@ -176,7 +176,7 @@ test("同一 reviewer 连续第 5 次回流修复时会直接终止，避免无�
     nodes: ["Build", "UnitTest"],
     edges: [
       { source: "Build", target: "UnitTest", triggerOn: "association" },
-      { source: "UnitTest", target: "Build", triggerOn: "review_fail" },
+      { source: "UnitTest", target: "Build", triggerOn: "needs_revision" },
     ],
   };
   let state = createGraphTaskState({
@@ -190,7 +190,7 @@ test("同一 reviewer 连续第 5 次回流修复时会直接终止，避免无�
       agentName: "Build",
       status: "completed",
       reviewAgent: false,
-      reviewDecision: "pass",
+      reviewDecision: "approved",
       agentStatus: "completed",
       agentContextContent: `Build 已修复第 ${round} 轮问题`,
       opinion: null,
@@ -220,7 +220,7 @@ test("同一 reviewer 连续第 5 次回流修复时会直接终止，避免无�
     agentName: "Build",
     status: "completed",
     reviewAgent: false,
-    reviewDecision: "pass",
+    reviewDecision: "approved",
     agentStatus: "completed",
     agentContextContent: "Build 已修复第 5 轮问题",
     opinion: null,
@@ -253,7 +253,7 @@ test("同一 reviewer 连续 4 次回流后，只要第 5 次改为通过，流�
     nodes: ["Build", "UnitTest"],
     edges: [
       { source: "Build", target: "UnitTest", triggerOn: "association" },
-      { source: "UnitTest", target: "Build", triggerOn: "review_fail" },
+      { source: "UnitTest", target: "Build", triggerOn: "needs_revision" },
     ],
   };
   let state = createGraphTaskState({
@@ -267,7 +267,7 @@ test("同一 reviewer 连续 4 次回流后，只要第 5 次改为通过，流�
       agentName: "Build",
       status: "completed",
       reviewAgent: false,
-      reviewDecision: "pass",
+      reviewDecision: "approved",
       agentStatus: "completed",
       agentContextContent: `Build 已修复第 ${round} 轮问题`,
       opinion: null,
@@ -297,7 +297,7 @@ test("同一 reviewer 连续 4 次回流后，只要第 5 次改为通过，流�
     agentName: "Build",
     status: "completed",
     reviewAgent: false,
-    reviewDecision: "pass",
+    reviewDecision: "approved",
     agentStatus: "completed",
     agentContextContent: "Build 已修复第 5 轮问题",
     opinion: null,
@@ -311,7 +311,7 @@ test("同一 reviewer 连续 4 次回流后，只要第 5 次改为通过，流�
     agentName: "UnitTest",
     status: "completed",
     reviewAgent: true,
-    reviewDecision: "pass",
+    reviewDecision: "approved",
     agentStatus: "completed",
     agentContextContent: "UnitTest 第 5 轮通过",
     opinion: null,

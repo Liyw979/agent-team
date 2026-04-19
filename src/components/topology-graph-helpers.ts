@@ -31,7 +31,7 @@ export function getTopologyEdgeTriggerAppearance(triggerOn: TopologyEdge["trigge
         zIndex: 1,
         animated: false,
       };
-    case "review_pass":
+    case "approved":
       return {
         color: "#2F5E9E",
         strokeWidth: 2,
@@ -39,7 +39,7 @@ export function getTopologyEdgeTriggerAppearance(triggerOn: TopologyEdge["trigge
         zIndex: 1,
         animated: false,
       };
-    case "review_fail":
+    case "needs_revision":
       return {
         color: "#A95C42",
         strokeWidth: 2,

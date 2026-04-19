@@ -172,9 +172,9 @@ function getEdgeTriggerLabel(triggerOn: TopologyEdge["triggerOn"]) {
   switch (triggerOn) {
     case "association":
       return "传递";
-    case "review_pass":
+    case "approved":
       return "审视通过";
-    case "review_fail":
+    case "needs_revision":
       return "审视不通过";
     default:
       return triggerOn;
@@ -185,9 +185,9 @@ function getEdgeTriggerDescription(triggerOn: TopologyEdge["triggerOn"]) {
   switch (triggerOn) {
     case "association":
       return "当前 Agent 正常完成本轮任务后，会自动传递到这个下游 Agent。";
-    case "review_pass":
+    case "approved":
       return "当前 Agent 给出审查通过结论时，才会传递到这个下游 Agent。";
-    case "review_fail":
+    case "needs_revision":
       return "当前 Agent 明确给出需要继续回应的结论时，才会传递到这个下游 Agent。";
     default:
       return "";
@@ -204,7 +204,7 @@ function getEdgeTriggerAppearance(triggerOn: TopologyEdge["triggerOn"]) {
         zIndex: 1,
         animated: false,
       };
-    case "review_pass":
+    case "approved":
       return {
         color: "#2F5E9E",
         strokeWidth: 2,
@@ -212,7 +212,7 @@ function getEdgeTriggerAppearance(triggerOn: TopologyEdge["triggerOn"]) {
         zIndex: 1,
         animated: false,
       };
-    case "review_fail":
+    case "needs_revision":
       return {
         color: "#A95C42",
         strokeWidth: 2,
@@ -1726,7 +1726,7 @@ export function TopologyGraph({
                         ) : null}
                       </div>
                       <div className="flex min-w-[220px] flex-wrap justify-end gap-2">
-                        {(["association", "review_pass", "review_fail"] as TopologyEdge["triggerOn"][]).map((trigger) => {
+                        {(["association", "approved", "needs_revision"] as TopologyEdge["triggerOn"][]).map((trigger) => {
                           const selected = selectedTriggers.has(trigger);
                           return (
                             <button
