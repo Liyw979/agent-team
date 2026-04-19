@@ -1728,7 +1728,7 @@ test("审视不通过且只返回 challenge 标签时，群聊展示会去掉标
   assert.equal(displayContent, "请继续补充实现依据。");
 });
 
-test("审查 Agent 未返回合法标签时默认按通过处理", () => {
+test("审查 Agent 未返回合法标签时应标记为 invalid", () => {
   const orchestrator = createTestOrchestrator({
     userDataPath: createTempDir(),
     enableEventStream: false,
@@ -1751,10 +1751,10 @@ test("审查 Agent 未返回合法标签时默认按通过处理", () => {
 
   assert.deepEqual(parsedReview, {
     cleanContent: "这是普通审查正文，标签写错了。\n\n<chalenge>请继续补充实现依据。</chalenge>",
-    decision: "pass",
+    decision: "invalid",
     opinion: null,
     rawDecisionBlock: null,
-    validationError: null,
+    validationError: "审查 Agent 必须用 <agree> 或 <challenge> 标签明确给出结论。",
   });
 });
 

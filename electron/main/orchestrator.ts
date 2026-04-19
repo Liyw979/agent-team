@@ -48,12 +48,16 @@ import {
   formatRevisionRequestContent,
 } from "@shared/chat-message-format";
 import {
-  extractTrailingReviewSignalBlock,
   stripReviewResponseMarkup,
 } from "@shared/review-response";
 import { buildZellijMissingReminder } from "@shared/zellij";
 import { CustomAgentConfigService } from "./custom-agent-config";
 import { buildAgentSystemPrompt } from "./agent-system-prompt";
+import {
+  parseReview as parseReviewPure,
+  stripStructuredSignals as stripStructuredSignalsPure,
+  type ParsedReview,
+} from "./review-parser";
 import { OpenCodeClient } from "./opencode-client";
 import { OpenCodeRunner } from "./opencode-runner";
 import { StoreService } from "./store";
@@ -91,16 +95,6 @@ interface OrchestratorOptions {
 
 interface ParsedSignal {
   done: boolean;
-}
-
-type ReviewDecision = "pass" | "needs_revision" | "invalid";
-
-interface ParsedReview {
-  cleanContent: string;
-  decision: ReviewDecision;
-  opinion: string | null;
-  rawDecisionBlock: string | null;
-  validationError: string | null;
 }
 
 interface GitSummaryCommandResult {
@@ -971,32 +965,11 @@ export class Orchestrator {
   }
 
   private parseReview(content: string, reviewAgent: boolean): ParsedReview {
-    const signalMatch = extractTrailingReviewSignalBlock(content);
-    if (!signalMatch) {
-      return {
-        cleanContent: this.stripStructuredSignals(content),
-        decision: "pass",
-        opinion: null,
-        rawDecisionBlock: null,
-        validationError: null,
-      };
-    }
-
-    return {
-      cleanContent: this.stripStructuredSignals(signalMatch.body),
-      decision: signalMatch.kind === "agree" ? "pass" : "needs_revision",
-      opinion: signalMatch.response,
-      rawDecisionBlock: signalMatch.rawBlock,
-      validationError: null,
-    };
+    return parseReviewPure(content, reviewAgent);
   }
 
   private stripStructuredSignals(content: string): string {
-    return content
-      .split(/\r?\n/)
-      .filter((line) => !/^\s*(NEXT_AGENTS:|TASK_DONE\b|SESSION_REF:)/i.test(line))
-      .join("\n")
-      .trim();
+    return stripStructuredSignalsPure(content);
   }
 
   private async buildProjectGitDiffSummary(cwd: string): Promise<string> {
