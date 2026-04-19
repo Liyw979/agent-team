@@ -4,6 +4,7 @@ import test from "node:test";
 import type { TopologyRecord } from "@shared/types";
 
 import { assertSchedulerScript } from "./scheduler-script-harness";
+import { createTopology } from "./topology-test-dsl";
 
 function createEdge(
   source: string,
@@ -17,29 +18,18 @@ function createEdge(
   };
 }
 
-function createTopology(options: {
-  projectId: string;
-  nodes: string[];
-  edges: TopologyRecord["edges"];
-}): TopologyRecord {
-  return {
-    projectId: options.projectId,
-    nodes: options.nodes,
-    edges: options.edges,
-  };
-}
-
 test("直接挂在 Build 下的后续节点会等 CodeReview 回合结束后再触发", async () => {
   const topology = createTopology({
     projectId: "migrated-script-1021",
-    nodes: ["BA", "Build", "CodeReview", "UnitTest", "TaskReview"],
-    edges: [
-      createEdge("BA", "Build", "association"),
-      createEdge("Build", "CodeReview", "association"),
-      createEdge("Build", "UnitTest", "association"),
-      createEdge("Build", "TaskReview", "association"),
-      createEdge("CodeReview", "Build", "needs_revision"),
-    ],
+    downstream: {
+      BA: { Build: "association" },
+      Build: {
+        CodeReview: "association",
+        UnitTest: "association",
+        TaskReview: "association",
+      },
+      CodeReview: { Build: "review_fail" },
+    },
   });
 
   const script = [
@@ -59,14 +49,13 @@ test("直接挂在 Build 下的后续节点会等 CodeReview 回合结束后再�
   await assertSchedulerScript({ topology, script });
 });
 
-test("脚本模式支持用户首条直接 @reviewer 并沿 needs_revision 回路继续推进", async () => {
+test("脚本模式支持用户首条直接 @reviewer 并沿 review_fail 回路继续推进", async () => {
   const topology = createTopology({
     projectId: "direct-review-loop-entry",
-    nodes: ["安全负责人", "漏洞分析人员"],
-    edges: [
-      createEdge("安全负责人", "漏洞分析人员", "needs_revision"),
-      createEdge("漏洞分析人员", "安全负责人", "needs_revision"),
-    ],
+    downstream: {
+      安全负责人: { 漏洞分析人员: "review_fail" },
+      漏洞分析人员: { 安全负责人: "review_fail" },
+    },
   });
   const script = [
     "user: @安全负责人 请先判断这个漏洞定性是否站得住。",
@@ -82,13 +71,14 @@ test("脚本模式支持用户首条直接 @reviewer 并沿 needs_revision 回�
 test("通用调度脚本模式支持非 Build 的实现者反复修复 reviewer 意见", async () => {
   const topology = createTopology({
     projectId: "generic-script-1",
-    nodes: ["Implementer", "UnitTest", "TaskReview", "CodeReview"],
-    edges: [
-      createEdge("Implementer", "UnitTest", "association"),
-      createEdge("Implementer", "TaskReview", "association"),
-      createEdge("Implementer", "CodeReview", "association"),
-      createEdge("UnitTest", "Implementer", "needs_revision"),
-    ],
+    downstream: {
+      Implementer: {
+        UnitTest: "association",
+        TaskReview: "association",
+        CodeReview: "association",
+      },
+      UnitTest: { Implementer: "review_fail" },
+    },
   });
 
   const script = [
@@ -113,10 +103,10 @@ test("脚本模式要求 topology 显式给出边，脚本里的派发不能脱�
   const topology = createTopology({
     projectId: "generic-script-invalid",
     nodes: ["Implementer", "UnitTest", "TaskReview", "CodeReview"],
-    edges: [
-      createEdge("Implementer", "UnitTest", "association"),
-      createEdge("UnitTest", "Implementer", "needs_revision"),
-    ],
+    downstream: {
+      Implementer: { UnitTest: "association" },
+      UnitTest: { Implementer: "review_fail" },
+    },
   });
 
   const script = [
@@ -130,17 +120,18 @@ test("脚本模式要求 topology 显式给出边，脚本里的派发不能脱�
   );
 });
 
-test("通用调度脚本模式支持 reviewer 通过后显式触发 approved 下游", async () => {
+test("通用调度脚本模式支持 reviewer 通过后显式触发 review_pass 下游", async () => {
   const topology = createTopology({
     projectId: "generic-script-2",
-    nodes: ["BA", "Implementer", "CodeReview", "TaskReview", "UnitTest"],
-    edges: [
-      createEdge("BA", "Implementer", "association"),
-      createEdge("Implementer", "CodeReview", "association"),
-      createEdge("CodeReview", "Implementer", "needs_revision"),
-      createEdge("CodeReview", "TaskReview", "approved"),
-      createEdge("CodeReview", "UnitTest", "approved"),
-    ],
+    downstream: {
+      BA: { Implementer: "association" },
+      Implementer: { CodeReview: "association" },
+      CodeReview: {
+        Implementer: "review_fail",
+        TaskReview: "review_pass",
+        UnitTest: "review_pass",
+      },
+    },
   });
 
   const script = [
@@ -160,10 +151,10 @@ test("通用调度脚本模式支持 reviewer 通过后显式触发 approved 下
 test("脚本首条 user 显式 @ 的 Agent 只要存在于 topology.nodes 就允许作为起点", async () => {
   const topology = createTopology({
     projectId: "generic-script-explicit-user-start",
-    nodes: ["BA", "Implementer", "TaskReview"],
-    edges: [
-      createEdge("Implementer", "TaskReview", "association"),
-    ],
+    nodes: ["BA"],
+    downstream: {
+      Implementer: { TaskReview: "association" },
+    },
   });
 
   const script = [
@@ -175,18 +166,15 @@ test("脚本首条 user 显式 @ 的 Agent 只要存在于 topology.nodes 就允
   await assertSchedulerScript({ topology, script });
 });
 
-test("当前调度不支持在 needs_revision 对弈中由发起方直接跳到裁决", async () => {
+test("当前调度不支持在 review_fail 对弈中由发起方直接跳到裁决", async () => {
   const topology = createTopology({
     projectId: "security-hunting-loop-invalid-exit",
-    nodes: ["初筛", "正方", "反方", "裁决"],
-    edges: [
-      createEdge("初筛", "正方", "association"),
-      createEdge("正方", "反方", "needs_revision"),
-      createEdge("反方", "正方", "needs_revision"),
-      createEdge("正方", "裁决", "approved"),
-      createEdge("反方", "裁决", "approved"),
-      createEdge("裁决", "初筛", "approved"),
-    ],
+    downstream: {
+      初筛: { 正方: "association" },
+      正方: { 反方: "review_fail", 裁决: "review_pass" },
+      反方: { 正方: "review_fail", 裁决: "review_pass" },
+      裁决: { 初筛: "review_pass" },
+    },
   });
 
   const script = [
@@ -203,18 +191,15 @@ test("当前调度不支持在 needs_revision 对弈中由发起方直接跳到�
   );
 });
 
-test("漏洞挖掘团队可以通过 needs_revision 对弈并在裁决后回到初筛继续下一轮", async () => {
+test("漏洞挖掘团队可以通过 review_fail 对弈并在裁决后回到初筛继续下一轮", async () => {
   const topology = createTopology({
     projectId: "security-hunting-loop-supported",
-    nodes: ["初筛", "正方", "反方", "裁决"],
-    edges: [
-      createEdge("初筛", "正方", "association"),
-      createEdge("正方", "反方", "needs_revision"),
-      createEdge("反方", "正方", "needs_revision"),
-      createEdge("正方", "裁决", "approved"),
-      createEdge("反方", "裁决", "approved"),
-      createEdge("裁决", "初筛", "approved"),
-    ],
+    downstream: {
+      初筛: { 正方: "association" },
+      正方: { 反方: "review_fail", 裁决: "review_pass" },
+      反方: { 正方: "review_fail", 裁决: "review_pass" },
+      裁决: { 初筛: "review_pass" },
+    },
   });
 
   const script = [
@@ -233,17 +218,20 @@ test("漏洞挖掘团队可以通过 needs_revision 对弈并在裁决后回到�
   await assertSchedulerScript({ topology, script });
 });
 
-test("CodeReview 即使存在 approved 下游，也会先拦住 Build 的其他 association 下游", async () => {
+test("CodeReview 即使存在 review_pass 下游，也会先拦住 Build 的其他 association 下游", async () => {
   const topology = createTopology({
     projectId: "migrated-script-1176",
-    nodes: ["BA", "Build", "CodeReview", "UnitTest", "TaskReview"],
-    edges: [
-      createEdge("BA", "Build", "association"),
-      createEdge("Build", "CodeReview", "association"),
-      createEdge("Build", "UnitTest", "association"),
-      createEdge("CodeReview", "Build", "needs_revision"),
-      createEdge("CodeReview", "TaskReview", "approved"),
-    ],
+    downstream: {
+      BA: { Build: "association" },
+      Build: {
+        CodeReview: "association",
+        UnitTest: "association",
+      },
+      CodeReview: {
+        Build: "review_fail",
+        TaskReview: "review_pass",
+      },
+    },
   });
 
   const script = [
@@ -261,14 +249,17 @@ test("CodeReview 即使存在 approved 下游，也会先拦住 Build 的其他 
 test("super-step 模式下 reviewer 不再拦住同轮其他 association 下游", async () => {
   const topology = createTopology({
     projectId: "langgraph-superstep-association-fanout",
-    nodes: ["BA", "Build", "CodeReview", "UnitTest", "TaskReview"],
-    edges: [
-      createEdge("BA", "Build", "association"),
-      createEdge("Build", "CodeReview", "association"),
-      createEdge("Build", "UnitTest", "association"),
-      createEdge("CodeReview", "Build", "needs_revision"),
-      createEdge("CodeReview", "TaskReview", "approved"),
-    ],
+    downstream: {
+      BA: { Build: "association" },
+      Build: {
+        CodeReview: "association",
+        UnitTest: "association",
+      },
+      CodeReview: {
+        Build: "review_fail",
+        TaskReview: "review_pass",
+      },
+    },
   });
 
   const script = [
@@ -290,11 +281,11 @@ test("BA dispatches Build through three review passes before the task can finish
     edges: [
       createEdge("BA", "Build", "association"),
       createEdge("Build", "UnitTest", "association"),
-      createEdge("UnitTest", "Build", "needs_revision"),
-      createEdge("UnitTest", "CodeReview", "approved"),
-      createEdge("CodeReview", "Build", "needs_revision"),
-      createEdge("CodeReview", "TaskReview", "approved"),
-      createEdge("TaskReview", "Build", "needs_revision"),
+      createEdge("UnitTest", "Build", "review_fail"),
+      createEdge("UnitTest", "CodeReview", "review_pass"),
+      createEdge("CodeReview", "Build", "review_fail"),
+      createEdge("CodeReview", "TaskReview", "review_pass"),
+      createEdge("TaskReview", "Build", "review_fail"),
     ],
   });
 
@@ -327,9 +318,9 @@ test("长链路脚本会覆盖 UnitTest、TaskReview、CodeReview 多轮往返�
       createEdge("Build", "UnitTest", "association"),
       createEdge("Build", "TaskReview", "association"),
       createEdge("Build", "CodeReview", "association"),
-      createEdge("UnitTest", "Build", "needs_revision"),
-      createEdge("TaskReview", "Build", "needs_revision"),
-      createEdge("CodeReview", "Build", "needs_revision"),
+      createEdge("UnitTest", "Build", "review_fail"),
+      createEdge("TaskReview", "Build", "review_fail"),
+      createEdge("CodeReview", "Build", "review_fail"),
     ],
   });
 
@@ -380,9 +371,9 @@ test("长链路脚本里同一 reviewer 连续 4 轮回流后改为通过，仍�
       createEdge("Build", "UnitTest", "association"),
       createEdge("Build", "TaskReview", "association"),
       createEdge("Build", "CodeReview", "association"),
-      createEdge("UnitTest", "Build", "needs_revision"),
-      createEdge("TaskReview", "Build", "needs_revision"),
-      createEdge("CodeReview", "Build", "needs_revision"),
+      createEdge("UnitTest", "Build", "review_fail"),
+      createEdge("TaskReview", "Build", "review_fail"),
+      createEdge("CodeReview", "Build", "review_fail"),
     ],
   });
 
@@ -413,9 +404,9 @@ test("长链路脚本里同一 reviewer 连续第 5 次回流时会被判定为�
       createEdge("Build", "UnitTest", "association"),
       createEdge("Build", "TaskReview", "association"),
       createEdge("Build", "CodeReview", "association"),
-      createEdge("UnitTest", "Build", "needs_revision"),
-      createEdge("TaskReview", "Build", "needs_revision"),
-      createEdge("CodeReview", "Build", "needs_revision"),
+      createEdge("UnitTest", "Build", "review_fail"),
+      createEdge("TaskReview", "Build", "review_fail"),
+      createEdge("CodeReview", "Build", "review_fail"),
     ],
   });
 
@@ -450,9 +441,9 @@ test("修完中间 reviewer 后，会先继续后续未完成 reviewer，再补�
       createEdge("Build", "UnitTest", "association"),
       createEdge("Build", "TaskReview", "association"),
       createEdge("Build", "CodeReview", "association"),
-      createEdge("UnitTest", "Build", "needs_revision"),
-      createEdge("TaskReview", "Build", "needs_revision"),
-      createEdge("CodeReview", "Build", "needs_revision"),
+      createEdge("UnitTest", "Build", "review_fail"),
+      createEdge("TaskReview", "Build", "review_fail"),
+      createEdge("CodeReview", "Build", "review_fail"),
     ],
   });
 
@@ -486,9 +477,9 @@ test("同一批 reviewer 可以按任意顺序回复，只要整批收齐后再�
       createEdge("Build", "UnitTest", "association"),
       createEdge("Build", "TaskReview", "association"),
       createEdge("Build", "CodeReview", "association"),
-      createEdge("UnitTest", "Build", "needs_revision"),
-      createEdge("TaskReview", "Build", "needs_revision"),
-      createEdge("CodeReview", "Build", "needs_revision"),
+      createEdge("UnitTest", "Build", "review_fail"),
+      createEdge("TaskReview", "Build", "review_fail"),
+      createEdge("CodeReview", "Build", "review_fail"),
     ],
   });
 
@@ -517,9 +508,9 @@ test("真实日志里重复 reviewer 回复并在整批失败后再次全量派�
       createEdge("Build", "UnitTest", "association"),
       createEdge("Build", "TaskReview", "association"),
       createEdge("Build", "CodeReview", "association"),
-      createEdge("UnitTest", "Build", "needs_revision"),
-      createEdge("TaskReview", "Build", "needs_revision"),
-      createEdge("CodeReview", "Build", "needs_revision"),
+      createEdge("UnitTest", "Build", "review_fail"),
+      createEdge("TaskReview", "Build", "review_fail"),
+      createEdge("CodeReview", "Build", "review_fail"),
     ],
   });
 
@@ -548,9 +539,9 @@ test("TaskReview 在 Build 未重跑前再次出现第二条 reviewer 回复，�
       createEdge("Build", "UnitTest", "association"),
       createEdge("Build", "TaskReview", "association"),
       createEdge("Build", "CodeReview", "association"),
-      createEdge("UnitTest", "Build", "needs_revision"),
-      createEdge("TaskReview", "Build", "needs_revision"),
-      createEdge("CodeReview", "Build", "needs_revision"),
+      createEdge("UnitTest", "Build", "review_fail"),
+      createEdge("TaskReview", "Build", "review_fail"),
+      createEdge("CodeReview", "Build", "review_fail"),
     ],
   });
 
@@ -577,9 +568,9 @@ test("真实日志里修完首个失败 reviewer 后立刻全量重派，不应�
       createEdge("Build", "UnitTest", "association"),
       createEdge("Build", "TaskReview", "association"),
       createEdge("Build", "CodeReview", "association"),
-      createEdge("UnitTest", "Build", "needs_revision"),
-      createEdge("TaskReview", "Build", "needs_revision"),
-      createEdge("CodeReview", "Build", "needs_revision"),
+      createEdge("UnitTest", "Build", "review_fail"),
+      createEdge("TaskReview", "Build", "review_fail"),
+      createEdge("CodeReview", "Build", "review_fail"),
     ],
   });
 
@@ -596,4 +587,27 @@ test("真实日志里修完首个失败 reviewer 后立刻全量重派，不应�
     () => assertSchedulerScript({ topology, script }),
     /@ 目标与预期不一致|初始\/全量派发目标必须等于 topology\.association 默认顺序/u,
   );
+});
+
+test("script 模板支持 spawn 实例短名 sender 和 @target", async () => {
+  const topology = createTopology({
+    projectId: "generic-script-spawn-display-name",
+    downstream: {
+      Build: { TaskReview: "spawn" },
+      TaskReview: { Build: "review_fail" },
+    },
+    spawn: {
+      TaskReview: {},
+    },
+  });
+
+  const script = [
+    "user: @Build 请完成这个需求",
+    "Build: 第 1 轮实现完成，@TaskReview-1",
+    "TaskReview-1: 第 1 轮未通过 @Build",
+    "Build: 已修复第 1 轮问题 @TaskReview-2",
+    "TaskReview-2: 通过",
+  ];
+
+  await assertSchedulerScript({ topology, script });
 });

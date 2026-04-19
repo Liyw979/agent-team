@@ -1,4 +1,11 @@
-import type { AgentStatus, TaskStatus, TopologyRecord } from "@shared/types";
+import type {
+  AgentStatus,
+  RuntimeTopologyEdge,
+  RuntimeTopologyNode,
+  SpawnBundleInstantiation,
+  TaskStatus,
+  TopologyRecord,
+} from "@shared/types";
 
 export interface GraphRevisionRequest {
   opinion: string | null;
@@ -49,6 +56,9 @@ export interface GraphTaskState {
   taskId: string;
   projectId: string;
   topology: TopologyRecord;
+  runtimeNodes: RuntimeTopologyNode[];
+  runtimeEdges: RuntimeTopologyEdge[];
+  spawnBundles: SpawnBundleInstantiation[];
   taskStatus: TaskStatus;
   waitingReason: string | null;
   agentStatusesByName: Record<string, AgentStatus>;
@@ -61,7 +71,8 @@ export interface GraphTaskState {
   activeAssociationBatchBySource: Record<string, GraphAssociationBatchState>;
   pendingRevisionRequestsByAgent: Record<string, GraphRevisionRequest>;
   pendingAssociationRepairTargetsBySource: Record<string, string[]>;
-  needsRevisionLoopCountByEdge: Record<string, number>;
+  reviewFailLoopCountByEdge: Record<string, number>;
+  spawnSequenceByRule: Record<string, number>;
   hasForwardedInitialTask: boolean;
 }
 
@@ -74,6 +85,9 @@ export function createEmptyGraphTaskState(input: {
     taskId: input.taskId,
     projectId: input.projectId,
     topology: input.topology,
+    runtimeNodes: [],
+    runtimeEdges: [],
+    spawnBundles: [],
     taskStatus: "pending",
     waitingReason: null,
     agentStatusesByName: Object.fromEntries(input.topology.nodes.map((name) => [name, "idle"])),
@@ -86,7 +100,8 @@ export function createEmptyGraphTaskState(input: {
     activeAssociationBatchBySource: {},
     pendingRevisionRequestsByAgent: {},
     pendingAssociationRepairTargetsBySource: {},
-    needsRevisionLoopCountByEdge: {},
+    reviewFailLoopCountByEdge: {},
+    spawnSequenceByRule: {},
     hasForwardedInitialTask: false,
   };
 }
@@ -98,7 +113,21 @@ export function cloneGraphTaskState(state: GraphTaskState): GraphTaskState {
       ...state.topology,
       nodes: [...state.topology.nodes],
       edges: state.topology.edges.map((edge) => ({ ...edge })),
+      nodeRecords: state.topology.nodeRecords?.map((node) => ({ ...node })),
+      spawnRules: state.topology.spawnRules?.map((rule) => ({
+        ...rule,
+        spawnedAgents: rule.spawnedAgents.map((agent) => ({ ...agent })),
+        edges: rule.edges.map((edge) => ({ ...edge })),
+      })),
     },
+    runtimeNodes: state.runtimeNodes.map((node) => ({ ...node })),
+    runtimeEdges: state.runtimeEdges.map((edge) => ({ ...edge })),
+    spawnBundles: state.spawnBundles.map((bundle) => ({
+      ...bundle,
+      item: { ...bundle.item },
+      nodes: bundle.nodes.map((node) => ({ ...node })),
+      edges: bundle.edges.map((edge) => ({ ...edge })),
+    })),
     agentStatusesByName: { ...state.agentStatusesByName },
     completedEdges: [...state.completedEdges],
     edgeTriggerVersion: { ...state.edgeTriggerVersion },
@@ -143,7 +172,8 @@ export function cloneGraphTaskState(state: GraphTaskState): GraphTaskState {
         [...targets],
       ]),
     ),
-    needsRevisionLoopCountByEdge: { ...state.needsRevisionLoopCountByEdge },
+    reviewFailLoopCountByEdge: { ...state.reviewFailLoopCountByEdge },
+    spawnSequenceByRule: { ...state.spawnSequenceByRule },
   };
 }
 

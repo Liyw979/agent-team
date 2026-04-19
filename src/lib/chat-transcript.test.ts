@@ -46,3 +46,32 @@ test("formatChatTranscript 会把聊天消息整理成可复制的对话记录",
 test("formatChatTranscript 在没有消息时返回空字符串", () => {
   assert.equal(formatChatTranscript([]), "");
 });
+
+test("formatChatTranscript 会保留 spawn 实例的 senderDisplayName", () => {
+  const transcript = formatChatTranscript(
+    [
+      {
+        id: "spawn-message",
+        sender: "TaskReview-1",
+        senderDisplayName: "TaskReview-1",
+        timestamp: "2026-04-19T10:36:50.000Z",
+        content: "我认可这版已经达到可交付标准。",
+        kinds: ["agent-final"],
+        metaChain: [],
+      },
+    ],
+    {
+      locale: "zh-CN",
+      timeZone: "UTC",
+    },
+  );
+
+  assert.equal(
+    transcript,
+    [
+      "TaskReview-1",
+      "2026/4/19 10:36:50",
+      "我认可这版已经达到可交付标准。",
+    ].join("\n"),
+  );
+});

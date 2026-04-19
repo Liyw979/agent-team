@@ -595,6 +595,66 @@ export class StoreService {
                         : {}),
                     }))
                 : [],
+              nodeRecords: Array.isArray(parsed.topology.nodeRecords)
+                ? parsed.topology.nodeRecords
+                    .filter((node): node is Record<string, unknown> => Boolean(node) && typeof node === "object")
+                    .map((node) => ({
+                      id: typeof node.id === "string" ? node.id : "",
+                      kind: node.kind === "spawn" ? "spawn" : "agent",
+                      templateName: typeof node.templateName === "string" ? node.templateName : "",
+                      spawnRuleId: typeof node.spawnRuleId === "string" ? node.spawnRuleId : undefined,
+                      spawnEnabled: node.spawnEnabled === true,
+                    }))
+                    .filter((node) => node.id && node.templateName)
+                : undefined,
+              spawnRules: Array.isArray(parsed.topology.spawnRules)
+                ? parsed.topology.spawnRules
+                    .filter((rule): rule is Record<string, unknown> => Boolean(rule) && typeof rule === "object")
+                    .map((rule) => ({
+                      id: typeof rule.id === "string" ? rule.id : "",
+                      name: typeof rule.name === "string" ? rule.name : "",
+                      sourceTemplateName:
+                        typeof rule.sourceTemplateName === "string" ? rule.sourceTemplateName : "",
+                      itemKey: typeof rule.itemKey === "string" ? rule.itemKey : "",
+                      entryRole: typeof rule.entryRole === "string" ? rule.entryRole : "",
+                      spawnedAgents: Array.isArray(rule.spawnedAgents)
+                        ? rule.spawnedAgents
+                            .filter((agent): agent is Record<string, unknown> => Boolean(agent) && typeof agent === "object")
+                            .map((agent) => ({
+                              role: typeof agent.role === "string" ? agent.role : "",
+                              templateName: typeof agent.templateName === "string" ? agent.templateName : "",
+                            }))
+                            .filter((agent) => agent.role && agent.templateName)
+                        : [],
+                      edges: Array.isArray(rule.edges)
+                        ? rule.edges
+                            .filter((edge): edge is Record<string, unknown> => Boolean(edge) && typeof edge === "object")
+                            .map((edge) => ({
+                              sourceRole: typeof edge.sourceRole === "string" ? edge.sourceRole : "",
+                              targetRole: typeof edge.targetRole === "string" ? edge.targetRole : "",
+                              triggerOn:
+                                edge.triggerOn === "association"
+                                || edge.triggerOn === "approved"
+                                || edge.triggerOn === "needs_revision"
+                                  ? edge.triggerOn
+                                  : "association",
+                            }))
+                            .filter((edge) => edge.sourceRole && edge.targetRole)
+                        : [],
+                      exitWhen: rule.exitWhen === "one_side_agrees" ? "one_side_agrees" : "one_side_agrees",
+                      reportToTemplateName:
+                        typeof rule.reportToTemplateName === "string" ? rule.reportToTemplateName : "",
+                    }))
+                    .filter(
+                      (rule) =>
+                        rule.id
+                        && rule.name
+                        && rule.sourceTemplateName
+                        && rule.itemKey
+                        && rule.entryRole
+                        && rule.reportToTemplateName,
+                    )
+                : undefined,
             }
           : createDefaultProjectState(projectId).topology,
       tasks,

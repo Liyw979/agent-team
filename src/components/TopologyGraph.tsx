@@ -16,13 +16,7 @@ import {
 import { getAgentColorToken } from "@/lib/agent-colors";
 import { getPanelHeaderActionButtonClass } from "@/lib/panel-header-action-button";
 import { stripReviewResponseMarkup } from "@shared/review-response";
-import {
-  DEFAULT_NEEDS_REVISION_MAX_ROUNDS,
-  getNeedsRevisionEdgeLoopLimit,
-  isReviewAgentInTopology,
-  normalizeNeedsRevisionMaxRounds,
-  resolveTopologyAgentOrder,
-} from "@shared/types";
+import { isReviewAgentInTopology, resolveTopologyAgentOrder } from "@shared/types";
 import type {
   AgentRole,
   AgentRuntimeSnapshot,
@@ -32,6 +26,12 @@ import type {
   TopologyEdge,
   TopologyRecord,
 } from "@shared/types";
+import { getTopologyDisplayNodeIds } from "./topology-spawn-drafts";
+import {
+  getDownstreamMode,
+  setDownstreamMode,
+  type DownstreamMode,
+} from "./topology-spawn-toggle";
 
 interface TopologyGraphProps {
   project: ProjectSnapshot | undefined;
@@ -65,6 +65,7 @@ interface HoveredHistoryPreview extends SelectedHistoryRecord {
   x: number;
   y: number;
 }
+
 
 const NODE_COLUMN_GAP = 8;
 const NODE_START_X = 0;
@@ -178,9 +179,9 @@ function getEdgeTriggerLabel(triggerOn: TopologyEdge["triggerOn"]) {
   switch (triggerOn) {
     case "association":
       return "传递";
-    case "approved":
+    case "review_pass":
       return "审视通过";
-    case "needs_revision":
+    case "review_fail":
       return "审视不通过";
     default:
       return triggerOn;
@@ -191,21 +192,13 @@ function getEdgeTriggerDescription(triggerOn: TopologyEdge["triggerOn"]) {
   switch (triggerOn) {
     case "association":
       return "当前 Agent 正常完成本轮任务后，会自动传递到这个下游 Agent。";
-    case "approved":
+    case "review_pass":
       return "当前 Agent 给出审查通过结论时，才会传递到这个下游 Agent。";
-    case "needs_revision":
+    case "review_fail":
       return "当前 Agent 明确给出需要继续回应的结论时，才会传递到这个下游 Agent。";
     default:
       return "";
   }
-}
-
-function getEdgeSupplementaryLabel(edge: TopologyEdge) {
-  if (edge.triggerOn !== "needs_revision") {
-    return null;
-  }
-
-  return `最大反驳次数 ${normalizeNeedsRevisionMaxRounds(edge.maxRevisionRounds)}`;
 }
 
 function getEdgeTriggerAppearance(triggerOn: TopologyEdge["triggerOn"]) {
@@ -218,7 +211,7 @@ function getEdgeTriggerAppearance(triggerOn: TopologyEdge["triggerOn"]) {
         zIndex: 1,
         animated: false,
       };
-    case "approved":
+    case "review_pass":
       return {
         color: "#2F5E9E",
         strokeWidth: 2,
@@ -226,7 +219,7 @@ function getEdgeTriggerAppearance(triggerOn: TopologyEdge["triggerOn"]) {
         zIndex: 1,
         animated: false,
       };
-    case "needs_revision":
+    case "review_fail":
       return {
         color: "#A95C42",
         strokeWidth: 2,
@@ -1039,13 +1032,14 @@ export function TopologyGraph({
   const agentHistories = useMemo(() => {
     const taskMessages = task?.messages ?? [];
     const histories = new Map<string, ReturnType<typeof getAgentHistoryFromMessages>>();
+    const displayNodeIds = draft ? getTopologyDisplayNodeIds(draft, defaultAgentOrderIds) : [];
 
-    for (const nodeId of draft?.nodes ?? []) {
+    for (const nodeId of displayNodeIds) {
       histories.set(nodeId, getAgentHistoryFromMessages(taskMessages, draft, nodeId));
     }
 
     return histories;
-  }, [draft, task?.messages]);
+  }, [defaultAgentOrderIds, draft, task?.messages]);
   const highlightedOutgoingTargets = useMemo(() => {
     if (!draft || !hoveredAgentId) {
       return new Set<string>();
@@ -1093,7 +1087,8 @@ export function TopologyGraph({
       return [];
     }
 
-    return draft.nodes.map((nodeId) => {
+    const displayNodeIds = getTopologyDisplayNodeIds(draft, defaultAgentOrderIds);
+    return displayNodeIds.map((nodeId) => {
       const displayName = getAgentDisplayName(nodeId);
       const agentState = taskStatuses.get(nodeId) ?? "idle";
       const agentColor = getAgentColorToken(nodeId);
@@ -1353,7 +1348,7 @@ export function TopologyGraph({
 
   const nodes = useMemo(
     () => buildNodes(autoLayout.layoutByNode, autoLayout.nodeColumnHeight, autoLayout.nodeCardWidth),
-    [agentHistories, autoLayout, draft, highlightedOutgoingTargets, hoveredAgentId, runtimeSnapshots, selectedAgentId, taskStatuses],
+    [agentHistories, autoLayout, defaultAgentOrderIds, draft, highlightedOutgoingTargets, hoveredAgentId, runtimeSnapshots, selectedAgentId, taskStatuses],
   );
   const expandedNodes = useMemo(
     () =>
@@ -1362,19 +1357,20 @@ export function TopologyGraph({
         expandedAutoLayout.nodeColumnHeight,
         expandedAutoLayout.nodeCardWidth,
       ),
-    [agentHistories, draft, expandedAutoLayout, highlightedOutgoingTargets, hoveredAgentId, runtimeSnapshots, selectedAgentId, taskStatuses],
+    [agentHistories, defaultAgentOrderIds, draft, expandedAutoLayout, highlightedOutgoingTargets, hoveredAgentId, runtimeSnapshots, selectedAgentId, taskStatuses],
   );
 
   const edges = useMemo<Edge[]>(() => {
+    const displayNodeIds = draft ? getTopologyDisplayNodeIds(draft, defaultAgentOrderIds) : [];
     const nodeOrder = new Map(
-      draft?.nodes
+      displayNodeIds
         .map((node) => node)
         .sort((left, right) => {
           const leftX = autoLayout.layoutByNode.get(left)?.x ?? 0;
           const rightX = autoLayout.layoutByNode.get(right)?.x ?? 0;
           return leftX - rightX;
         })
-        .map((nodeId, index) => [nodeId, index]) ?? [],
+        .map((nodeId, index) => [nodeId, index]),
     );
     const orderedEdges = [...(draft?.edges ?? [])].sort((left, right) => {
       const leftSourceOrder = nodeOrder.get(left.source) ?? 0;
@@ -1431,9 +1427,14 @@ export function TopologyGraph({
         },
       };
     });
-  }, [autoLayout, draft, hoveredAgentId, taskStatuses]);
+  }, [autoLayout, defaultAgentOrderIds, draft, hoveredAgentId, taskStatuses]);
 
   const editingAgent = project?.agentFiles.find((agent) => agent.name === editingAgentId);
+  const editingNodeRecord = draft?.nodeRecords?.find((node) => node.id === editingAgentId) ?? null;
+  const editingSpawnRule =
+    editingNodeRecord?.kind === "spawn"
+      ? draft?.spawnRules?.find((rule) => rule.id === editingNodeRecord.spawnRuleId) ?? null
+      : null;
   const downstreamTriggersByTarget = useMemo(() => {
     if (!draft || !editingAgentId) {
       return new Map<string, Set<TopologyEdge["triggerOn"]>>();
@@ -1443,21 +1444,6 @@ export function TopologyGraph({
       const triggers = next.get(edge.target) ?? new Set<TopologyEdge["triggerOn"]>();
       triggers.add(edge.triggerOn);
       next.set(edge.target, triggers);
-    }
-    return next;
-  }, [draft, editingAgentId]);
-  const needsRevisionRoundsByTarget = useMemo(() => {
-    if (!draft || !editingAgentId) {
-      return new Map<string, number>();
-    }
-    const next = new Map<string, number>();
-    for (const edge of draft.edges) {
-      if (
-        edge.source === editingAgentId
-        && edge.triggerOn === "needs_revision"
-      ) {
-        next.set(edge.target, normalizeNeedsRevisionMaxRounds(edge.maxRevisionRounds));
-      }
     }
     return next;
   }, [draft, editingAgentId]);
@@ -1496,56 +1482,28 @@ export function TopologyGraph({
       return;
     }
 
-    const retained = draft.edges.filter(
-      (edge) => !(edge.source === editingAgentId && edge.target === target),
+    const nextMode: DownstreamMode | null = enabled ? triggerOn : null;
+    await saveDraft(
+      setDownstreamMode({
+        topology: draft,
+        sourceNodeId: editingAgentId,
+        targetNodeId: target,
+        mode: nextMode,
+      }),
     );
-    const nextEdges = enabled
-      ? [
-          ...retained,
-          {
-            source: editingAgentId,
-            target,
-            triggerOn,
-            ...(triggerOn === "needs_revision"
-              ? {
-                  maxRevisionRounds: needsRevisionRoundsByTarget.get(target) ?? DEFAULT_NEEDS_REVISION_MAX_ROUNDS,
-                }
-              : {}),
-          },
-        ]
-      : retained;
-
-    await saveDraft({
-      ...draft,
-      edges: nextEdges,
-    });
   }
 
-  async function setNeedsRevisionMaxRounds(target: string, value: number) {
+  async function setDownstreamSpawn(target: string, enabled: boolean) {
     if (!draft || !editingAgentId) {
       return;
     }
-
-    const normalizedValue = normalizeNeedsRevisionMaxRounds(value);
-    const nextEdges = draft.edges.map((edge) => {
-      if (
-        edge.source === editingAgentId
-        && edge.target === target
-        && edge.triggerOn === "needs_revision"
-      ) {
-        return {
-          ...edge,
-          maxRevisionRounds: normalizedValue,
-        };
-      }
-
-      return edge;
+    const next = setDownstreamMode({
+      topology: draft,
+      sourceNodeId: editingAgentId,
+      targetNodeId: target,
+      mode: enabled ? "spawn" : null,
     });
-
-    await saveDraft({
-      ...draft,
-      edges: nextEdges,
-    });
+    await saveDraft(next);
   }
 
   return (
@@ -1665,16 +1623,9 @@ export function TopologyGraph({
                   <span className="truncate">
                     {getAgentDisplayName(edge.source)} {"->"} {getAgentDisplayName(edge.target)}
                   </span>
-                  <div className="flex shrink-0 items-center gap-2">
-                    {getEdgeSupplementaryLabel(edge) ? (
-                      <span className="rounded-[6px] bg-[#fff3e6] px-2.5 py-1 text-[11px] text-[#935f1f]">
-                        {getEdgeSupplementaryLabel(edge)}
-                      </span>
-                    ) : null}
-                    <span className="rounded-[6px] bg-muted px-2.5 py-1 text-[11px]">
-                      {getEdgeTriggerLabel(edge.triggerOn)}
-                    </span>
-                  </div>
+                  <span className="rounded-[6px] bg-muted px-2.5 py-1 text-[11px]">
+                    {getEdgeTriggerLabel(edge.triggerOn)}
+                  </span>
                 </button>
               ))}
             </div>
@@ -1762,22 +1713,33 @@ export function TopologyGraph({
               <p className="text-sm font-semibold text-primary">
                 {getAgentDisplayName(editingAgent?.name ?? editingAgentId ?? "Agent")}
               </p>
+              {editingSpawnRule ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  动态团队：{editingSpawnRule.sourceTemplateName} {"->"} {editingSpawnRule.name}
+                </p>
+              ) : null}
             </div>
 
             <div className="mt-5 rounded-[8px] border border-border/70 bg-[#f8f4ea] px-4 py-3 text-xs text-muted-foreground">
               <p className="font-semibold text-primary">关系类型</p>
-              <p className="mt-1">传递：上游 Agent 正常完成本轮任务后，直接传递到下游。</p>
-              <p className="mt-1">审视通过：上游 Agent 给出审查通过结论后，才传递到下游。</p>
-              <p className="mt-1">审视不通过：上游 Agent 明确要求继续回应当前内容后，才传递到下游。</p>
+              <p className="mt-1">`Spawn / 传递 / 审视通过 / 审视不通过` 四选一，始终只保留一种模式。</p>
+              <p className="mt-1">Spawn：把这个下游以及它后面可达的关联 Agent 自动收进同一个动态团队。</p>
             </div>
 
             <div className="mt-5 space-y-2">
-              {project?.agentFiles
+              {editingSpawnRule ? null : project?.agentFiles
                 .filter((agent) => agent.name !== editingAgentId)
                 .map((agent) => {
                   const selectedTriggers =
                     downstreamTriggersByTarget.get(agent.name) ?? new Set<TopologyEdge["triggerOn"]>();
-                  const selectedLabels = [...selectedTriggers].map((trigger) => getEdgeTriggerLabel(trigger));
+                  const currentMode = draft && editingAgentId
+                    ? getDownstreamMode({
+                        topology: draft,
+                        sourceNodeId: editingAgentId,
+                        targetNodeId: agent.name,
+                      })
+                    : null;
+                  const selectedLabels = currentMode ? [currentMode === "spawn" ? "Spawn" : getEdgeTriggerLabel(currentMode)] : [];
                   return (
                     <div
                       key={agent.name}
@@ -1792,58 +1754,60 @@ export function TopologyGraph({
                             已启用：{selectedLabels.join(" / ")}
                           </p>
                         ) : null}
-                        {selectedTriggers.has("needs_revision") ? (
-                          <p className="mt-1 text-xs text-[#935f1f]">
-                            最大反驳次数：{getNeedsRevisionEdgeLoopLimit(draft, editingAgentId ?? "", agent.name)}
-                          </p>
-                        ) : null}
                       </div>
-                      <div className="flex min-w-[220px] flex-col items-end gap-2">
-                        {selectedTriggers.has("needs_revision") ? (
-                          <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <span>最大反驳次数</span>
-                            <input
-                              type="number"
-                              min={1}
-                              step={1}
-                              value={getNeedsRevisionEdgeLoopLimit(draft, editingAgentId ?? "", agent.name)}
-                              onChange={(event) => {
-                                void setNeedsRevisionMaxRounds(
-                                  agent.name,
-                                  Number(event.currentTarget.value),
-                                );
-                              }}
-                              className="w-20 rounded-[8px] border border-border bg-white px-2 py-1 text-sm text-foreground"
-                            />
-                          </label>
-                        ) : null}
-                        <div className="flex flex-wrap justify-end gap-2">
-                        {(["association", "approved", "needs_revision"] as TopologyEdge["triggerOn"][]).map((trigger) => {
-                          const selected = selectedTriggers.has(trigger);
+                      <div className="flex min-w-[420px] flex-wrap justify-end gap-2">
+                        {([
+                          { mode: "spawn", label: "Spawn", title: "勾选后，这个下游以及它后面可达的关联 Agent 会被自动当成一个动态团队来创建。" },
+                          { mode: "association", label: "传递", title: getEdgeTriggerDescription("association") },
+                          { mode: "review_pass", label: "审视通过", title: getEdgeTriggerDescription("review_pass") },
+                          { mode: "review_fail", label: "审视不通过", title: getEdgeTriggerDescription("review_fail") },
+                        ] as Array<{ mode: DownstreamMode; label: string; title: string }>).map((item) => {
+                          const selected = currentMode === item.mode;
+                          const activeClassName =
+                            item.mode === "spawn"
+                              ? "border-[#9a5c00] bg-[#f0b24a] text-[#4b2e00]"
+                              : item.mode === "review_fail"
+                                ? "border-[#9b5b42] bg-[#f6dfd4] text-[#7d3d25]"
+                                : "border-primary bg-primary text-primary-foreground";
                           return (
                             <button
-                              key={trigger}
+                              key={item.mode}
                               type="button"
                               onClick={() => {
-                                void setDownstreamTrigger(agent.name, trigger, !selected);
+                                if (item.mode === "spawn") {
+                                  void setDownstreamSpawn(agent.name, !selected);
+                                  return;
+                                }
+                                void setDownstreamTrigger(agent.name, item.mode, !selected);
                               }}
                               className={`rounded-[8px] border px-3 py-2 text-sm transition ${
                                 selected
-                                  ? "border-primary bg-primary text-primary-foreground"
+                                  ? activeClassName
                                   : "border-border/70 bg-white/90 text-foreground hover:border-primary"
                               }`}
-                              title={getEdgeTriggerDescription(trigger)}
+                              title={item.title}
+                              aria-pressed={selected}
                             >
-                              {getEdgeTriggerLabel(trigger)}
+                              {item.label}
                             </button>
                           );
                         })}
-                        </div>
                       </div>
                     </div>
                   );
                 })}
             </div>
+
+            {editingSpawnRule ? (
+              <div className="mt-5 rounded-[8px] border border-border px-4 py-3 text-sm text-muted-foreground">
+                <p className="font-semibold text-primary">动态团队规则</p>
+                <p className="mt-2">入口角色：{editingSpawnRule.entryRole}</p>
+                <p className="mt-1">
+                  生成模板：{editingSpawnRule.spawnedAgents.map((item) => `${item.role}:${item.templateName}`).join(" / ")}
+                </p>
+                <p className="mt-1">汇报目标：{editingSpawnRule.reportToTemplateName}</p>
+              </div>
+            ) : null}
 
             <div className="mt-5 flex justify-end">
               <Dialog.Close asChild>
@@ -1855,6 +1819,7 @@ export function TopologyGraph({
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+
 
       <Dialog.Root
         open={!!selectedHistoryRecord}
