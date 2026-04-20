@@ -207,3 +207,65 @@ test("buildAgentHistoryItems 不会把同一条最终回复同时展示成审视
     ],
   );
 });
+
+test("buildAgentHistoryItems 不会把同一条最终回复里的 thinking 再展示到审视结果后面", () => {
+  const messages: MessageRecord[] = [
+    {
+      id: "review-final-with-thinking",
+      taskId: "task-1",
+      sender: "TaskReview",
+      content: "原始消息",
+      timestamp: "2026-04-20T14:34:44.000Z",
+      meta: {
+        kind: "agent-final",
+        reviewDecision: "approved",
+        finalMessage: "这次我认可最终交付结论。",
+      },
+    },
+  ];
+
+  const runtimeSnapshot: AgentRuntimeSnapshot = {
+    taskId: "task-1",
+    agentId: "TaskReview",
+    sessionId: "session-review",
+    status: "completed",
+    messageCount: 1,
+    updatedAt: "2026-04-20T14:34:44.000Z",
+    headline: "TaskReview 已完成",
+    activeToolNames: [],
+    activities: [
+      {
+        id: "review-final-with-thinking:0:1:thinking",
+        kind: "thinking",
+        label: "思考",
+        detail: "正在确认最终结论是否足够严谨",
+        timestamp: "2026-04-20T14:34:44.000Z",
+      },
+      {
+        id: "review-final-with-thinking:0:2:message",
+        kind: "message",
+        label: "消息",
+        detail: "这次我认可最终交付结论。",
+        timestamp: "2026-04-20T14:34:44.000Z",
+      },
+    ],
+  };
+
+  assert.deepEqual(
+    buildAgentHistoryItems({
+      agentId: "TaskReview",
+      messages,
+      topology,
+      runtimeSnapshot,
+    }).map((item) => ({
+      label: item.label,
+      detail: item.detail,
+    })),
+    [
+      {
+        label: "审视通过",
+        detail: "这次我认可最终交付结论。",
+      },
+    ],
+  );
+});

@@ -125,6 +125,9 @@ function buildRuntimeHistoryItems(input: {
   const finalMessageSignatures = new Set(
     (input.finalHistoryItems ?? []).map((item) => `${item.sortTimestamp}:::${item.detail}`),
   );
+  const finalMessageIds = new Set((input.finalHistoryItems ?? []).map((item) => item.id));
+  const belongsToFinalMessage = (activityId: string) =>
+    [...finalMessageIds].some((messageId) => activityId.startsWith(`${messageId}:`));
 
   return input.runtimeSnapshot.activities.map((activity, index) => {
     const presentation = getRuntimeItemPresentation(activity.kind);
@@ -141,14 +144,23 @@ function buildRuntimeHistoryItems(input: {
       sortTimestamp: activity.timestamp,
       tone: presentation.tone,
     } satisfies AgentHistoryItem;
-    return runtimeItem;
+    return {
+      runtimeItem,
+      activityId: activity.id,
+    };
   }).filter((item) => {
-    if (item.tone !== "runtime-message") {
+    if (belongsToFinalMessage(item.activityId)) {
+      return false;
+    }
+
+    if (item.runtimeItem.tone !== "runtime-message") {
       return true;
     }
 
-    return !finalMessageSignatures.has(`${item.sortTimestamp}:::${item.detail}`);
-  });
+    return !finalMessageSignatures.has(
+      `${item.runtimeItem.sortTimestamp}:::${item.runtimeItem.detail}`,
+    );
+  }).map((item) => item.runtimeItem);
 }
 
 export function buildAgentHistoryItems(input: {
