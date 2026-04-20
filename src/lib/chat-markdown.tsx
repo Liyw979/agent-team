@@ -5,6 +5,7 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 
 import { getChatMarkdownSpacingStyle } from "./chat-markdown-spacing";
+import { getChatMarkdownTypographyStyle } from "./chat-markdown-typography";
 
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkBreaks] as const;
 
@@ -35,7 +36,10 @@ export function MarkdownMessage({
   return (
     <div
       className={className ? `chat-markdown ${className}` : "chat-markdown"}
-      style={getChatMarkdownSpacingStyle()}
+      style={{
+        ...getChatMarkdownSpacingStyle(),
+        ...getChatMarkdownTypographyStyle(),
+      }}
     >
       <MarkdownContent content={content} />
     </div>

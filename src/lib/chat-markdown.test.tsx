@@ -13,4 +13,7 @@ test("renderMarkdownToStaticHtml 会把标题列表和代码块渲染成 HTML", 
   assert.match(html, /<code/);
   assert.match(html, /--chat-markdown-block-spacing:0\.1625em/);
   assert.match(html, /--chat-markdown-list-item-spacing:0\.06rem/);
+  assert.match(html, /--chat-markdown-font-size:0\.875rem/);
+  assert.match(html, /--chat-markdown-heading-font-size:1em/);
+  assert.match(html, /--chat-markdown-code-font-size:1em/);
 });
