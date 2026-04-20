@@ -4,11 +4,19 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { StoreService } from "./store";
+import { StoreService, shouldMaterializeWorkspaceState } from "./store";
 
 function createTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "agentflow-store-"));
 }
+
+test("只读访问缺失工作区状态时不应物化 .agentflow 目录", () => {
+  assert.equal(shouldMaterializeWorkspaceState({
+    accessMode: "read",
+    stateFileExists: false,
+    rawState: null,
+  }), false);
+});
 
 test("StoreService 读取旧 review 拓扑边时不再静默兼容", () => {
   const userDataPath = createTempDir();

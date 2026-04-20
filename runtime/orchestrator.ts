@@ -1201,9 +1201,7 @@ export class Orchestrator {
   private ensureTopologyExists(cwd: string, agents: AgentRecord[]): TopologyRecord {
     const current = this.store.getTopology(cwd);
     if (current.nodes.length === 0 && current.edges.length === 0) {
-      const fallback = createDefaultTopology(agents);
-      this.store.upsertTopology(cwd, fallback);
-      return fallback;
+      return createDefaultTopology(agents);
     }
     return this.normalizeTopology(agents, current);
   }
@@ -1806,12 +1804,8 @@ export class Orchestrator {
   }
 
   private hasWorkspaceRecord(cwd: string): boolean {
-    try {
-      this.store.getState(cwd);
-      return true;
-    } catch {
-      return false;
-    }
+    const normalizedCwd = path.resolve(cwd);
+    return this.knownWorkspaces.has(normalizedCwd) || this.store.hasWorkspaceState(normalizedCwd);
   }
 
   private extractSessionIdFromOpenCodeEvent(event: unknown): string | null {

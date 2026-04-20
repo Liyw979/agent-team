@@ -27,6 +27,8 @@ interface TaskLocatorIndexFile {
   tasks: TaskLocatorEntry[];
 }
 
+type WorkspaceStateAccessMode = "read" | "write";
+
 const WORKSPACE_DATA_DIR_NAME = ".agentflow";
 const WORKSPACE_STATE_FILE_NAME = "state.json";
 const TASK_LOCATOR_INDEX_FILE_NAME = "task-locator.json";
@@ -110,6 +112,22 @@ function createDefaultWorkspaceState(): WorkspaceStateFile {
     taskAgents: [],
     messages: [],
   };
+}
+
+export function shouldMaterializeWorkspaceState(input: {
+  accessMode: WorkspaceStateAccessMode;
+  stateFileExists: boolean;
+  rawState: string | null;
+}) {
+  if (input.accessMode !== "write") {
+    return false;
+  }
+
+  if (!input.stateFileExists) {
+    return true;
+  }
+
+  return input.rawState === null || input.rawState.trim().length === 0;
 }
 
 export class StoreService {
@@ -296,6 +314,10 @@ export class StoreService {
     return this.readWorkspaceState(cwd);
   }
 
+  hasWorkspaceState(cwd: string): boolean {
+    return fs.existsSync(this.getWorkspaceStatePath(cwd));
+  }
+
   private getWorkspaceStatePath(cwd: string) {
     return path.join(path.resolve(cwd), WORKSPACE_DATA_DIR_NAME, WORKSPACE_STATE_FILE_NAME);
   }
@@ -340,20 +362,31 @@ export class StoreService {
     };
   }
 
-  private readWorkspaceState(cwd: string): WorkspaceStateFile {
+  private readWorkspaceState(cwd: string, accessMode: WorkspaceStateAccessMode = "read"): WorkspaceStateFile {
     const normalizedCwd = path.resolve(cwd);
     const statePath = this.getWorkspaceStatePath(normalizedCwd);
-    fs.mkdirSync(path.dirname(statePath), { recursive: true });
-    if (!fs.existsSync(statePath)) {
-      const initialState = createDefaultWorkspaceState();
-      this.writeWorkspaceState(normalizedCwd, initialState);
+    const initialState = createDefaultWorkspaceState();
+    const stateFileExists = fs.existsSync(statePath);
+    if (!stateFileExists) {
+      if (shouldMaterializeWorkspaceState({
+        accessMode,
+        stateFileExists,
+        rawState: null,
+      })) {
+        this.writeWorkspaceState(normalizedCwd, initialState);
+      }
       return initialState;
     }
 
     const raw = fs.readFileSync(statePath, "utf8").trim();
     if (!raw) {
-      const initialState = createDefaultWorkspaceState();
-      this.writeWorkspaceState(normalizedCwd, initialState);
+      if (shouldMaterializeWorkspaceState({
+        accessMode,
+        stateFileExists,
+        rawState: raw,
+      })) {
+        this.writeWorkspaceState(normalizedCwd, initialState);
+      }
       return initialState;
     }
 
@@ -474,69 +507,69 @@ export class StoreService {
                       ? null
                       : undefined,
               }),
-            nodeRecords: Array.isArray(parsed.topology.nodeRecords)
-              ? parsed.topology.nodeRecords
-                  .filter((node): node is Record<string, unknown> => Boolean(node) && typeof node === "object")
-                  .map((node) => ({
-                    id: typeof node.id === "string" ? node.id : "",
-                    kind: node.kind === "spawn" ? "spawn" : "agent",
-                    templateName: typeof node.templateName === "string" ? node.templateName : "",
-                    spawnRuleId: typeof node.spawnRuleId === "string" ? node.spawnRuleId : undefined,
-                    spawnEnabled: node.spawnEnabled === true,
-                    prompt: typeof node.prompt === "string" ? node.prompt : undefined,
-                    writable: node.writable === true,
-                  }))
-                  .filter((node) => node.id && node.templateName)
-              : undefined,
-            spawnRules: Array.isArray(parsed.topology.spawnRules)
-              ? parsed.topology.spawnRules
-                  .filter((rule): rule is Record<string, unknown> => Boolean(rule) && typeof rule === "object")
-                  .map((rule) => ({
-                    id: typeof rule.id === "string" ? rule.id : "",
-                    name: typeof rule.name === "string" ? rule.name : "",
-                    sourceTemplateName: typeof rule.sourceTemplateName === "string" ? rule.sourceTemplateName : "",
-                    itemKey: typeof rule.itemKey === "string" ? rule.itemKey : "",
-                    entryRole: typeof rule.entryRole === "string" ? rule.entryRole : "",
-                    spawnedAgents: Array.isArray(rule.spawnedAgents)
-                      ? rule.spawnedAgents
-                          .filter((agent): agent is Record<string, unknown> => Boolean(agent) && typeof agent === "object")
-                          .map((agent) => ({
-                            role: typeof agent.role === "string" ? agent.role : "",
-                            templateName: typeof agent.templateName === "string" ? agent.templateName : "",
-                          }))
-                          .filter((agent) => agent.role && agent.templateName)
-                      : [],
-                    edges: Array.isArray(rule.edges)
-                      ? rule.edges
-                          .filter((edge): edge is Record<string, unknown> => Boolean(edge) && typeof edge === "object")
-                          .map((edge) => ({
-                            sourceRole: typeof edge.sourceRole === "string" ? edge.sourceRole : "",
-                            targetRole: typeof edge.targetRole === "string" ? edge.targetRole : "",
-                            triggerOn:
-                              edge.triggerOn === "association"
-                              || edge.triggerOn === "approved"
-                              || edge.triggerOn === "needs_revision"
-                                ? edge.triggerOn
-                                : "association",
-                          }))
-                          .filter((edge) => edge.sourceRole && edge.targetRole)
-                      : [],
-                    exitWhen: rule.exitWhen === "one_side_agrees" ? "one_side_agrees" : "one_side_agrees",
-                    reportToTemplateName: typeof rule.reportToTemplateName === "string" ? rule.reportToTemplateName : "",
-                  }))
-                  .filter(
-                    (rule) =>
-                      rule.id
-                      && rule.name
-                      && rule.sourceTemplateName
-                      && rule.itemKey
-                      && rule.entryRole
-                      && rule.reportToTemplateName,
-                  )
-              : undefined,
+              nodeRecords: Array.isArray(parsed.topology.nodeRecords)
+                ? parsed.topology.nodeRecords
+                    .filter((node): node is Record<string, unknown> => Boolean(node) && typeof node === "object")
+                    .map((node) => ({
+                      id: typeof node.id === "string" ? node.id : "",
+                      kind: node.kind === "spawn" ? "spawn" : "agent",
+                      templateName: typeof node.templateName === "string" ? node.templateName : "",
+                      spawnRuleId: typeof node.spawnRuleId === "string" ? node.spawnRuleId : undefined,
+                      spawnEnabled: node.spawnEnabled === true,
+                      prompt: typeof node.prompt === "string" ? node.prompt : undefined,
+                      writable: node.writable === true,
+                    }))
+                    .filter((node) => node.id && node.templateName)
+                : undefined,
+              spawnRules: Array.isArray(parsed.topology.spawnRules)
+                ? parsed.topology.spawnRules
+                    .filter((rule): rule is Record<string, unknown> => Boolean(rule) && typeof rule === "object")
+                    .map((rule) => ({
+                      id: typeof rule.id === "string" ? rule.id : "",
+                      name: typeof rule.name === "string" ? rule.name : "",
+                      sourceTemplateName: typeof rule.sourceTemplateName === "string" ? rule.sourceTemplateName : "",
+                      itemKey: typeof rule.itemKey === "string" ? rule.itemKey : "",
+                      entryRole: typeof rule.entryRole === "string" ? rule.entryRole : "",
+                      spawnedAgents: Array.isArray(rule.spawnedAgents)
+                        ? rule.spawnedAgents
+                            .filter((agent): agent is Record<string, unknown> => Boolean(agent) && typeof agent === "object")
+                            .map((agent) => ({
+                              role: typeof agent.role === "string" ? agent.role : "",
+                              templateName: typeof agent.templateName === "string" ? agent.templateName : "",
+                            }))
+                            .filter((agent) => agent.role && agent.templateName)
+                        : [],
+                      edges: Array.isArray(rule.edges)
+                        ? rule.edges
+                            .filter((edge): edge is Record<string, unknown> => Boolean(edge) && typeof edge === "object")
+                            .map((edge) => ({
+                              sourceRole: typeof edge.sourceRole === "string" ? edge.sourceRole : "",
+                              targetRole: typeof edge.targetRole === "string" ? edge.targetRole : "",
+                              triggerOn:
+                                edge.triggerOn === "association"
+                                || edge.triggerOn === "approved"
+                                || edge.triggerOn === "needs_revision"
+                                  ? edge.triggerOn
+                                  : "association",
+                            }))
+                            .filter((edge) => edge.sourceRole && edge.targetRole)
+                        : [],
+                      exitWhen: rule.exitWhen === "one_side_agrees" ? "one_side_agrees" : "one_side_agrees",
+                      reportToTemplateName: typeof rule.reportToTemplateName === "string" ? rule.reportToTemplateName : "",
+                    }))
+                    .filter(
+                      (rule) =>
+                        rule.id
+                        && rule.name
+                        && rule.sourceTemplateName
+                        && rule.itemKey
+                        && rule.entryRole
+                        && rule.reportToTemplateName,
+                    )
+                : undefined,
             };
           })()
-        : createDefaultWorkspaceState().topology;
+        : initialState.topology;
 
     const messages: MessageRecord[] = Array.isArray(parsed.messages)
       ? parsed.messages
@@ -580,7 +613,7 @@ export class StoreService {
 
   private updateWorkspaceState(cwd: string, updater: (state: WorkspaceStateFile) => WorkspaceStateFile) {
     const normalizedCwd = path.resolve(cwd);
-    const current = this.readWorkspaceState(normalizedCwd);
+    const current = this.readWorkspaceState(normalizedCwd, "write");
     const next = updater(current);
     this.writeWorkspaceState(normalizedCwd, next);
   }

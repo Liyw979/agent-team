@@ -119,6 +119,19 @@ afterEach(async () => {
   forceCleanupCurrentProcessOpenCodeChildren();
 });
 
+test("getWorkspaceSnapshot 在空工作区只读读取时不应物化 .agentflow/state.json", async () => {
+  const userDataPath = createTempDir();
+  const workspacePath = createTempDir();
+  const orchestrator = createTestOrchestrator({
+    userDataPath,
+    enableEventStream: false,
+  });
+
+  await orchestrator.getWorkspaceSnapshot(workspacePath);
+
+  assert.equal(fs.existsSync(path.join(workspacePath, ".agentflow", "state.json")), false);
+});
+
 function buildTeamDslFromWorkspaceSnapshot(input: {
   workspace: Awaited<ReturnType<Orchestrator["getWorkspaceSnapshot"]>>;
   nextAgents: Array<{ name: string; prompt: string; isWritable?: boolean }>;
