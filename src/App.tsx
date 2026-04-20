@@ -157,7 +157,6 @@ function App() {
       return [];
     }
 
-    const taskMessages = task.messages;
     const taskAgents = new Map(task.agents.map((agent) => [agent.name, agent]));
     return orderAgentsForFrontend(workspace.agents, task.topology ?? workspace.topology).map((agent) => {
       const taskAgent = taskAgents.get(agent.name);
@@ -166,7 +165,6 @@ function App() {
         prompt: agent.prompt,
         status: taskAgent?.status ?? "idle",
         hasAttachSession: Boolean(taskAgent?.opencodeSessionId),
-        messageCount: taskMessages.filter((message) => message.sender === agent.name).length,
       };
     });
   }, [workspace, task]);
@@ -377,7 +375,6 @@ function App() {
                               {attachButtonState.label}
                             </button>
                           </div>
-                          <span className="rounded-full border border-[#d8cdbd] bg-[#fffaf2] px-2.5 py-0.5 text-[0.78rem] font-semibold text-foreground/76">{agent.messageCount}</span>
                         </div>
                         {promptPreview ? (
                           <div className="mt-1 min-w-0">
