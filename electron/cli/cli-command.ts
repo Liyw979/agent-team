@@ -12,7 +12,6 @@ export type ParsedCliCommand =
   | {
       kind: "task.show";
       taskId: string;
-      cwd?: string;
       ui: boolean;
     }
   | {
@@ -68,13 +67,11 @@ export function buildCliProgram(onCommand?: (command: ParsedCliCommand) => void)
   task
     .command("show <taskId>")
     .description("显示已有 task 的群聊记录")
-    .option("--cwd <path>", "指定工作目录")
     .option("--ui", "同步启动前端界面")
     .action((taskId, options) => {
       emit({
         kind: "task.show",
         taskId,
-        cwd: options.cwd,
         ui: Boolean(options.ui),
       });
     });

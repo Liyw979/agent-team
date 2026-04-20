@@ -123,10 +123,8 @@ export function buildCliPanelFocusCommand(
 
 export function buildCliTaskShowCommand(
   taskId: string,
-  cwd?: string,
 ): string {
-  const cwdSegment = cwd ? ` --cwd ${quotePortableShellArg(cwd)}` : "";
-  return `npm run cli -- task show ${quotePortableShellArg(taskId)}${cwdSegment}`;
+  return `npm run cli -- task show ${quotePortableShellArg(taskId)}`;
 }
 
 export function buildCliAttachAgentCommand(
