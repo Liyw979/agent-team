@@ -6,13 +6,13 @@ import net from "node:net";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import packageJson from "../../package.json";
+import packageJson from "../package.json";
 import { buildCliAttachAgentCommand, buildCliOpencodeAttachCommand } from "@shared/terminal-commands";
 import type { TaskSnapshot, WorkspaceSnapshot } from "@shared/types";
-import { appendAppLog, initAppFileLogger } from "../main/app-log";
-import { Orchestrator } from "../main/orchestrator";
-import { resolveCliUserDataPath } from "../main/user-data-path";
-import { compileTeamDsl, matchesAppliedTeamDsl } from "../main/team-dsl";
+import { appendAppLog, initAppFileLogger } from "../runtime/app-log";
+import { Orchestrator } from "../runtime/orchestrator";
+import { resolveCliUserDataPath } from "../runtime/user-data-path";
+import { compileTeamDsl, matchesAppliedTeamDsl } from "../runtime/team-dsl";
 import { collectIncrementalChatTranscript, renderChatStreamEntries } from "./chat-stream-printer";
 import {
   buildCliProgram,

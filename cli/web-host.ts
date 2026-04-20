@@ -9,7 +9,7 @@ import type {
   SubmitTaskPayload,
   UiBootstrapPayload,
 } from "@shared/types";
-import type { Orchestrator } from "../main/orchestrator";
+import type { Orchestrator } from "../runtime/orchestrator";
 
 interface StartWebHostOptions {
   orchestrator: Orchestrator;

@@ -17,14 +17,13 @@ const { buildCliLauncherSpec } = require("./launcher-spec.cjs") as {
   };
 };
 
-test("buildCliLauncherSpec 直接使用当前 Node 进程启动 CLI，而不是走 Electron binary", () => {
+test("buildCliLauncherSpec 直接使用当前 Node 进程启动 CLI 入口", () => {
   const spec = buildCliLauncherSpec({
     nodeBinary: "/opt/homebrew/bin/node",
     repoRoot: "/repo/agent-team",
     argv: ["task", "run", "--message", "hello"],
     env: {
       PATH: "/usr/bin",
-      ELECTRON_RUN_AS_NODE: "1",
     },
   });
 
@@ -34,7 +33,7 @@ test("buildCliLauncherSpec 直接使用当前 Node 进程启动 CLI，而不是�
     "/repo/agent-team/node_modules/tsx/dist/preflight.cjs",
     "--import",
     "file:///repo/agent-team/node_modules/tsx/dist/loader.mjs",
-    "/repo/agent-team/electron/cli/index.ts",
+    "/repo/agent-team/cli/index.ts",
     "task",
     "run",
     "--message",
@@ -42,5 +41,4 @@ test("buildCliLauncherSpec 直接使用当前 Node 进程启动 CLI，而不是�
   ]);
   assert.equal(spec.cwd, "/repo/agent-team");
   assert.equal(spec.env.PATH, "/usr/bin");
-  assert.equal(spec.env.ELECTRON_RUN_AS_NODE, "1");
 });

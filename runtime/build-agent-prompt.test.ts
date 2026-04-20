@@ -6,7 +6,7 @@ import { buildSubmitMessageBody } from "./opencode-request-body";
 import {
   REVIEW_APPROVED_LABEL,
   REVIEW_NEEDS_REVISION_LABEL,
-} from "../../shared/review-response";
+} from "../shared/review-response";
 
 test("Build agent does not inject a system prompt", () => {
   const prompt = buildAgentSystemPrompt({

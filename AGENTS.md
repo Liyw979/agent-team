@@ -13,7 +13,7 @@
 
 ### 1.2 技术栈
 
-- Electron
+- Node.js CLI + 浏览器 Web Host
 - React 19 + TypeScript + TailwindCSS
 - React Flow
 - Zustand
@@ -160,21 +160,20 @@ CLI 能力分组：
 
 ```txt
 agentflow/
-├── electron/
-│   ├── cli/
-│   │   └── index.ts
-│   ├── main/
-│   │   ├── index.ts
-│   │   ├── gating-state.ts
-│   │   ├── gating-router.ts
-│   │   ├── langgraph-host.ts
-│   │   ├── langgraph-runtime.ts
-│   │   ├── orchestrator.ts
-│   │   ├── topology-compiler.ts
-│   │   ├── store.ts
-│   │   ├── opencode-client.ts
-│   │   └── user-data-path.ts
-│   └── preload.ts
+├── cli/
+│   ├── index.ts
+│   ├── launcher.cjs
+│   └── web-host.ts
+├── runtime/
+│   ├── gating-state.ts
+│   ├── gating-router.ts
+│   ├── langgraph-host.ts
+│   ├── langgraph-runtime.ts
+│   ├── orchestrator.ts
+│   ├── topology-compiler.ts
+│   ├── store.ts
+│   ├── opencode-client.ts
+│   └── user-data-path.ts
 ├── shared/
 │   ├── ipc.ts
 │   ├── terminal-commands.ts

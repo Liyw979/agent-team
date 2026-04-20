@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const webRoot = path.join(repoRoot, "dist", "web");
-const outputPath = path.join(repoRoot, "electron", "cli", "generated-embedded-assets.ts");
+const outputPath = path.join(repoRoot, "cli", "generated-embedded-assets.ts");
 
 function walkFiles(rootDir) {
   const queue = [rootDir];

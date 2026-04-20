@@ -20,9 +20,10 @@
     }
   },
   "include": [
-    "electron/**/*.ts",
-    "electron/**/*.d.ts",
-    "shared/**/*.ts",
-    "electron.vite.config.ts"
+    "cli/**/*.ts",
+    "cli/**/*.d.ts",
+    "runtime/**/*.ts",
+    "runtime/**/*.d.ts",
+    "shared/**/*.ts"
   ]
 }

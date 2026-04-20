@@ -883,7 +883,7 @@ test("下游结构化 prompt 会使用 Initial Task 与真实来源 Agent 段标
     from: "BA",
     userMessage: "在当前项目的一个临时文件中实现一个加法工具，调用后传入 a 和 b，返回 c",
     agentMessage: "这里应该是真实的 AGENT 名称，而不是 at 一个来源，要换成真实的名称。",
-    gitDiffSummary: "当前项目 Git Diff 精简摘要：\n工作区状态：\nM electron/main/orchestrator.ts",
+    gitDiffSummary: "当前项目 Git Diff 精简摘要：\n工作区状态：\nM runtime/orchestrator.ts",
   });
 
   assert.match(prompt, /\[Initial Task\]/);

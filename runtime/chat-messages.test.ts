@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 
 import type { MessageRecord } from "@shared/types";
 
-import { mergeTaskChatMessages } from "../../src/lib/chat-messages";
-import { formatRevisionRequestContent } from "../../shared/chat-message-format";
+import { mergeTaskChatMessages } from "../src/lib/chat-messages";
+import { formatRevisionRequestContent } from "../shared/chat-message-format";
 import {
   REVIEW_NEEDS_REVISION_END_LABEL,
   REVIEW_NEEDS_REVISION_LABEL,
-} from "../../shared/review-response";
+} from "../shared/review-response";
 
 function createMessage(overrides: Partial<MessageRecord>): MessageRecord {
   return {

@@ -3,9 +3,9 @@ import test from "node:test";
 
 import { resolveLaunchContext } from "./launch-context";
 
-test("resolveLaunchContext 在 electron-vite dev 无法透传自定义 CLI 参数时，会回退读取环境变量", () => {
+test("resolveLaunchContext 在启动入口没有透传自定义 CLI 参数时，会回退读取环境变量", () => {
   const launch = resolveLaunchContext({
-    argv: ["electron", "."],
+    argv: ["node", "cli/index.ts"],
     env: {
       AGENTFLOW_TASK_ID: "task-123",
       AGENTFLOW_CWD: "/Users/demo/code/empty",

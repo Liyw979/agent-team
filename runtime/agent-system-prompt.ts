@@ -1,8 +1,8 @@
-import type { AgentRecord } from "../../shared/types";
+import type { AgentRecord } from "../shared/types";
 import {
   REVIEW_APPROVED_LABEL,
   REVIEW_NEEDS_REVISION_LABEL,
-} from "../../shared/review-response";
+} from "../shared/review-response";
 
 export function buildAgentSystemPrompt(
   agent: Pick<AgentRecord, "name">,

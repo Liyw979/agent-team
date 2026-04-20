@@ -8,6 +8,7 @@ import { ChatWindow } from "./components/ChatWindow";
 import { TopologyGraph } from "./components/TopologyGraph";
 import { PANEL_HEADER_ACTION_BUTTON_CLASS } from "./lib/panel-header-action-button";
 import { getAgentColorToken } from "./lib/agent-colors";
+import { buildAgentHistoryItems, type AgentHistoryItem } from "./lib/agent-history";
 import {
   bootstrapTask,
   getTaskRuntime,
@@ -141,6 +142,20 @@ function App() {
       };
     });
   }, [workspace, task]);
+  const selectedAgentCard = agentCards.find((agent) => agent.name === selectedAgentId) ?? null;
+  const selectedAgentRuntime = selectedAgentId ? runtimeSnapshots[selectedAgentId] : undefined;
+  const selectedAgentHistory = useMemo(() => {
+    if (!task || !workspace || !selectedAgentId) {
+      return [];
+    }
+
+    return buildAgentHistoryItems({
+      agentId: selectedAgentId,
+      messages: task.messages,
+      topology: task.topology ?? workspace.topology,
+      runtimeSnapshot: runtimeSnapshots[selectedAgentId],
+    });
+  }, [runtimeSnapshots, selectedAgentId, task, workspace]);
 
   async function handleOpenAgentTerminal(agentName: string) {
     if (!workspace || !task || openingAgentTerminalId === agentName) {
@@ -218,48 +233,146 @@ function App() {
                 </span>
               </header>
 
-              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-                {agentTerminalActionError ? (
-                  <div className="mb-3 rounded-[8px] border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-700">
-                    {agentTerminalActionError}
-                  </div>
-                ) : null}
-
-                <div className="space-y-3">
-                  {agentCards.map((agent) => {
-                    const color = getAgentColorToken(agent.name);
-                    return (
-                      <div
-                        key={agent.name}
-                        className="rounded-[10px] border p-4"
-                        style={{
-                          background: color.soft,
-                          borderColor: color.border,
-                        }}
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="text-base font-semibold text-foreground">{agent.name}</p>
-                            <p className="text-xs text-foreground/70">runs: {agent.runCount}</p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void handleOpenAgentTerminal(agent.name);
-                            }}
-                            className={PANEL_HEADER_ACTION_BUTTON_CLASS}
-                          >
-                            {openingAgentTerminalId === agent.name ? "打开中..." : "attach"}
-                          </button>
-                        </div>
-                        {agent.prompt ? (
-                          <p className="mt-3 text-sm leading-6 text-foreground/80">
-                            {agent.prompt.split(/\n+/).find((line) => line.trim())}
-                          </p>
-                        ) : null}
+              <div className="grid min-h-0 flex-1 grid-rows-[minmax(240px,0.95fr)_minmax(0,1.05fr)] gap-4 px-5 py-4">
+                <section className="flex min-h-0 flex-col overflow-hidden rounded-[10px] border border-border/60 bg-card/75">
+                  <header className="border-b border-border/60 px-4 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-foreground">Agent 历史记录</p>
+                        <p className="text-xs text-muted-foreground">
+                          {selectedAgentCard ? `${selectedAgentCard.name} 的完整运行轨迹` : "请选择一个 Agent"}
+                        </p>
                       </div>
-                    );
-                  })}
+                      {selectedAgentRuntime?.headline ? (
+                        <span className="max-w-[150px] truncate rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                          {selectedAgentRuntime.headline}
+                        </span>
+                      ) : null}
+                    </div>
+                  </header>
+
+                  <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+                    {selectedAgentCard ? (
+                      <div className="space-y-3">
+                        <div
+                          className="rounded-[10px] border px-3 py-3"
+                          style={{
+                            background: getAgentColorToken(selectedAgentCard.name).soft,
+                            borderColor: getAgentColorToken(selectedAgentCard.name).border,
+                          }}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-foreground">{selectedAgentCard.name}</p>
+                              <p className="text-xs text-foreground/70">
+                                状态: {getAgentStatusText(selectedAgentCard.status)} · runs: {selectedAgentCard.runCount}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void handleOpenAgentTerminal(selectedAgentCard.name);
+                              }}
+                              className={PANEL_HEADER_ACTION_BUTTON_CLASS}
+                            >
+                              {openingAgentTerminalId === selectedAgentCard.name ? "打开中..." : "attach"}
+                            </button>
+                          </div>
+                          {selectedAgentCard.prompt ? (
+                            <p className="mt-3 line-clamp-2 text-xs leading-6 text-foreground/80">
+                              {selectedAgentCard.prompt.split(/\n+/).find((line) => line.trim())}
+                            </p>
+                          ) : null}
+                        </div>
+
+                        {selectedAgentHistory.length > 0 ? (
+                          <div className="space-y-2">
+                            {selectedAgentHistory.map((item) => (
+                              <article
+                                key={item.id}
+                                className={`rounded-[10px] border px-3 py-2.5 text-left ${getHistoryItemClassName(item)}`}
+                              >
+                                <div className="flex items-center justify-between gap-3">
+                                  <span className="text-[11px] font-semibold">{item.label}</span>
+                                  <span className="text-[11px] opacity-70">{formatHistoryTimestamp(item.timestamp)}</span>
+                                </div>
+                                <p className="mt-1 whitespace-pre-wrap break-all text-[12px] leading-6 opacity-90">
+                                  {item.detail}
+                                </p>
+                              </article>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="rounded-[10px] border border-dashed border-border/70 bg-background/50 px-3 py-4 text-sm text-muted-foreground">
+                            当前还没有这位 Agent 的历史记录。
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="rounded-[10px] border border-dashed border-border/70 bg-background/50 px-3 py-4 text-sm text-muted-foreground">
+                        当前没有选中的 Agent。
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                <div className="min-h-0 overflow-y-auto">
+                  {agentTerminalActionError ? (
+                    <div className="mb-3 rounded-[8px] border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-700">
+                      {agentTerminalActionError}
+                    </div>
+                  ) : null}
+
+                  <div className="space-y-3">
+                    {agentCards.map((agent) => {
+                      const color = getAgentColorToken(agent.name);
+                      const selected = agent.name === selectedAgentId;
+                      return (
+                        <div
+                          key={agent.name}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => {
+                            setSelectedAgentId(agent.name);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              setSelectedAgentId(agent.name);
+                            }
+                          }}
+                          className="block w-full rounded-[10px] border p-4 text-left transition"
+                          style={{
+                            background: color.soft,
+                            borderColor: selected ? color.solid : color.border,
+                            boxShadow: selected ? `0 0 0 2px ${color.solid}33 inset` : undefined,
+                          }}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-base font-semibold text-foreground">{agent.name}</p>
+                              <p className="text-xs text-foreground/70">runs: {agent.runCount}</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void handleOpenAgentTerminal(agent.name);
+                              }}
+                              className={PANEL_HEADER_ACTION_BUTTON_CLASS}
+                            >
+                              {openingAgentTerminalId === agent.name ? "打开中..." : "attach"}
+                            </button>
+                          </div>
+                          {agent.prompt ? (
+                            <p className="mt-3 text-sm leading-6 text-foreground/80">
+                              {agent.prompt.split(/\n+/).find((line) => line.trim())}
+                            </p>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </aside>
@@ -268,6 +381,51 @@ function App() {
       </main>
     </div>
   );
+}
+
+function formatHistoryTimestamp(timestamp: string) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return timestamp;
+  }
+  return date.toLocaleTimeString("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+
+function getHistoryItemClassName(item: AgentHistoryItem) {
+  switch (item.tone) {
+    case "failure":
+      return "border-rose-200 bg-rose-50 text-rose-900";
+    case "runtime-tool":
+      return "border-amber-200 bg-amber-50 text-amber-900";
+    case "runtime-thinking":
+      return "border-slate-200 bg-slate-50 text-slate-800";
+    case "runtime-step":
+      return "border-sky-200 bg-sky-50 text-sky-900";
+    case "runtime-message":
+      return "border-emerald-200 bg-emerald-50 text-emerald-900";
+    default:
+      return "border-emerald-200 bg-emerald-50 text-emerald-900";
+  }
+}
+
+function getAgentStatusText(status: string) {
+  switch (status) {
+    case "running":
+      return "运行中";
+    case "completed":
+      return "已完成";
+    case "failed":
+      return "执行失败";
+    case "needs_revision":
+      return "需要修改";
+    default:
+      return "未启动";
+  }
 }
 
 export default App;

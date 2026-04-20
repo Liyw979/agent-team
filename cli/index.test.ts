@@ -54,9 +54,8 @@ test("CLI 不再通过 ProjectSnapshot / ensureProjectForPath 驱动当前工作
   assert.doesNotMatch(CLI_SOURCE, /getProjectSnapshot/);
 });
 
-test("CLI 会通过内部 web-host 模式拉起浏览器 UI，而不是 Electron", () => {
+test("CLI 会通过内部 web-host 模式拉起浏览器 UI", () => {
   assert.match(CLI_SOURCE, /internal web-host/);
   assert.match(CLI_SOURCE, /openBrowser/);
-  assert.doesNotMatch(CLI_SOURCE, /electron:dev/);
   assert.doesNotMatch(CLI_SOURCE, /spawnUi\(/);
 });

@@ -56,7 +56,7 @@ export function buildUiHostLaunchSpec(
       path.join(input.repoRoot, "node_modules/tsx/dist/preflight.cjs"),
       "--import",
       `file://${path.join(input.repoRoot, "node_modules/tsx/dist/loader.mjs")}`,
-      path.join(input.repoRoot, "electron/cli/index.ts"),
+      path.join(input.repoRoot, "cli/index.ts"),
       ...hostArgs,
     ],
     cwd: input.repoRoot,
