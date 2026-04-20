@@ -34,6 +34,8 @@ body {
   font-size: 0.875rem;
   line-height: 1.5;
   word-break: break-word;
+  --chat-markdown-block-spacing: 0.65em;
+  --chat-markdown-list-item-spacing: 0.24rem;
 }
 
 .chat-markdown > :first-child {
@@ -45,7 +47,7 @@ body {
 }
 
 .chat-markdown :is(h1, h2, h3, h4, h5, h6, p, ul, ol, pre, blockquote, table, hr) {
-  margin: 0.65em 0 0;
+  margin: var(--chat-markdown-block-spacing) 0 0;
 }
 
 .chat-markdown :is(h1, h2, h3, h4, h5, h6) {
@@ -74,7 +76,7 @@ body {
 }
 
 .chat-markdown li + li {
-  margin-top: 0.24rem;
+  margin-top: var(--chat-markdown-list-item-spacing);
 }
 
 .chat-markdown blockquote {

@@ -4,6 +4,8 @@ import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 
+import { getChatMarkdownSpacingStyle } from "./chat-markdown-spacing";
+
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkBreaks] as const;
 
 function MarkdownContent({
@@ -31,7 +33,10 @@ export function MarkdownMessage({
   className?: string;
 }) {
   return (
-    <div className={className ? `chat-markdown ${className}` : "chat-markdown"}>
+    <div
+      className={className ? `chat-markdown ${className}` : "chat-markdown"}
+      style={getChatMarkdownSpacingStyle()}
+    >
       <MarkdownContent content={content} />
     </div>
   );

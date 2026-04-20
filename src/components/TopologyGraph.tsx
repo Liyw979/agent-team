@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getAgentColorToken } from "@/lib/agent-colors";
 import { buildAgentHistoryItems, type AgentHistoryItem } from "@/lib/agent-history";
+import { AgentHistoryMarkdown } from "@/lib/agent-history-markdown";
+import { getTopologyHistoryItemButtonClassName } from "@/lib/topology-history-layout";
 import {
   PANEL_HEADER_CLASS,
   PANEL_HEADER_LEADING_CLASS,
@@ -349,15 +351,16 @@ export function TopologyGraph({
                                 item,
                               });
                             }}
-                            className={`rounded-[10px] border px-2.5 py-1.5 text-left ${getHistoryItemClassName(item)}`}
+                            className={`${getTopologyHistoryItemButtonClassName()} ${getHistoryItemClassName(item)}`}
                           >
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-[11px] font-semibold">{item.label}</span>
                               <span className="text-[11px] opacity-70">{formatHistoryTimestamp(item.timestamp)}</span>
                             </div>
-                            <p className="mt-1 whitespace-pre-wrap break-words text-[11px] leading-5 opacity-90">
-                              {item.detail}
-                            </p>
+                            <AgentHistoryMarkdown
+                              content={item.detail}
+                              className="mt-1 text-[11px] leading-5 opacity-90"
+                            />
                           </button>
                         ))}
                       </div>
@@ -426,9 +429,10 @@ export function TopologyGraph({
             </div>
 
             <div className="min-h-0 overflow-y-auto px-5 py-4">
-              <pre className="whitespace-pre-wrap break-words text-[14px] leading-7 text-foreground/84">
-                {selectedHistoryItem.item.detail}
-              </pre>
+              <AgentHistoryMarkdown
+                content={selectedHistoryItem.item.detail}
+                className="text-[14px] leading-7 text-foreground/84"
+              />
             </div>
           </div>
         </div>
