@@ -108,8 +108,12 @@ async function resolveProject(
 async function resolveTaskProject(
   context: CliContext,
   taskId: string,
+  cwd?: string,
 ): Promise<WorkspaceSnapshot> {
-  const task = await context.orchestrator.getTaskSnapshot(taskId);
+  const task = await context.orchestrator.getTaskSnapshot(
+    taskId,
+    cwd ? path.resolve(cwd) : undefined,
+  );
   return context.orchestrator.getWorkspaceSnapshot(task.task.cwd);
 }
 
@@ -119,14 +123,6 @@ function findTaskOrThrow(workspace: WorkspaceSnapshot, taskId: string): TaskSnap
     fail(`未找到 Task：${taskId}`);
   }
   return matched;
-}
-
-function findLatestTaskOrThrow(workspace: WorkspaceSnapshot): TaskSnapshot {
-  const latest = workspace.tasks[0];
-  if (!latest) {
-    fail(`当前工作目录 ${workspace.cwd} 还没有可 attach 的 Task。`);
-  }
-  return latest;
 }
 
 async function loadTeamDslDefinition(file: string) {
@@ -188,7 +184,7 @@ function validateTaskUiCommand(
   }
 }
 
-function printTaskAttachCommands(task: TaskSnapshot, cwd?: string) {
+function printTaskAttachCommands(task: TaskSnapshot) {
   process.stdout.write("\nattach:\n");
   const attachCommandOptions = isCompiledRuntime()
     ? {
@@ -202,7 +198,7 @@ function printTaskAttachCommands(task: TaskSnapshot, cwd?: string) {
       };
   for (const agent of task.agents) {
     process.stdout.write(
-      `- ${agent.name} | attach: ${buildCliAttachAgentCommand(agent.name, cwd, attachCommandOptions)}\n`,
+      `- ${agent.name} | attach: ${buildCliAttachAgentCommand(task.task.id, agent.name, attachCommandOptions)}\n`,
     );
   }
   process.stdout.write("\n");
@@ -260,7 +256,7 @@ async function renderTaskMessages(
     const snapshot = await context.orchestrator.getTaskSnapshot(taskId);
 
     if (!attachPrinted) {
-      printTaskAttachCommands(snapshot, snapshot.task.cwd);
+      printTaskAttachCommands(snapshot);
       attachPrinted = true;
     }
 
@@ -594,7 +590,7 @@ async function handleTaskUiCommand(
   });
 
   if (command.taskId) {
-    const workspace = await resolveTaskProject(context, command.taskId);
+    const workspace = await resolveTaskProject(context, command.taskId, command.cwd);
     const task = findTaskOrThrow(workspace, command.taskId);
     const { url } = await ensureUiHost(context, task.task.cwd, task.task.id);
     printTaskRunDiagnostics(diagnostics, task.task.id);
@@ -609,7 +605,7 @@ async function handleTaskUiCommand(
     return;
   }
 
-  let workspace = await resolveProject(context);
+  let workspace = await resolveProject(context, command.cwd);
   workspace = await ensureJsonTopologyApplied(context, workspace, command.file!);
   const snapshot = await context.orchestrator.submitTask({
     cwd: workspace.cwd,
@@ -632,8 +628,8 @@ async function handleTaskAttachCommand(
   context: CliContext,
   command: Extract<ParsedCliCommand, { kind: "task.attach" }>,
 ) {
-  const workspace = await resolveProject(context, command.cwd);
-  const task = findLatestTaskOrThrow(workspace);
+  const workspace = await resolveTaskProject(context, command.taskId);
+  const task = findTaskOrThrow(workspace, command.taskId);
   const agent = task.agents.find((item) => item.name === command.agentName);
   if (!agent) {
     fail(`未找到 Agent：${command.agentName}`);
@@ -663,15 +659,15 @@ function buildHelp() {
     "",
     "补充命令示例：",
     "  task headless --file <topology-json> --message <message> [--cwd <path>]",
-    "  task ui --file <topology-json> --message <message>",
-    "  task ui <taskId>",
-    "  task attach <agentName> [--cwd <path>] [--print-only]",
+    "  task ui --file <topology-json> --message <message> [--cwd <path>]",
+    "  task ui <taskId> [--cwd <path>]",
+    "  task attach <taskId> <agentName> [--print-only]",
     "",
     "说明：",
     "  - `task headless` 只负责新建任务，运行到本轮任务结束后退出 CLI。",
     "  - `task ui` 会通过 internal web-host 启动后台网页服务，并打开浏览器。",
     "  - 新建任务时必须传 `--file` 和 `--message`。",
-    "  - `task attach <agentName>` 会 attach 到当前工作目录最新 task 的对应 Agent。",
+    "  - `task attach <taskId> <agentName>` 会 attach 到指定 Task 的对应 Agent。",
   ].join("\n");
   return `${commanderHelp}\n${appendix}`;
 }

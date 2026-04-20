@@ -8,26 +8,26 @@ import {
 
 test("CLI 打开的 attach 命令统一走顶层 attach 子命令", () => {
   assert.equal(
-    buildCliAttachAgentCommand("Code Review"),
-    "bun run cli -- task attach 'Code Review'",
+    buildCliAttachAgentCommand("task-1", "Code Review"),
+    "bun run cli -- task attach 'task-1' 'Code Review'",
   );
 });
 
-test("CLI 在跨工作区场景下构造 task attach 命令时会带上 --cwd", () => {
+test("CLI 构造 task attach 命令时固定使用 taskId 而不是 cwd", () => {
   assert.equal(
-    buildCliAttachAgentCommand("Code Review", "/tmp/project"),
-    "bun run cli -- task attach 'Code Review' --cwd '/tmp/project'",
+    buildCliAttachAgentCommand("task with space", "Code Review"),
+    "bun run cli -- task attach 'task with space' 'Code Review'",
   );
 });
 
 test("编译态 attach 提示会切换到当前可执行文件名", () => {
   assert.equal(
-    buildCliAttachAgentCommand("Code Review", "C:\\work\\agent-team", {
+    buildCliAttachAgentCommand("task-1", "Code Review", {
       mode: "compiled",
       executablePath: "C:\\AgentTeam\\agent-team.exe",
       platform: "win32",
     }),
-    'agent-team.exe task attach "Code Review" --cwd "C:\\work\\agent-team"',
+    'agent-team.exe task attach "task-1" "Code Review"',
   );
 });
 

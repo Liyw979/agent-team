@@ -27,17 +27,21 @@ function resolveCompiledExecutableName(executablePath: string, platform: NodeJS.
 }
 
 export function buildCliAttachAgentCommand(
+  taskId: string,
   agentName: string,
-  cwd?: string,
   options?: BuildCliAttachAgentCommandOptions,
 ): string {
   const platform = options?.platform ?? process.platform;
-  const cwdSegment = cwd ? ` --cwd ${quotePortableShellArg(cwd, platform)}` : "";
   const commandPrefix =
     options?.mode === "compiled" && options.executablePath
       ? resolveCompiledExecutableName(options.executablePath, platform)
       : "bun run cli --";
-  return `${commandPrefix} task attach ${quotePortableShellArg(agentName, platform)}${cwdSegment}`;
+  return [
+    commandPrefix,
+    "task attach",
+    quotePortableShellArg(taskId, platform),
+    quotePortableShellArg(agentName, platform),
+  ].join(" ");
 }
 
 export function buildCliOpencodeAttachCommand(

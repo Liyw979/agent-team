@@ -81,6 +81,7 @@
 - 编译后的最终拓扑会额外持久化 `topology.langgraph` 边界信息：`start.id` 固定为 LangGraph 的 `__start__`，并显式保存它连接到哪些业务节点；`end` 只有在团队拓扑明确声明“存在语义上的结束节点”时才会写入 `__end__`，像当前开发团队这类依靠调度状态自然收束的拓扑会把 `end` 保存为 `null`，而不是伪造一个业务 EndNode。
 - 拓扑配置中的 `edges` 持久化 `source / target / triggerOn`；当 `triggerOn = needs_revision` 时，还会额外持久化该边自己的 `maxRevisionRounds`，用于限制这条审视回流链路可连续反驳的最大轮数，默认值为 `4`。边的唯一标识在运行时按三元组即时推导，不再单独持久化 `id` 字段。
 - 拓扑节点顶部直接展示 Agent 当前状态徽标，包括 `未启动 / 运行中 / 已完成 / 执行失败`；审查类 Agent 则显示 `审查通过 / 审查不通过`。
+- 拓扑图中每个 Agent 节点头部都会在状态 icon 左侧提供 `attach` 按钮；点击后直接打开该 Agent 对应的 OpenCode attach 终端。
 - 拓扑图中的 Agent 节点颜色用于表达当前运行状态，不再用颜色区分 built-in / custom；内置与本地类型信息仅在编辑面板等辅助信息中展示。
 - 拓扑图在面板尺寸变化时会保持“Agent 在上、历史区在下、首尾节点贴近左右边界但保留少量留白、顶部预留连线通道”的布局约束，而不是把整张图简单等比缩放后居中。
 - 前端拓扑编辑面板支持为每一条 `needs_revision` 关系单独配置“最大反驳次数”；默认显示 `4`，不同审视关系可以分别保存不同数值。
@@ -122,10 +123,10 @@
 - CLI 默认使用当前目录作为工作目录。
 - CLI 只保留 `task headless`、`task ui`、`task attach`。
 - `task headless --file <topology.json> --message <message>` 会新建当前 Task，打印本轮群聊，任务结束后退出到 shell。
-- `task ui --file <topology.json> --message <message>` 会新建当前 Task，后台启动本地 Web Host，并在浏览器中打开当前 Task 页面。
-- `task ui <taskId>` 会恢复已有 Task，并在浏览器中打开当前 Task 页面。
-- `task attach <agentName>` 会 attach 到当前工作区最近一个 Task 的目标 Agent OpenCode session；所有用户可见 attach 文案都统一显示这条高层命令，不展示底层 `opencode attach ...`。
-- `bun run cli -- ...` 需要在仓库根目录执行；若从其他目录排查目标工作区，`task headless` / `task attach` 请显式传入 `--cwd`。
+- `task ui --file <topology.json> --message <message> [--cwd <path>]` 会新建当前 Task，后台启动本地 Web Host，并在浏览器中打开当前 Task 页面。
+- `task ui <taskId> [--cwd <path>]` 会恢复已有 Task，并在浏览器中打开当前 Task 页面；传入 `--cwd` 时会作为任务定位的优先工作区。
+- `task attach <taskId> <agentName>` 会 attach 到指定 Task 的目标 Agent OpenCode session；所有用户可见 attach 文案都统一显示这条高层命令，不展示底层 `opencode attach ...`。
+- `bun run cli -- ...` 需要在仓库根目录执行；若从其他目录排查目标工作区，`task headless` 请显式传入 `--cwd`；`task attach` 则应直接传入目标 `taskId`。
 
 常用命令示例：
 
@@ -133,16 +134,16 @@
 bun run cli -- help
 
 bun run cli -- task headless --file config/team-topologies/development-team.topology.json --message "请开始一轮开发团队协作。"
-bun run cli -- task ui --file config/team-topologies/development-team.topology.json --message "请开始一轮开发团队协作。"
-bun run cli -- task ui <taskId>
-bun run cli -- task attach <agentName>
+bun run cli -- task ui --file config/team-topologies/development-team.topology.json --message "请开始一轮开发团队协作。" --cwd /path/to/workspace
+bun run cli -- task ui <taskId> --cwd /path/to/workspace
+bun run cli -- task attach <taskId> <agentName>
 ```
 
 CLI 能力分组：
 
 - `task headless`：运行一轮任务，结束后退出 CLI。
 - `task ui`：运行或恢复任务，并在浏览器里打开当前 Task 页面。
-- `task attach`：attach 到当前工作区最近一个 Task 的指定 Agent OpenCode 会话。
+- `task attach`：attach 到指定 Task 的指定 Agent OpenCode 会话。
 
 ## 5. 存储布局与仓库结构
 
