@@ -2,9 +2,8 @@ export function quotePortableShellArg(value: string): string {
   return `"${value.replace(/"/g, '\\"')}"`;
 }
 
-export function buildCliAttachAgentCommand(agentName: string, cwd?: string): string {
-  const cwdSegment = cwd ? ` --cwd ${quotePortableShellArg(cwd)}` : "";
-  return `bun run cli -- task attach ${quotePortableShellArg(agentName)}${cwdSegment}`;
+export function buildCliAttachAgentCommand(taskId: string, agentName: string): string {
+  return `bun run cli -- task attach ${quotePortableShellArg(taskId)} ${quotePortableShellArg(agentName)}`;
 }
 
 export function buildCliOpencodeAttachCommand(

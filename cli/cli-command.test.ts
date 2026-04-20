@@ -55,6 +55,8 @@ test("parseCliCommand 解析 task ui 新建任务", () => {
     "config/team-topologies/development-team.topology.json",
     "--message",
     "请开始执行",
+    "--cwd",
+    "/tmp/project",
   ]);
 
   assert.deepEqual(parsed, {
@@ -62,6 +64,7 @@ test("parseCliCommand 解析 task ui 新建任务", () => {
     file: "config/team-topologies/development-team.topology.json",
     message: "请开始执行",
     taskId: undefined,
+    cwd: "/tmp/project",
   });
 });
 
@@ -71,6 +74,8 @@ test("parseCliCommand 解析 task ui 恢复已有任务", () => {
     "ui",
     "--task",
     "task-1",
+    "--cwd",
+    "/tmp/project",
   ]);
 
   assert.deepEqual(parsed, {
@@ -78,6 +83,7 @@ test("parseCliCommand 解析 task ui 恢复已有任务", () => {
     taskId: "task-1",
     file: undefined,
     message: undefined,
+    cwd: "/tmp/project",
   });
 });
 
@@ -93,35 +99,45 @@ test("parseCliCommand 解析 task ui 位置参数 taskId", () => {
     taskId: "task-1",
     file: undefined,
     message: undefined,
+    cwd: undefined,
   });
 });
 
-test("parseCliCommand 不再接受 task ui --cwd", () => {
-  assert.throws(() => parseCliCommand([
+test("parseCliCommand 允许 task ui 单独接收 --cwd", () => {
+  const parsed = parseCliCommand([
     "task",
     "ui",
-    "--task",
-    "task-1",
     "--cwd",
     "/tmp/project",
-  ]));
+    "--file",
+    "config/team-topologies/development-team.topology.json",
+    "--message",
+    "请开始执行",
+  ]);
+
+  assert.deepEqual(parsed, {
+    kind: "task.ui",
+    taskId: undefined,
+    file: "config/team-topologies/development-team.topology.json",
+    message: "请开始执行",
+    cwd: "/tmp/project",
+  });
 });
 
 test("parseCliCommand 解析 task attach", () => {
   const parsed = parseCliCommand([
     "task",
     "attach",
+    "task-1",
     "Build",
     "--print-only",
-    "--cwd",
-    "/tmp/project",
   ]);
 
   assert.deepEqual(parsed, {
     kind: "task.attach",
+    taskId: "task-1",
     agentName: "Build",
     printOnly: true,
-    cwd: "/tmp/project",
   });
 });
 
@@ -146,15 +162,14 @@ test("Commander help 包含 task headless/task ui/task attach 命令", () => {
   assert.match(CLI_COMMAND_SOURCE, /\.name\("agent-team"\)/);
   assert.doesNotMatch(CLI_COMMAND_SOURCE, new RegExp(`\\.name\\("${LEGACY_CLI_NAME}"\\)`));
   assert.match(CLI_SOURCE, /task headless --file <topology-json> --message <message>/);
-  assert.match(CLI_SOURCE, /task ui --file <topology-json> --message <message>/);
-  assert.match(CLI_SOURCE, /task ui <taskId>/);
-  assert.match(CLI_SOURCE, /task attach <agentName>/);
+  assert.match(CLI_SOURCE, /task ui --file <topology-json> --message <message> \[--cwd <path>\]/);
+  assert.match(CLI_SOURCE, /task ui <taskId> \[--cwd <path>\]/);
+  assert.match(CLI_SOURCE, /task attach <taskId> <agentName>/);
   assert.doesNotMatch(CLI_SOURCE, /task run --file <topology-json> --message <message>/);
   assert.doesNotMatch(CLI_SOURCE, /task show <taskId>/);
   assert.doesNotMatch(CLI_SOURCE, /task chat --file <topology-json> --message <message>/);
   assert.doesNotMatch(CLI_SOURCE, /task chat --task <taskId>/);
   assert.doesNotMatch(CLI_SOURCE, /--ui/);
-  assert.doesNotMatch(CLI_SOURCE, /attach <taskId> <agentName>/);
   assert.doesNotMatch(CLI_SOURCE, /task attach-agent <taskId> <agentName>/);
   assert.doesNotMatch(CLI_SOURCE, /dsl run --file <dsl-file>/);
   assert.doesNotMatch(CLI_SOURCE, /agent attach <agentName>/);

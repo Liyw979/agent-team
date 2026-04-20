@@ -10,13 +10,14 @@ export type ParsedCliCommand =
     }
   | {
       kind: "task.ui";
+      cwd?: string;
       file?: string;
       taskId?: string;
       message?: string;
     }
   | {
       kind: "task.attach";
-      cwd?: string;
+      taskId: string;
       agentName: string;
       printOnly: boolean;
     };
@@ -57,6 +58,7 @@ export function buildCliProgram(onCommand?: (command: ParsedCliCommand) => void)
   task
     .command("ui [taskId]")
     .description("新建或恢复 task，并在浏览器中打开网页界面")
+    .option("--cwd <path>", "指定工作目录")
     .option("--file <topology-json>", "团队拓扑 JSON 文件路径")
     .option("--task <taskId>", "恢复已有 task")
     .option("--message <message>", "新建 task 时的首条消息")
@@ -66,6 +68,7 @@ export function buildCliProgram(onCommand?: (command: ParsedCliCommand) => void)
       }
       emit({
         kind: "task.ui",
+        cwd: options.cwd,
         file: options.file,
         taskId: taskId ?? options.task,
         message: options.message,
@@ -73,14 +76,13 @@ export function buildCliProgram(onCommand?: (command: ParsedCliCommand) => void)
     });
 
   task
-    .command("attach <agentName>")
-    .description("attach 到当前工作目录最新 task 的指定 Agent")
-    .option("--cwd <path>", "指定工作目录")
+    .command("attach <taskId> <agentName>")
+    .description("attach 到指定 task 的目标 Agent")
     .option("--print-only", "仅打印 attach 命令")
-    .action((agentName, options) => {
+    .action((taskId, agentName, options) => {
       emit({
         kind: "task.attach",
-        cwd: options.cwd,
+        taskId,
         agentName,
         printOnly: Boolean(options.printOnly),
       });

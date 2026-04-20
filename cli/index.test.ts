@@ -11,17 +11,14 @@ test("CLI 不再兼容旧的 review relation 别名", () => {
 
 test("CLI 帮助包含 task headless/task ui/task attach 命令", () => {
   assert.match(CLI_SOURCE, /task headless --file <topology-json> --message <message>/);
-  assert.match(CLI_SOURCE, /task ui --file <topology-json> --message <message>/);
-  assert.match(CLI_SOURCE, /task ui <taskId>/);
-  assert.match(CLI_SOURCE, /task attach <agentName>/);
-  assert.doesNotMatch(CLI_SOURCE, /task ui --file <topology-json> --message <message> \[--cwd <path>\]/);
-  assert.doesNotMatch(CLI_SOURCE, /task ui --task <taskId> \[--cwd <path>\]/);
+  assert.match(CLI_SOURCE, /task ui --file <topology-json> --message <message> \[--cwd <path>\]/);
+  assert.match(CLI_SOURCE, /task ui <taskId> \[--cwd <path>\]/);
+  assert.match(CLI_SOURCE, /task attach <taskId> <agentName>/);
   assert.doesNotMatch(CLI_SOURCE, /task show <taskId>/);
   assert.doesNotMatch(CLI_SOURCE, /task chat --file <topology-json> --message <message>/);
   assert.doesNotMatch(CLI_SOURCE, /task chat --task <taskId>/);
   assert.doesNotMatch(CLI_SOURCE, /task run --file <topology-json> --message <message>/);
   assert.doesNotMatch(CLI_SOURCE, /--ui/);
-  assert.doesNotMatch(CLI_SOURCE, /attach <taskId> <agentName>/);
   assert.doesNotMatch(CLI_SOURCE, /task attach-agent <taskId> <agentName>/);
   assert.doesNotMatch(CLI_SOURCE, /dsl run --file <dsl-file>/);
   assert.doesNotMatch(CLI_SOURCE, /agent attach <agentName>/);
@@ -60,4 +57,9 @@ test("CLI 会通过内部 web-host 模式拉起浏览器 UI", () => {
   assert.match(CLI_SOURCE, /internal web-host/);
   assert.match(CLI_SOURCE, /openBrowser/);
   assert.doesNotMatch(CLI_SOURCE, /spawnUi\(/);
+});
+
+test("task ui 与 task headless 都会把 command.cwd 传入工作区解析链路", () => {
+  assert.match(CLI_SOURCE, /resolveProject\(context, command\.cwd\)/);
+  assert.match(CLI_SOURCE, /resolveTaskProject\(context, command\.taskId, command\.cwd\)/);
 });
