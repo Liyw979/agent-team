@@ -21,6 +21,7 @@ import {
 } from "./cli-command";
 import { resolveCliDisposeOptions } from "./cli-dispose-policy";
 import { ensureRuntimeAssets, isCompiledRuntime } from "./runtime-assets";
+import { resolveCliTaskStreamingPlan } from "./task-streaming-policy";
 import { renderTaskSessionSummary } from "./task-session-summary";
 import {
   buildBrowserOpenSpec,
@@ -567,9 +568,17 @@ async function handleTaskHeadlessCommand(
   });
   printTaskRunDiagnostics(diagnostics, snapshot.task.id);
 
+  const streamingPlan = resolveCliTaskStreamingPlan({
+    commandKind: command.kind,
+    isResume: false,
+  });
+  if (!streamingPlan.enabled) {
+    return;
+  }
+
   await renderTaskMessages(context, snapshot.task.id, [], {
-    includeHistory: true,
-    printAttach: true,
+    includeHistory: streamingPlan.includeHistory,
+    printAttach: streamingPlan.printAttach,
   });
 }
 
@@ -579,6 +588,10 @@ async function handleTaskUiCommand(
 ) {
   validateTaskUiCommand(command);
   const diagnostics = buildTaskRunDiagnostics(context.userDataPath);
+  const streamingPlan = resolveCliTaskStreamingPlan({
+    commandKind: command.kind,
+    isResume: Boolean(command.taskId),
+  });
 
   if (command.taskId) {
     const workspace = await resolveTaskProject(context, command.taskId);
@@ -587,6 +600,12 @@ async function handleTaskUiCommand(
     printTaskRunDiagnostics(diagnostics, task.task.id);
     process.stdout.write(`[UI] ${url}\n`);
     await openBrowser(url);
+    if (streamingPlan.enabled) {
+      await renderTaskMessages(context, task.task.id, task.messages, {
+        includeHistory: streamingPlan.includeHistory,
+        printAttach: streamingPlan.printAttach,
+      });
+    }
     return;
   }
 
@@ -601,6 +620,12 @@ async function handleTaskUiCommand(
   printTaskRunDiagnostics(diagnostics, snapshot.task.id);
   process.stdout.write(`[UI] ${url}\n`);
   await openBrowser(url);
+  if (streamingPlan.enabled) {
+    await renderTaskMessages(context, snapshot.task.id, [], {
+      includeHistory: streamingPlan.includeHistory,
+      printAttach: streamingPlan.printAttach,
+    });
+  }
 }
 
 async function handleTaskAttachCommand(
