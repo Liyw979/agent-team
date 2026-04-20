@@ -17,7 +17,7 @@ test("buildAgentPromptDialogState 会为普通 agent 返回 prompt 详情", () =
   );
 });
 
-test("buildAgentPromptDialogState 会为 Build 返回内置 prompt 说明", () => {
+test("buildAgentPromptDialogState 会为 Build 返回 opencode 加载提示", () => {
   assert.deepEqual(
     buildAgentPromptDialogState({
       agentName: "Build",
@@ -25,8 +25,22 @@ test("buildAgentPromptDialogState 会为 Build 返回内置 prompt 说明", () =
     }),
     {
       agentName: "Build",
-      promptSourceLabel: "OpenCode 内置",
-      content: "当前 Agent 使用 OpenCode 内置 prompt，运行时不会在工作区拓扑里展开具体正文。",
+      promptSourceLabel: "OpenCode 加载",
+      content: "Prompt为空或者由opencode加载",
+    },
+  );
+});
+
+test("buildAgentPromptDialogState 会为普通 agent 的空 prompt 返回 opencode 加载提示", () => {
+  assert.deepEqual(
+    buildAgentPromptDialogState({
+      agentName: "CodeReview",
+      prompt: "",
+    }),
+    {
+      agentName: "CodeReview",
+      promptSourceLabel: "OpenCode 加载",
+      content: "Prompt为空或者由opencode加载",
     },
   );
 });

@@ -17,6 +17,7 @@ import {
 import { getAgentColorToken } from "./lib/agent-colors";
 import { calculateAgentCardListGap, calculateAgentCardPromptLineCount } from "./lib/agent-card-layout";
 import { buildAgentPanelAttachButtonState } from "./lib/agent-panel-attach-button";
+import { buildAgentPromptPreviewText } from "./lib/agent-prompt-preview";
 import {
   PANEL_HEADER_CLASS,
   PANEL_HEADER_LEADING_CLASS,
@@ -160,9 +161,14 @@ function App() {
     const taskAgents = new Map(task.agents.map((agent) => [agent.name, agent]));
     return orderAgentsForFrontend(workspace.agents, task.topology ?? workspace.topology).map((agent) => {
       const taskAgent = taskAgents.get(agent.name);
+      const promptPreview = buildAgentPromptPreviewText({
+        agentName: agent.name,
+        prompt: agent.prompt,
+      });
       return {
         name: agent.name,
         prompt: agent.prompt,
+        promptPreview,
         status: taskAgent?.status ?? "idle",
         hasAttachSession: Boolean(taskAgent?.opencodeSessionId),
       };
@@ -191,7 +197,7 @@ function App() {
         calculateAgentCardListGap({
           viewportHeight,
           cardCount: agentCards.length,
-          promptCardCount: agentCards.filter((agent) => agent.prompt.trim().length > 0).length,
+          promptCardCount: agentCards.filter((agent) => agent.promptPreview !== "-").length,
           promptLineCount: nextPromptLineCount,
           minGapPx: 6,
           reservedHeightPx: 58,
@@ -319,8 +325,7 @@ function App() {
                 <div className="flex flex-col" style={{ gap: `${agentCardGapPx}px` }}>
                   {agentCards.map((agent) => {
                     const color = getAgentColorToken(agent.name);
-                    const promptPreview = agent.prompt.trim();
-                    const promptPreviewLine = promptPreview.replace(/\s+/gu, "");
+                    const promptPreviewLine = agent.promptPreview.replace(/\s+/gu, "");
                     const attachButtonState = buildAgentPanelAttachButtonState({
                       agentName: agent.name,
                       hasSession: agent.hasAttachSession,
@@ -376,10 +381,10 @@ function App() {
                             </button>
                           </div>
                         </div>
-                        {promptPreview ? (
+                        {agent.promptPreview !== "-" ? (
                           <div className="mt-1 min-w-0">
                             <p
-                              title={promptPreview}
+                              title={agent.promptPreview}
                               className="min-w-0 overflow-hidden break-all text-[13px] leading-[18px]"
                               style={{
                                 color: color.mutedText,

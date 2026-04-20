@@ -27,8 +27,9 @@ test("App 保留聊天输入与 attach 按钮", () => {
 });
 
 test("团队成员卡片里的 prompt 只显示单行缩略，悬停时展示完整 prompt", () => {
-  assert.match(APP_SOURCE, /title=\{promptPreview\}/);
-  assert.match(APP_SOURCE, /promptPreview\.replace\(\/\\s\+\/gu, ""\)/);
+  assert.match(APP_SOURCE, /buildAgentPromptPreviewText/);
+  assert.match(APP_SOURCE, /title=\{agent\.promptPreview\}/);
+  assert.match(APP_SOURCE, /agent\.promptPreview\.replace\(\/\\s\+\/gu, ""\)/);
   assert.match(APP_SOURCE, /calculateAgentCardPromptLineCount/);
   assert.match(APP_SOURCE, /WebkitLineClamp: promptLineCount/);
   assert.match(APP_SOURCE, /color: color\.mutedText/);
