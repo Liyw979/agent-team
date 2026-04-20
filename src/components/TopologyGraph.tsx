@@ -4,6 +4,10 @@ import { buildAgentHistoryItems, type AgentHistoryItem } from "@/lib/agent-histo
 import { AgentHistoryMarkdown } from "@/lib/agent-history-markdown";
 import { getTopologyHistoryItemButtonClassName } from "@/lib/topology-history-layout";
 import {
+  shouldAutoScrollTopologyHistory,
+  shouldStickTopologyHistoryToBottom,
+} from "@/lib/topology-history-scroll";
+import {
   PANEL_HEADER_CLASS,
   PANEL_HEADER_LEADING_CLASS,
   PANEL_HEADER_TITLE_CLASS,
@@ -172,6 +176,9 @@ export function TopologyGraph({
   runtimeSnapshots = {},
 }: TopologyGraphProps) {
   const canvasViewportRef = useRef<HTMLDivElement | null>(null);
+  const historyViewportRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const historyShouldStickToBottomRef = useRef<Record<string, boolean>>({});
+  const historyLastItemIdRef = useRef<Record<string, string | null>>({});
   const [canvasViewport, setCanvasViewport] = useState<{ width: number; height: number } | null>(null);
   const [selectedHistoryItem, setSelectedHistoryItem] = useState<SelectedHistoryItemState | null>(null);
   const topology = task?.topology ?? workspace?.topology;
@@ -271,6 +278,73 @@ export function TopologyGraph({
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [selectedHistoryItem]);
+
+  useEffect(() => {
+    if (!topology) {
+      historyViewportRefs.current = {};
+      historyShouldStickToBottomRef.current = {};
+      historyLastItemIdRef.current = {};
+      return;
+    }
+
+    const activeNodeIds = new Set(topology.nodes);
+    for (const nodeId of Object.keys(historyViewportRefs.current)) {
+      if (!activeNodeIds.has(nodeId)) {
+        delete historyViewportRefs.current[nodeId];
+      }
+    }
+    for (const nodeId of Object.keys(historyShouldStickToBottomRef.current)) {
+      if (!activeNodeIds.has(nodeId)) {
+        delete historyShouldStickToBottomRef.current[nodeId];
+      }
+    }
+    for (const nodeId of Object.keys(historyLastItemIdRef.current)) {
+      if (!activeNodeIds.has(nodeId)) {
+        delete historyLastItemIdRef.current[nodeId];
+      }
+    }
+  }, [topology]);
+
+  useEffect(() => {
+    if (!topology) {
+      return;
+    }
+
+    const frameIds: number[] = [];
+
+    for (const nodeId of topology.nodes) {
+      const historyItems = historyByAgent.get(nodeId) ?? [];
+      const nextLastItemId = historyItems.at(-1)?.id ?? null;
+      const previousLastItemId = historyLastItemIdRef.current[nodeId] ?? null;
+      const shouldStickToBottom = historyShouldStickToBottomRef.current[nodeId] ?? true;
+
+      if (
+        shouldAutoScrollTopologyHistory({
+          previousLastItemId,
+          nextLastItemId,
+          shouldStickToBottom,
+        })
+      ) {
+        frameIds.push(
+          requestAnimationFrame(() => {
+            const viewport = historyViewportRefs.current[nodeId];
+            if (!viewport) {
+              return;
+            }
+            viewport.scrollTop = viewport.scrollHeight;
+          }),
+        );
+      }
+
+      historyLastItemIdRef.current[nodeId] = nextLastItemId;
+    }
+
+    return () => {
+      for (const frameId of frameIds) {
+        cancelAnimationFrame(frameId);
+      }
+    };
+  }, [historyByAgent, topology]);
 
   if (!workspace || !task || !topology || !canvasLayout) {
     return (
@@ -401,7 +475,20 @@ export function TopologyGraph({
 
                   <div className="min-h-0 flex-1 px-2 py-2">
                     {historyItems.length > 0 ? (
-                      <div className="h-full space-y-1 overflow-y-auto">
+                      <div
+                        ref={(element) => {
+                          historyViewportRefs.current[node.id] = element;
+                        }}
+                        onScroll={(event) => {
+                          historyShouldStickToBottomRef.current[node.id] =
+                            shouldStickTopologyHistoryToBottom({
+                              scrollHeight: event.currentTarget.scrollHeight,
+                              clientHeight: event.currentTarget.clientHeight,
+                              scrollTop: event.currentTarget.scrollTop,
+                            });
+                        }}
+                        className="h-full space-y-1 overflow-y-auto"
+                      >
                         {historyItems.map((item) => (
                           <article
                             key={item.id}

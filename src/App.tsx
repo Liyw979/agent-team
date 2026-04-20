@@ -16,6 +16,7 @@ import {
 } from "./lib/web-api";
 import { getAgentColorToken } from "./lib/agent-colors";
 import { calculateAgentCardListGap, calculateAgentCardPromptLineCount } from "./lib/agent-card-layout";
+import { buildAgentPanelAttachButtonState } from "./lib/agent-panel-attach-button";
 import {
   PANEL_HEADER_CLASS,
   PANEL_HEADER_LEADING_CLASS,
@@ -164,6 +165,7 @@ function App() {
         name: agent.name,
         prompt: agent.prompt,
         status: taskAgent?.status ?? "idle",
+        hasAttachSession: Boolean(taskAgent?.opencodeSessionId),
         messageCount: taskMessages.filter((message) => message.sender === agent.name).length,
       };
     });
@@ -321,6 +323,11 @@ function App() {
                     const color = getAgentColorToken(agent.name);
                     const promptPreview = agent.prompt.trim();
                     const promptPreviewLine = promptPreview.replace(/\s+/gu, "");
+                    const attachButtonState = buildAgentPanelAttachButtonState({
+                      agentName: agent.name,
+                      hasSession: agent.hasAttachSession,
+                      isOpening: openingAgentTerminalId === agent.name,
+                    });
                     return (
                       <div
                         key={agent.name}
@@ -343,15 +350,33 @@ function App() {
                         }}
                       >
                         <div className="flex items-center justify-between gap-3">
-                          <span
-                            className="inline-flex max-w-full shrink-0 rounded-[8px] px-2 py-px text-center text-[14px] font-semibold leading-[1.2] tracking-[0.02em]"
-                            style={{
-                              background: color.solid,
-                              color: color.badgeText,
-                            }}
-                          >
-                            {agent.name}
-                          </span>
+                          <div className="min-w-0 flex items-center gap-2">
+                            <span
+                              className="inline-flex max-w-full shrink-0 rounded-[8px] px-2 py-px text-center text-[14px] font-semibold leading-[1.2] tracking-[0.02em]"
+                              style={{
+                                background: color.solid,
+                                color: color.badgeText,
+                              }}
+                            >
+                              {agent.name}
+                            </span>
+                            <button
+                              type="button"
+                              aria-label={`打开 ${agent.name} 的 attach 终端`}
+                              title={attachButtonState.title}
+                              disabled={attachButtonState.disabled}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                if (attachButtonState.disabled) {
+                                  return;
+                                }
+                                void handleOpenAgentTerminal(agent.name);
+                              }}
+                              className={attachButtonState.className}
+                            >
+                              {attachButtonState.label}
+                            </button>
+                          </div>
                           <span className="rounded-full border border-[#d8cdbd] bg-[#fffaf2] px-2.5 py-0.5 text-[0.78rem] font-semibold text-foreground/76">{agent.messageCount}</span>
                         </div>
                         {promptPreview ? (
@@ -374,16 +399,6 @@ function App() {
                             -
                           </div>
                         )}
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void handleOpenAgentTerminal(agent.name);
-                          }}
-                          className="sr-only"
-                        >
-                          {openingAgentTerminalId === agent.name ? "打开中..." : "attach"}
-                        </button>
                       </div>
                     );
                   })}
