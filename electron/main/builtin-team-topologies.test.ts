@@ -40,6 +40,10 @@ test("开发团队拓扑包含 CodeReview 审查回路", () => {
     developmentTeamTopology.topology.downstream.CodeReview?.Build,
     "needs_revision",
   );
+  assert.deepEqual(developmentTeamTopology.topology.langgraph, {
+    start: "BA",
+    end: null,
+  });
 });
 
 test("开发团队拓扑文件内直接提供 BA / CodeReview / UnitTest / TaskReview 的 prompt", () => {
@@ -67,4 +71,31 @@ test("JSON 团队拓扑可以直接编译为运行时 DSL", () => {
 
   assert.equal(compiled.agents.some((agent) => agent.name === "Build"), true);
   assert.equal(compiled.topology.edges.length > 0, true);
+  assert.deepEqual(compiled.topology.langgraph, {
+    start: {
+      id: "__start__",
+      targets: ["BA"],
+    },
+    end: null,
+  });
+});
+
+test("漏洞挖掘团队默认使用正反双方多轮对弈，而不是固定四个辩手串行两轮", () => {
+  const vulnerabilityTeamTopology = readBuiltinTopology("vulnerability-team.topology.json");
+  const compiled = compileTeamDsl(vulnerabilityTeamTopology);
+  const spawnRule = compiled.topology.spawnRules?.[0];
+
+  assert.notEqual(spawnRule, undefined);
+  assert.equal(spawnRule?.entryRole, "pro");
+  assert.deepEqual(spawnRule?.spawnedAgents, [
+    { role: "pro", templateName: "正方" },
+    { role: "con", templateName: "反方" },
+    { role: "summary", templateName: "裁决总结" },
+  ]);
+  assert.deepEqual(spawnRule?.edges, [
+    { sourceRole: "pro", targetRole: "con", triggerOn: "needs_revision" },
+    { sourceRole: "con", targetRole: "pro", triggerOn: "needs_revision" },
+    { sourceRole: "pro", targetRole: "summary", triggerOn: "approved" },
+    { sourceRole: "con", targetRole: "summary", triggerOn: "approved" },
+  ]);
 });
