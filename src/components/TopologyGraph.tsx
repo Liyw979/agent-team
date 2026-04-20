@@ -361,7 +361,7 @@ export function TopologyGraph({
                                 <span className="text-[11px] opacity-70">{formatHistoryTimestamp(item.timestamp)}</span>
                               </div>
                               <AgentHistoryMarkdown
-                                content={item.detail}
+                                content={item.previewDetail}
                                 className="mt-1 text-[11px] leading-[1.35] opacity-90 select-text"
                               />
                             </div>

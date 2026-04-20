@@ -9,6 +9,7 @@ import { stripReviewResponseMarkup } from "@shared/review-response";
 export interface AgentHistoryItem {
   id: string;
   label: string;
+  previewDetail: string;
   detail: string;
   timestamp: string;
   sortTimestamp: string;
@@ -21,10 +22,16 @@ export interface AgentHistoryItem {
     | "runtime-message";
 }
 
-function normalizeHistoryText(content: string | null | undefined) {
+function normalizeHistoryDetail(content: string | null | undefined) {
   const normalized = stripReviewResponseMarkup(content ?? "")
     .replace(/\r\n?/gu, "\n")
     .replace(/[ \t]+\n/gu, "\n")
+    .trim();
+  return normalized || "暂无详细记录";
+}
+
+function buildHistoryPreviewDetail(detail: string) {
+  const normalized = detail
     .replace(/\n\s*\n+/gu, "\n")
     .trim();
   return normalized || "暂无详细记录";
@@ -32,7 +39,7 @@ function normalizeHistoryText(content: string | null | undefined) {
 
 function normalizeToolHistory(toolName: string, detail: string) {
   const normalizedDetail = detail.replace(/^参数:\s*/u, "").trim();
-  return normalizeHistoryText(
+  return normalizeHistoryDetail(
     normalizedDetail ? `${toolName.trim()} · 参数: ${normalizedDetail}` : toolName.trim(),
   );
 }
@@ -92,11 +99,13 @@ function buildFinalHistoryItems(input: {
         reviewAgent,
         status,
       });
+      const detail = normalizeHistoryDetail(message.meta?.finalMessage ?? message.content);
 
       return {
         id: message.id,
         label: presentation.label,
-        detail: normalizeHistoryText(message.meta?.finalMessage ?? message.content),
+        previewDetail: buildHistoryPreviewDetail(detail),
+        detail,
         timestamp: message.timestamp,
         sortTimestamp: message.timestamp,
         tone: presentation.tone,
@@ -122,10 +131,11 @@ function buildRuntimeHistoryItems(input: {
     const detail =
       activity.kind === "tool"
         ? normalizeToolHistory(activity.label, activity.detail)
-        : normalizeHistoryText(activity.detail || activity.label);
+        : normalizeHistoryDetail(activity.detail || activity.label);
     const runtimeItem = {
       id: `${input.agentId}-runtime-${activity.id}-${index}`,
       label: presentation.label,
+      previewDetail: buildHistoryPreviewDetail(detail),
       detail,
       timestamp: activity.timestamp,
       sortTimestamp: activity.timestamp,

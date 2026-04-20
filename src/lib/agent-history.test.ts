@@ -107,12 +107,14 @@ test("buildAgentHistoryItems 会把审查标签去掉并标记为审视不通过
       runtimeSnapshot: undefined,
     }).map((item) => ({
       label: item.label,
+      previewDetail: item.previewDetail,
       detail: item.detail,
     })),
     [
       {
         label: "审视不通过",
-        detail: "缺少测试。\n请补充测试",
+        previewDetail: "缺少测试。\n请补充测试",
+        detail: "缺少测试。\n\n请补充测试",
       },
     ],
   );
@@ -139,9 +141,15 @@ test("buildAgentHistoryItems 会移除历史消息中的多余空行，避免卡
       messages,
       topology,
       runtimeSnapshot: undefined,
-    }).map((item) => item.detail),
+    }).map((item) => ({
+      previewDetail: item.previewDetail,
+      detail: item.detail,
+    })),
     [
-      "实际验证结果已经有了，且可以复核：\n```text\nprint('ok')\n```",
+      {
+        previewDetail: "实际验证结果已经有了，且可以复核：\n```text\nprint('ok')\n```",
+        detail: "实际验证结果已经有了，且可以复核：\n\n```text\nprint('ok')\n```",
+      },
     ],
   );
 });
