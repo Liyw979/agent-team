@@ -275,6 +275,10 @@ function App() {
             task={task}
             selectedAgentId={selectedAgentId}
             onSelectAgent={setSelectedAgentId}
+            openingAgentTerminalId={openingAgentTerminalId}
+            onOpenAgentTerminal={(agentName) => {
+              void handleOpenAgentTerminal(agentName);
+            }}
             runtimeSnapshots={runtimeSnapshots}
           />
 

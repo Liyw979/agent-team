@@ -12,6 +12,7 @@ import {
 } from "@/lib/panel-header";
 import {
   getTopologyAgentStatusBadgePresentation,
+  getTopologyNodeHeaderActionOrder,
   type TopologyAgentStatusBadgePresentation,
 } from "@/components/topology-graph-helpers";
 import { buildTopologyCanvasLayout } from "@/lib/topology-canvas";
@@ -26,6 +27,8 @@ interface TopologyGraphProps {
   task: TaskSnapshot | undefined;
   selectedAgentId: string | null;
   onSelectAgent: (agentId: string) => void;
+  openingAgentTerminalId?: string | null;
+  onOpenAgentTerminal?: (agentId: string) => void;
   runtimeSnapshots?: Record<string, AgentRuntimeSnapshot>;
 }
 
@@ -140,11 +143,32 @@ function renderStatusBadgeIcon(presentation: TopologyAgentStatusBadgePresentatio
   );
 }
 
+function renderAttachButtonIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="2.25" y="3" width="11.5" height="10" rx="2" />
+      <path d="m5.2 7.1 2 1.9-2 2" />
+      <path d="M8.9 11h2.1" />
+    </svg>
+  );
+}
+
 export function TopologyGraph({
   workspace,
   task,
   selectedAgentId,
   onSelectAgent,
+  openingAgentTerminalId = null,
+  onOpenAgentTerminal,
   runtimeSnapshots = {},
 }: TopologyGraphProps) {
   const canvasViewportRef = useRef<HTMLDivElement | null>(null);
@@ -294,6 +318,15 @@ export function TopologyGraph({
                 node.id,
                 taskAgent?.status ?? "idle",
               );
+              const showAttachButton = typeof onOpenAgentTerminal === "function";
+              const headerActions = getTopologyNodeHeaderActionOrder({
+                showAttachButton,
+              });
+              const isAttachOpening = openingAgentTerminalId === node.id;
+              const attachDisabled = !taskAgent?.opencodeSessionId || isAttachOpening;
+              const attachTitle = taskAgent?.opencodeSessionId
+                ? (isAttachOpening ? `正在打开 ${node.id} 的 attach 终端` : `attach 到 ${node.id}`)
+                : `${node.id} 当前还没有可 attach 的 OpenCode session。`;
               return (
                 <div
                   key={node.id}
@@ -326,13 +359,43 @@ export function TopologyGraph({
                   >
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-base font-semibold text-foreground">{node.id}</p>
-                      <span
-                        aria-label={statusBadge.label}
-                        title={statusBadge.label}
-                        className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold shadow-[0_1px_0_rgba(255,255,255,0.45)] ${statusBadge.className} ${statusBadge.effectClassName}`}
-                      >
-                        {renderStatusBadgeIcon(statusBadge)}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        {headerActions.map((action) => {
+                          if (action === "attach") {
+                            return (
+                              <button
+                                key={action}
+                                type="button"
+                                aria-label={`打开 ${node.id} 的 attach 终端`}
+                                title={attachTitle}
+                                disabled={attachDisabled}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  if (attachDisabled || !onOpenAgentTerminal) {
+                                    return;
+                                  }
+                                  onOpenAgentTerminal(node.id);
+                                }}
+                                className="inline-flex h-7 items-center justify-center gap-1 rounded-full border border-[#d8cdbd] bg-[#fffaf2] px-2.5 text-[11px] font-semibold text-foreground/76 shadow-[0_1px_0_rgba(255,255,255,0.45)] transition hover:border-[#cda27d] hover:bg-white disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:border-[#d8cdbd] disabled:hover:bg-[#fffaf2]"
+                              >
+                                {renderAttachButtonIcon()}
+                                <span>{isAttachOpening ? "打开中" : "attach"}</span>
+                              </button>
+                            );
+                          }
+
+                          return (
+                            <span
+                              key={action}
+                              aria-label={statusBadge.label}
+                              title={statusBadge.label}
+                              className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold shadow-[0_1px_0_rgba(255,255,255,0.45)] ${statusBadge.className} ${statusBadge.effectClassName}`}
+                            >
+                              {renderStatusBadgeIcon(statusBadge)}
+                            </span>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
 

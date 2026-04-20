@@ -7,6 +7,14 @@ export interface TopologyAgentStatusBadgePresentation {
   effectClassName: string;
 }
 
+export type TopologyNodeHeaderAction = "attach" | "status";
+
+export function getTopologyNodeHeaderActionOrder(input: {
+  showAttachButton: boolean;
+}): TopologyNodeHeaderAction[] {
+  return input.showAttachButton ? ["attach", "status"] : ["status"];
+}
+
 export function getTopologyAgentStatusBadgePresentation(
   topology: Pick<TopologyRecord, "edges">,
   agentName: string,

@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { getTopologyAgentStatusBadgePresentation } from "./topology-graph-helpers";
+import {
+  getTopologyAgentStatusBadgePresentation,
+  getTopologyNodeHeaderActionOrder,
+} from "./topology-graph-helpers";
 
 test("getTopologyAgentStatusBadgePresentation 会把普通 agent 状态映射为 Electron 同款图标与文案", () => {
   const topology = {
@@ -59,5 +62,21 @@ test("getTopologyAgentStatusBadgePresentation 会把审查 agent 映射为审查
       className: "border border-[#d66b63]/45 bg-[#fff1ef] text-[#a33f38]",
       effectClassName: "",
     },
+  );
+});
+
+test("getTopologyNodeHeaderActionOrder 会把 attach 固定排在状态 icon 左边", () => {
+  assert.deepEqual(
+    getTopologyNodeHeaderActionOrder({
+      showAttachButton: true,
+    }),
+    ["attach", "status"],
+  );
+
+  assert.deepEqual(
+    getTopologyNodeHeaderActionOrder({
+      showAttachButton: false,
+    }),
+    ["status"],
   );
 });
