@@ -9,6 +9,7 @@ import {
   getMentionOptionItems,
   type MentionContext,
 } from "@/lib/chat-mentions";
+import { MarkdownMessage } from "@/lib/chat-markdown";
 import { PANEL_HEADER_ACTION_BUTTON_CLASS } from "@/lib/panel-header-action-button";
 import { formatChatTranscript, getChatSenderLabel } from "@/lib/chat-transcript";
 
@@ -152,7 +153,7 @@ function MessageBubble({
   return (
     <article
       className={cn(
-        "max-w-[88%] rounded-[8px] px-3 py-2 whitespace-pre-wrap",
+        "max-w-[88%] rounded-[8px] px-3 py-2",
         isUser && "ml-auto bg-primary text-primary-foreground",
         isAgent && "border",
         hasAgentDispatch && !isAgent && "border border-accent/60 bg-accent/35 text-foreground",
@@ -182,7 +183,13 @@ function MessageBubble({
             {new Date(message.timestamp).toLocaleString()}
           </span>
         </div>
-        <div className="min-w-0 text-sm leading-[1.36] break-words">{message.content}</div>
+        {isAgent ? (
+          <MarkdownMessage content={message.content} />
+        ) : (
+          <div className="min-w-0 whitespace-pre-wrap text-sm leading-[1.36] break-words">
+            {message.content}
+          </div>
+        )}
       </div>
     </article>
   );

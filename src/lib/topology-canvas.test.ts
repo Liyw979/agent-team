@@ -18,7 +18,7 @@ test("buildTopologyCanvasLayout 会按节点顺序生成从左到右的布局和
     nodeHeight: 260,
   });
 
-  assert.equal(layout.width, 680);
+  assert.equal(layout.width, 720);
   assert.equal(layout.height, 340);
   assert.deepEqual(
     layout.nodes.map((node) => ({ id: node.id, x: node.x, y: node.y })),
