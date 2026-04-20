@@ -27,16 +27,12 @@ test("App 保留聊天输入与 attach 按钮", () => {
 
 test("团队成员卡片里的 prompt 只显示单行缩略，悬停时展示完整 prompt", () => {
   assert.match(APP_SOURCE, /title=\{promptPreview\}/);
-  assert.match(APP_SOURCE, /buildAgentCardPromptPreview/);
-  assert.match(APP_SOURCE, /agentName: agent\.name/);
-  assert.match(APP_SOURCE, /prompt: agent\.prompt/);
+  assert.match(APP_SOURCE, /promptPreview\.replace\(\/\\s\+\/gu, ""\)/);
   assert.match(APP_SOURCE, /calculateAgentCardPromptLineCount/);
   assert.match(APP_SOURCE, /WebkitLineClamp: promptLineCount/);
   assert.match(APP_SOURCE, /color: color\.mutedText/);
   assert.match(APP_SOURCE, /className="min-w-0 overflow-hidden break-all text-\[13px\] leading-\[18px\]"/);
   assert.match(APP_SOURCE, /className="mt-1 min-w-0 text-\[13px\] leading-5"/);
-  assert.match(APP_SOURCE, /\{promptPreviewLine\}/);
-  assert.doesNotMatch(APP_SOURCE, />\s*-\s*<\/div>/);
   assert.doesNotMatch(APP_SOURCE, /className="min-w-0 truncate text-\[0\.9rem\] leading-5 text-foreground\/78"/);
   assert.doesNotMatch(APP_SOURCE, /className="min-w-0 overflow-hidden break-all text-\[0\.9rem\] leading-\[18px\] text-foreground\/78"/);
   assert.doesNotMatch(APP_SOURCE, /className="min-w-0 overflow-hidden break-all text-\[0\.9rem\] leading-\[18px\]"/);

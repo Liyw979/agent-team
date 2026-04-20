@@ -125,17 +125,17 @@
 - `task ui --file <topology.json> --message <message>` 会新建当前 Task，后台启动本地 Web Host，并在浏览器中打开当前 Task 页面。
 - `task ui <taskId>` 会恢复已有 Task，并在浏览器中打开当前 Task 页面。
 - `task attach <agentName>` 会 attach 到当前工作区最近一个 Task 的目标 Agent OpenCode session；所有用户可见 attach 文案都统一显示这条高层命令，不展示底层 `opencode attach ...`。
-- `npm run cli -- ...` 需要在仓库根目录执行；若从其他目录排查目标工作区，`task headless` / `task attach` 请显式传入 `--cwd`。
+- `bun run cli -- ...` 需要在仓库根目录执行；若从其他目录排查目标工作区，`task headless` / `task attach` 请显式传入 `--cwd`。
 
 常用命令示例：
 
 ```bash
-npm run cli -- help
+bun run cli -- help
 
-npm run cli -- task headless --file config/team-topologies/development-team.topology.json --message "请开始一轮开发团队协作。"
-npm run cli -- task ui --file config/team-topologies/development-team.topology.json --message "请开始一轮开发团队协作。"
-npm run cli -- task ui <taskId>
-npm run cli -- task attach <agentName>
+bun run cli -- task headless --file config/team-topologies/development-team.topology.json --message "请开始一轮开发团队协作。"
+bun run cli -- task ui --file config/team-topologies/development-team.topology.json --message "请开始一轮开发团队协作。"
+bun run cli -- task ui <taskId>
+bun run cli -- task attach <agentName>
 ```
 
 CLI 能力分组：
@@ -195,27 +195,27 @@ agent-team/
 开发环境：
 
 ```bash
-npm install
-npm run cli -- help
+bun install
+bun run cli -- help
 ```
 
 常用构建命令：
 
 ```bash
-npm run build
-npm run dist:win
+bun run build
+bun run dist:win
 ```
 
 交付前检查：
 
-- 每次交付前必须在仓库根目录运行 `npm test`，并以测试通过作为交付前置条件。
+- 每次交付前必须在仓库根目录运行 `bun test`，并以测试通过作为交付前置条件。
 
 打包注意事项：
 
-- 推荐直接使用 `npm run dist:win`；该命令会先执行 `npm run build` 生成最新 `dist/web/`，再生成单文件 `dist/agent-team.exe`。
+- 推荐直接使用 `bun run dist:win`；该命令会先执行 `bun run build` 生成最新 `dist/web/`，再生成单文件 `dist/agent-team.exe`。
 - Windows 主程序位于 `dist/agent-team.exe`。
 - 打包后的网页静态资源会内嵌在 `agent-team.exe` 中，并在运行时自动释放到本地 runtime 目录。
-- 如果只想单独刷新网页产物，可以执行 `npm run build`。
+- 如果只想单独刷新网页产物，可以执行 `bun run build`。
 
 ## 7. 文档同步要求
 

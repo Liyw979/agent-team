@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Project / Task oriented OpenCode Code Agent orchestration tool",
+  "packageManager": "bun@1.3.11",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +13,7 @@
     "test": "tsx --test",
     "preview": "vite preview",
     "cli": "node cli/launcher.cjs",
-    "dist:win": "npm run build && npm run build:embedded-assets && bun build --compile --target bun-windows-x64 ./cli/index.ts --outfile ./dist/agent-team.exe",
+    "dist:win": "bun run build && bun run build:embedded-assets && bun build --compile --target bun-windows-x64 ./cli/index.ts --outfile ./dist/agent-team.exe",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

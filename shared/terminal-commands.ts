@@ -4,7 +4,7 @@ export function quotePortableShellArg(value: string): string {
 
 export function buildCliAttachAgentCommand(agentName: string, cwd?: string): string {
   const cwdSegment = cwd ? ` --cwd ${quotePortableShellArg(cwd)}` : "";
-  return `npm run cli -- task attach ${quotePortableShellArg(agentName)}${cwdSegment}`;
+  return `bun run cli -- task attach ${quotePortableShellArg(agentName)}${cwdSegment}`;
 }
 
 export function buildCliOpencodeAttachCommand(

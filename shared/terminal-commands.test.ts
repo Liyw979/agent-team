@@ -9,14 +9,14 @@ import {
 test("CLI 打开的 attach 命令统一走顶层 attach 子命令", () => {
   assert.equal(
     buildCliAttachAgentCommand("Code Review"),
-    'npm run cli -- task attach "Code Review"',
+    'bun run cli -- task attach "Code Review"',
   );
 });
 
 test("CLI 在跨工作区场景下构造 task attach 命令时会带上 --cwd", () => {
   assert.equal(
     buildCliAttachAgentCommand("Code Review", "/tmp/project"),
-    'npm run cli -- task attach "Code Review" --cwd "/tmp/project"',
+    'bun run cli -- task attach "Code Review" --cwd "/tmp/project"',
   );
 });
 

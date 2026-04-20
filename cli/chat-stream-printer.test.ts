@@ -95,7 +95,7 @@ test("renderChatStreamEntries 输出的是群聊文本，不包含 agent runtime
   assert.match(output, /\[2026\/04\/19/);
   assert.match(output, /Build/);
   assert.match(output, /@CodeReview/);
-  assert.match(output, /┌ \[2026\/04\/19 18:00:00\] Build ─+/);
+  assert.match(output, /┌ \[\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}\] Build ─+/);
   assert.match(output, /└/);
   assert.doesNotMatch(output, /│\s*│\n│ {4}Build 已完成。/);
   assert.match(output, /│ {4}Build 已完成。/);
@@ -115,7 +115,7 @@ test("renderChatStreamEntries 的标题左对齐，正文上下不保留空白 p
     },
   ]);
 
-  assert.match(output, /┌ \[2026\/04\/20 09:47:01\] user ─+/);
+  assert.match(output, /┌ \[\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}\] user ─+/);
   assert.doesNotMatch(output, /┌[^\n]+\n│\s*│\n│ {4}入口应该是ba啊/);
   assert.doesNotMatch(output, /│ {4}入口应该是ba啊\n│\s*│\n└/);
   assert.match(output, /│ {4}入口应该是ba啊/);

@@ -20,14 +20,6 @@ export function buildAgentPromptDialogState(input: {
     };
   }
 
-  if (typeof input.prompt === "string") {
-    return {
-      agentName: input.agentName,
-      promptSourceLabel: "由 OpenCode 读取",
-      content: "当前拓扑配置里的 prompt 为空字符串，运行时会改为由 OpenCode 读取该 Agent 的提示词。",
-    };
-  }
-
   if (usesOpenCodeBuiltinPrompt(input.agentName)) {
     return {
       agentName: input.agentName,

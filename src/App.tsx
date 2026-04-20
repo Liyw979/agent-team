@@ -16,7 +16,6 @@ import {
 } from "./lib/web-api";
 import { getAgentColorToken } from "./lib/agent-colors";
 import { calculateAgentCardListGap, calculateAgentCardPromptLineCount } from "./lib/agent-card-layout";
-import { buildAgentCardPromptPreview } from "./lib/agent-card-prompt-preview";
 import {
   PANEL_HEADER_CLASS,
   PANEL_HEADER_LEADING_CLASS,
@@ -317,10 +316,7 @@ function App() {
                   {agentCards.map((agent) => {
                     const color = getAgentColorToken(agent.name);
                     const promptPreview = agent.prompt.trim();
-                    const promptPreviewLine = buildAgentCardPromptPreview({
-                      agentName: agent.name,
-                      prompt: agent.prompt,
-                    });
+                    const promptPreviewLine = promptPreview.replace(/\s+/gu, "");
                     return (
                       <div
                         key={agent.name}
@@ -371,7 +367,7 @@ function App() {
                           </div>
                         ) : (
                           <div className="mt-1 min-w-0 text-[13px] leading-5" style={{ color: color.mutedText }}>
-                            {promptPreviewLine}
+                            -
                           </div>
                         )}
                         <button
