@@ -1,24 +1,12 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, ipcMain } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { IPC_CHANNELS } from "@shared/ipc";
 import type {
-  CopyToClipboardPayload,
-  CreateProjectPayload,
-  DeleteProjectPayload,
-  DeleteAgentPayload,
-  DeleteTaskPayload,
   GetTaskRuntimePayload,
-  OpenLangGraphStudioPayload,
   OpenAgentTerminalPayload,
-  OpenTaskSessionPayload,
-  ReadAgentFilePayload,
-  ReadBuiltinAgentTemplatePayload,
-  ResetBuiltinAgentTemplatePayload,
-  SaveAgentPromptPayload,
-  SaveBuiltinAgentTemplatePayload,
   SubmitTaskPayload,
-  UpdateTopologyPayload,
+  UiBootstrapPayload,
 } from "@shared/types";
 import { Orchestrator } from "./orchestrator";
 import { initAppFileLogger } from "./app-log";
@@ -106,6 +94,33 @@ let mainWindow: BrowserWindow | null = null;
 const orchestrator = new Orchestrator({
   userDataPath,
 });
+let shuttingDown = false;
+
+function readLaunchArgument(flag: string): string | null {
+  const index = process.argv.findIndex((value) => value === flag);
+  if (index < 0) {
+    return null;
+  }
+  const next = process.argv[index + 1];
+  return typeof next === "string" && next.trim().length > 0 ? next : null;
+}
+
+async function buildUiBootstrapPayload(): Promise<UiBootstrapPayload> {
+  const launchCwd = readLaunchArgument("--agentflow-cwd");
+  const launchTaskId = readLaunchArgument("--agentflow-task-id");
+  const workspace = await orchestrator.getWorkspaceSnapshot(path.resolve(launchCwd || process.cwd()));
+  const task =
+    launchTaskId
+      ? workspace.tasks.find((item) => item.task.id === launchTaskId) ?? null
+      : workspace.tasks[0] ?? null;
+
+  return {
+    workspace,
+    task,
+    launchTaskId,
+    launchCwd: workspace.cwd,
+  };
+}
 
 async function createWindow() {
   mainWindow = new BrowserWindow({
@@ -154,80 +169,14 @@ async function createWindow() {
 app.whenReady().then(async () => {
   await orchestrator.initialize();
 
-  ipcMain.handle(IPC_CHANNELS.bootstrap, () => orchestrator.bootstrap());
-  ipcMain.handle(
-    IPC_CHANNELS.createProject,
-    (_event, payload: CreateProjectPayload) => orchestrator.createProject(payload),
-  );
-  ipcMain.handle(IPC_CHANNELS.pickProjectPath, async () => {
-    const result = await dialog.showOpenDialog(mainWindow ?? undefined, {
-      properties: ["openDirectory", "createDirectory"],
-    });
-
-    if (result.canceled) {
-      return null;
-    }
-
-    return result.filePaths[0] ?? null;
-  });
+  ipcMain.handle(IPC_CHANNELS.bootstrap, () => buildUiBootstrapPayload());
   ipcMain.handle(
     IPC_CHANNELS.submitTask,
     (_event, payload: SubmitTaskPayload) => orchestrator.submitTask(payload),
   );
-  ipcMain.handle(IPC_CHANNELS.copyToClipboard, (_event, payload: CopyToClipboardPayload) => {
-    clipboard.writeText(payload.text);
-  });
-  ipcMain.handle(
-    IPC_CHANNELS.deleteProject,
-    (_event, payload: DeleteProjectPayload) => orchestrator.deleteProject(payload),
-  );
-  ipcMain.handle(
-    IPC_CHANNELS.deleteTask,
-    (_event, payload: DeleteTaskPayload) => orchestrator.deleteTask(payload),
-  );
   ipcMain.handle(
     IPC_CHANNELS.openAgentTerminal,
     (_event, payload: OpenAgentTerminalPayload) => orchestrator.openAgentTerminal(payload),
-  );
-  ipcMain.handle(
-    IPC_CHANNELS.openTaskSession,
-    (_event, payload: OpenTaskSessionPayload) => orchestrator.openTaskSession(payload),
-  );
-  ipcMain.handle(
-    IPC_CHANNELS.openLangGraphStudio,
-    async (_event, payload: OpenLangGraphStudioPayload) => {
-      const url = await orchestrator.openLangGraphStudio(payload);
-      await shell.openExternal(url);
-      return url;
-    },
-  );
-  ipcMain.handle(
-    IPC_CHANNELS.readAgentFile,
-    (_event, payload: ReadAgentFilePayload) => orchestrator.readAgentFile(payload),
-  );
-  ipcMain.handle(
-    IPC_CHANNELS.readBuiltinAgentTemplate,
-    (_event, payload: ReadBuiltinAgentTemplatePayload) => orchestrator.readBuiltinAgentTemplate(payload),
-  );
-  ipcMain.handle(
-    IPC_CHANNELS.saveAgentPrompt,
-    (_event, payload: SaveAgentPromptPayload) => orchestrator.saveAgentPrompt(payload),
-  );
-  ipcMain.handle(
-    IPC_CHANNELS.saveBuiltinAgentTemplate,
-    (_event, payload: SaveBuiltinAgentTemplatePayload) => orchestrator.saveBuiltinAgentTemplate(payload),
-  );
-  ipcMain.handle(
-    IPC_CHANNELS.resetBuiltinAgentTemplate,
-    (_event, payload: ResetBuiltinAgentTemplatePayload) => orchestrator.resetBuiltinAgentTemplate(payload),
-  );
-  ipcMain.handle(
-    IPC_CHANNELS.deleteAgent,
-    (_event, payload: DeleteAgentPayload) => orchestrator.deleteAgent(payload),
-  );
-  ipcMain.handle(
-    IPC_CHANNELS.saveTopology,
-    (_event, payload: UpdateTopologyPayload) => orchestrator.saveTopology(payload),
   );
   ipcMain.handle(
     IPC_CHANNELS.getTaskRuntime,
@@ -241,6 +190,22 @@ app.whenReady().then(async () => {
       await createWindow();
     }
   });
+});
+
+app.on("before-quit", (event) => {
+  if (shuttingDown) {
+    return;
+  }
+
+  shuttingDown = true;
+  event.preventDefault();
+  void orchestrator.dispose()
+    .catch((error) => {
+      console.error("[main] orchestrator dispose failed during app shutdown", error);
+    })
+    .finally(() => {
+      app.quit();
+    });
 });
 
 app.on("window-all-closed", () => {

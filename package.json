@@ -31,7 +31,9 @@
     "@radix-ui/react-dialog": "^1.1.6",
     "@tanstack/react-query": "^5.66.8",
     "@xyflow/react": "^12.4.4",
+    "boxen": "^8.0.1",
     "clsx": "^2.1.1",
+    "commander": "^14.0.3",
     "electron-updater": "^6.3.9",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -39,7 +41,6 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
-    "@langchain/langgraph-cli": "^1.1.17",
     "@types/node": "^22.13.5",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",

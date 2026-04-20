@@ -1,6 +1,0 @@
-{
-  "dependencies": ["."],
-  "graphs": {
-    "agentflow": "./electron/main/langgraph-studio-entry.ts:agentflowStudio"
-  }
-}

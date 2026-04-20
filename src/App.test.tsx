@@ -1,19 +1,26 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 
-import {
-  getOpenAgentTerminalButtonLabel,
-  getOpenAgentTerminalButtonTitle,
-} from "./App";
+const APP_SOURCE = fs.readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 
-test("团队成员卡片按钮文案使用终端而不是 Pane", () => {
-  assert.equal(getOpenAgentTerminalButtonLabel(false), "打开终端");
-  assert.equal(getOpenAgentTerminalButtonLabel(true), "打开中...");
-  assert.equal(
-    getOpenAgentTerminalButtonTitle("Build", true),
-    "打开 Build 对应的 OpenCode 独立终端窗口",
-  );
-  assert.equal(getOpenAgentTerminalButtonTitle("Build", false), "请先选择一个 Task");
-  assert.doesNotMatch(getOpenAgentTerminalButtonLabel(false), /Pane/);
-  assert.doesNotMatch(getOpenAgentTerminalButtonTitle("Build", true), /Pane/);
+test("App 已裁成单 Task 展示面板", () => {
+  assert.doesNotMatch(APP_SOURCE, /SidebarList/);
+  assert.doesNotMatch(APP_SOURCE, /AgentConfigModal/);
+  assert.doesNotMatch(APP_SOURCE, /saveTopology/);
+  assert.doesNotMatch(APP_SOURCE, /createProject|deleteProject|deleteTask/);
+});
+
+test("App 保留聊天输入与 attach 按钮", () => {
+  assert.match(APP_SOURCE, /<ChatWindow/);
+  assert.match(APP_SOURCE, /"attach"/);
+  assert.match(APP_SOURCE, /纯展示面板，不提供配置入口/);
+  assert.doesNotMatch(APP_SOURCE, /openLangGraphStudio/);
+  assert.doesNotMatch(APP_SOURCE, /LangGraph UI/);
+});
+
+test("App 不再从 bootstrap.project 读取当前工作区", () => {
+  assert.doesNotMatch(APP_SOURCE, /bootstrap\?\.project/);
+  assert.doesNotMatch(APP_SOURCE, /project\.project\.id/);
+  assert.doesNotMatch(APP_SOURCE, /ProjectSnapshot/);
 });

@@ -2,23 +2,21 @@
 
 const { spawn } = require("node:child_process");
 const path = require("node:path");
+const { buildCliLauncherSpec } = require("./launcher-spec.cjs");
 
-const electronBinary = require("electron");
-const tsxCli = path.resolve(__dirname, "../../node_modules/tsx/dist/cli.mjs");
-const entry = path.resolve(__dirname, "index.ts");
+const repoRoot = path.resolve(__dirname, "../..");
+const spec = buildCliLauncherSpec({
+  nodeBinary: process.execPath,
+  repoRoot,
+  argv: process.argv.slice(2),
+  env: process.env,
+});
 
-const child = spawn(
-  electronBinary,
-  [tsxCli, "--tsconfig", "tsconfig.node.json", entry, ...process.argv.slice(2)],
-  {
-    cwd: path.resolve(__dirname, "../.."),
-    env: {
-      ...process.env,
-      ELECTRON_RUN_AS_NODE: "1",
-    },
-    stdio: "inherit",
-  },
-);
+const child = spawn(spec.command, spec.args, {
+  cwd: spec.cwd,
+  env: spec.env,
+  stdio: "inherit",
+});
 
 child.on("exit", (code, signal) => {
   if (signal) {

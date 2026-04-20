@@ -75,14 +75,6 @@ export function buildSpawnItemId(spawnRuleId: string, sequence: number): string 
   return `${spawnRuleId}-${String(sequence).padStart(4, "0")}`;
 }
 
-export function getRuntimeNode(state: GraphTaskState, nodeId: string) {
-  return state.runtimeNodes.find((node) => node.id === nodeId) ?? null;
-}
-
-export function getRuntimeNodesByGroup(state: GraphTaskState, groupId: string) {
-  return state.runtimeNodes.filter((node) => node.groupId === groupId);
-}
-
 export function ensureRuntimeNodeStatuses(state: GraphTaskState): void {
   for (const node of state.runtimeNodes) {
     if (!state.agentStatusesByName[node.id]) {

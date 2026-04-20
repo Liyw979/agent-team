@@ -6,55 +6,36 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { TopologyGraph } from "./TopologyGraph";
-import type { ProjectSnapshot, TaskSnapshot, TopologyRecord } from "@shared/types";
-import { REVIEW_CHALLENGE_END_LABEL, REVIEW_CHALLENGE_LABEL } from "@shared/review-response";
+import type { TaskSnapshot, TopologyRecord, WorkspaceSnapshot } from "@shared/types";
 
 const TOPOLOGY_GRAPH_SOURCE = fs.readFileSync(
   path.join(import.meta.dirname, "TopologyGraph.tsx"),
   "utf8",
 );
 
-function createProjectSnapshot(topology: TopologyRecord): ProjectSnapshot {
+function createWorkspaceSnapshot(topology: TopologyRecord): WorkspaceSnapshot {
   return {
-    project: {
-      id: topology.projectId,
-      name: "demo",
-      path: "/tmp/demo",
-      createdAt: "2026-04-14T00:00:00.000Z",
-    },
-    agentFiles: [
-      {
-        name: "BA",
-        prompt: "",
-      },
-      {
-        name: "TaskReview",
-        prompt: "",
-      },
-      {
-        name: "Build",
-        prompt: "",
-      },
+    cwd: "/tmp/demo",
+    name: "demo",
+    agents: [
+      { name: "BA", prompt: "" },
+      { name: "Build", prompt: "" },
+      { name: "TaskReview", prompt: "" },
     ],
-    builtinAgentTemplates: [],
     topology,
     messages: [],
     tasks: [],
   };
 }
 
-function createTaskSnapshot(
-  topology: TopologyRecord,
-  messages: TaskSnapshot["messages"] = [],
-): TaskSnapshot {
+function createTaskSnapshot(topology: TopologyRecord): TaskSnapshot {
   return {
     task: {
       id: "task-1",
-      projectId: topology.projectId,
       title: "demo task",
       status: "running",
       cwd: "/tmp/demo",
-      zellijSessionId: "oap-demo-task",
+      zellijSessionId: null,
       opencodeSessionId: null,
       agentCount: 3,
       createdAt: "2026-04-14T00:00:00.000Z",
@@ -62,107 +43,53 @@ function createTaskSnapshot(
       initializedAt: "2026-04-14T00:00:01.000Z",
     },
     agents: [
-      { id: "task-1:BA", taskId: "task-1", projectId: topology.projectId, name: "BA", opencodeSessionId: null, status: "completed", runCount: 1 },
-      { id: "task-1:TaskReview", taskId: "task-1", projectId: topology.projectId, name: "TaskReview", opencodeSessionId: null, status: "completed", runCount: 1 },
-      { id: "task-1:Build", taskId: "task-1", projectId: topology.projectId, name: "Build", opencodeSessionId: null, status: "failed", runCount: 1 },
+      { id: "task-1:BA", taskId: "task-1", name: "BA", opencodeSessionId: null, status: "completed", runCount: 1 },
+      { id: "task-1:Build", taskId: "task-1", name: "Build", opencodeSessionId: null, status: "running", runCount: 2 },
+      { id: "task-1:TaskReview", taskId: "task-1", name: "TaskReview", opencodeSessionId: null, status: "idle", runCount: 0 },
     ],
     panels: [],
-    messages,
+    messages: [],
     topology,
   };
 }
 
-function getTopologyHtml(messages: TaskSnapshot["messages"] = []) {
+function renderTopologyHtml() {
   const topology: TopologyRecord = {
-    projectId: "project-1",
-    nodes: ["TaskReview", "BA", "Build"],
+    nodes: ["BA", "Build", "TaskReview"],
     edges: [
       { source: "BA", target: "Build", triggerOn: "association" },
-      { source: "Build", target: "TaskReview", triggerOn: "association" },
-      { source: "TaskReview", target: "BA", triggerOn: "review_pass" },
-      { source: "TaskReview", target: "Build", triggerOn: "review_fail" },
+      { source: "Build", target: "TaskReview", triggerOn: "approved" },
+      { source: "TaskReview", target: "Build", triggerOn: "needs_revision" },
     ],
   };
 
   return renderToStaticMarkup(
     <TopologyGraph
-      project={createProjectSnapshot(topology)}
-      task={createTaskSnapshot(topology, messages)}
+      workspace={createWorkspaceSnapshot(topology)}
+      task={createTaskSnapshot(topology)}
       selectedAgentId={null}
       onSelectAgent={() => undefined}
-      onSaveTopology={async () => undefined}
-      onOpenLangGraphStudio={async () => undefined}
-      compact={false}
-      showEdgeList={true}
       runtimeSnapshots={{}}
     />,
   );
 }
 
-test("TopologyGraph 真实渲染包含状态徽标和边关系", () => {
-  const html = getTopologyHtml();
+test("TopologyGraph 纯展示渲染包含节点状态与边关系", () => {
+  const html = renderTopologyHtml();
 
-  assert.match(html, /审视通过/);
+  assert.match(html, /运行中/);
   assert.match(html, /已完成/);
-  assert.match(html, /执行失败/);
+  assert.match(html, /未启动/);
   assert.match(html, /传递/);
   assert.match(html, /审视通过/);
   assert.match(html, /审视不通过/);
-  assert.match(html, /TaskReview/);
-  assert.match(html, /BA/);
-  assert.match(html, /Build/);
+  assert.match(html, /纯展示模式，拓扑与 Prompt 全部来自 JSON 文件/);
 });
 
-test("布局顺序直接跟随 topology.nodes，不再被边关系和角色启发式改写", () => {
-  assert.match(TOPOLOGY_GRAPH_SOURCE, /const sortedNodeIds = \[\.\.\.draft\.nodes\];/);
-  assert.doesNotMatch(TOPOLOGY_GRAPH_SOURCE, /resolveBuildAgentName|getRoleRank|getRoleRowOrder/);
-});
-
-test("TopologyGraph 已接入动态团队 GUI 入口和 nodeRecords 展示", () => {
-  assert.match(TOPOLOGY_GRAPH_SOURCE, /Spawn/);
-  assert.match(TOPOLOGY_GRAPH_SOURCE, /getTopologyDisplayNodeIds/);
-  assert.match(TOPOLOGY_GRAPH_SOURCE, /setDownstreamSpawn/);
-  assert.match(TOPOLOGY_GRAPH_SOURCE, /setDownstreamMode/);
-  assert.match(TOPOLOGY_GRAPH_SOURCE, /getDownstreamMode/);
-});
-
-test("TopologyGraph 下游配置已改成单行四选一互斥模式", () => {
-  assert.match(
-    TOPOLOGY_GRAPH_SOURCE,
-    /`Spawn \/ 传递 \/ 审视通过 \/ 审视不通过` 四选一，始终只保留一种模式/,
-  );
-  assert.match(TOPOLOGY_GRAPH_SOURCE, /const currentMode = draft && editingAgentId/);
-  assert.match(TOPOLOGY_GRAPH_SOURCE, /selectedLabels = currentMode \? \[/);
-  assert.match(TOPOLOGY_GRAPH_SOURCE, /mode: "review_fail", label: "审视不通过"/);
-  assert.match(TOPOLOGY_GRAPH_SOURCE, /className="flex min-w-\[420px\] flex-wrap justify-end gap-2"/);
-});
-
-test("TopologyGraph 历史记录会去掉 challenge 标签", () => {
-  const html = getTopologyHtml([
-    {
-      id: "message-1",
-      projectId: "project-1",
-      taskId: "task-1",
-      sender: "TaskReview",
-      timestamp: "2026-04-14T00:05:00.000Z",
-      content: `审视不通过。\n\n${REVIEW_CHALLENGE_LABEL}请继续补充实现依据。${REVIEW_CHALLENGE_END_LABEL}`,
-      meta: {
-        kind: "agent-final",
-        status: "failed",
-        reviewDecision: "needs_revision",
-        finalMessage: `审视不通过。\n\n${REVIEW_CHALLENGE_LABEL}请继续补充实现依据。${REVIEW_CHALLENGE_END_LABEL}`,
-      },
-    },
-  ]);
-
-  assert.match(html, /审视不通过。/);
-  assert.match(html, /请继续补充实现依据。/);
-  assert.doesNotMatch(html, /&lt;challenge&gt;/);
-  assert.doesNotMatch(html, /&lt;\/challenge&gt;/);
-});
-
-test("TopologyGraph 顶部会渲染 LangGraph UI 按钮", () => {
-  const html = getTopologyHtml();
-
-  assert.match(html, /LangGraph UI/);
+test("TopologyGraph 不再包含拓扑编辑与保存入口", () => {
+  assert.doesNotMatch(TOPOLOGY_GRAPH_SOURCE, /onSaveTopology/);
+  assert.doesNotMatch(TOPOLOGY_GRAPH_SOURCE, /setDownstreamMode/);
+  assert.doesNotMatch(TOPOLOGY_GRAPH_SOURCE, /spawn/i);
+  assert.doesNotMatch(TOPOLOGY_GRAPH_SOURCE, /openLangGraphStudio/);
+  assert.doesNotMatch(TOPOLOGY_GRAPH_SOURCE, /LangGraph UI/);
 });

@@ -11,10 +11,6 @@ export function initAppFileLogger(userDataPath: string) {
   return appLogFilePath;
 }
 
-export function getAppLogFilePath() {
-  return appLogFilePath;
-}
-
 export function appendAppLog(
   level: "info" | "warn" | "error",
   event: string,

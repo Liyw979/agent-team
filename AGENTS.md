@@ -6,10 +6,10 @@
 
 ### 1.1 产品定位
 
-- Agent Flow 是面向 OpenCode 的 Project / Task 两层 Code Agent 编排桌面工具。
-- Project 是任务协作容器，Task 是最小执行单元。
-- GUI 主布局为：左侧 `Project + Task` 列表，右侧上方大拓扑图，右侧下方左聊天、右 Agent 列表。
-- CLI 与 GUI 复用同一套 `Orchestrator`、OpenCode、Zellij 与文件存储逻辑。
+- Agent Flow 是面向 OpenCode 的单工作区 Task Code Agent 编排桌面工具。
+- 当前系统只关注当前 `cwd` 下的团队拓扑、Task 会话、群聊记录与 Agent 运行态，不再维护 Project 概念。
+- GUI 主布局为：上方当前 Task 拓扑图，下方左侧当前 Task 群聊，右侧当前 Task Agent 列表；前端只负责展示与聊天发消息，不负责任何配置写入。
+- CLI 与 GUI 复用同一套 `Orchestrator`、OpenCode 与文件存储逻辑。
 
 ### 1.2 技术栈
 
@@ -18,58 +18,50 @@
 - React Flow
 - Zustand
 - OpenCode Server (`opencode serve`)
-- Zellij
-- 文件存储：全局用户数据目录 + Project 内 `.agentflow/`
+- 文件存储：当前工作区 `.agentflow/` + 用户数据目录日志
 
 ## 2. 真源与配置边界
 
 ### 2.1 Agent 配置
 
-- 当前项目不再内置本地 Agent 模板文件，也不再依赖 `.opencode/agents/**/*.md` 作为运行真源。
-- Agent 统一由用户目录中的自定义配置提供；运行时读取 `$AGENTFLOW_USER_DATA_DIR/custom-agents.json`。未显式设置 `AGENTFLOW_USER_DATA_DIR` 时，使用默认用户数据目录。
-- 同一份配置里既保存已写入当前 Project 的 Agent，也保存当前 Project 的内置模板 prompt 覆盖。
-- 只允许用户自定义 prompt；当前 Project 可以不设置可写 Agent，也可以从已写入当前 Project 的 Agent 中指定 1 个作为可写 Agent。
-- 同一 Project 中最多只能有 1 个可写 Agent；只要当前 Project 已写入 `Build`，`Build` 就会固定为唯一可写 Agent。
-- `Build` 作为默认内置模板提供，但继续使用 OpenCode 自带 prompt，不支持在 AgentFlow 中修改 prompt、覆盖模板或改名；只能按需写入当前 Project 或从当前 Project 删除。
-- `BA` 默认内置模板会主动阅读当前项目相关代码、目录结构与已有实现，并根据代码现状给出可落地的实施建议；`BA` 不直接编写实现代码，但需要明确建议修改的模块、接口、数据流、约束与风险点。
-- `UnitTest` 默认内置模板使用“单元测试审查”文案：必须主动阅读实现代码与测试代码，先检查当前改动是否提供了测试；若没有测试，要明确指出缺失测试。若存在测试，再检查是否遵循“一个功能点一个测试、分支覆盖完全、每个测试有注释、执行极快、尽量使用纯函数而不是 Mock”四条标准，同时确认测试是否真的覆盖实现的核心分支、边界条件与失败路径，并给出修改建议。
-- `TaskReview` 默认内置模板使用“任务交付审视”文案：必须主动阅读实际代码实现，并结合交付说明、运行结果与其他 Agent 反馈，判断核心功能是否真的已经实现；不评价代码风格问题，只有实现问题已经直接影响功能成立、验收结论或交付风险时，才作为交付问题指出。
-- `CodeReview` 默认内置模板使用“代码审查”文案：必须主动阅读实际代码实现，只专注判断代码是否优雅、是否最简洁；不要关注测试、验收结论、业务是否成立等其他逻辑。
-- 一旦当前 Project 出现 Task 启动记录，Agent 与内置模板配置都会被锁定，不允许继续修改。
+- Agent prompt、可写权限与拓扑的唯一真源是团队拓扑 JSON 文件；运行时按该文件编译结果启动当前 Task。
+- 前端不提供 Agent prompt、拓扑、模板或团队成员配置入口；这类修改只能通过 JSON 拓扑文件完成。
+- 运行时不再保留 `DEFAULT_BUILTIN_AGENT_TEMPLATES`、用户目录 prompt 覆盖或其他前端回填链路。
+- `Build` 继续复用 OpenCode 自带 prompt；其他 Agent 的 prompt 必须在团队拓扑 JSON 中显式提供。
+- 同一工作区中最多只能有 1 个可写 Agent；只要当前拓扑包含 `Build`，`Build` 就会固定为唯一可写 Agent。
+- 已有 Task 后，后续仍允许通过新的 JSON 拓扑重新覆盖当前工作区配置；运行时始终以最新应用的 JSON 编译结果为准。
 
-### 2.2 Project / Topology / Task 真源
+### 2.2 工作区 / Topology / Task 真源
 
-- Project 只保留全局注册信息；拓扑、Task、消息、panel 绑定等运行数据保存在各自 Project 目录下的 `.agentflow/`。
-- 默认拓扑只在 Project 首次初始化且当前还没有拓扑数据时，按当前 Agent 列表自动推断。
-- Project 一旦已有拓扑，后续运行时只认当前拓扑，不会再根据固定名字做调度判断。
-- Task 不再快照 Agent 的 prompt / permission 定义；运行时始终读取当前 Project 当前生效的自定义 Agent 配置，`.agentflow/state.json` 里的 `taskAgents` 只保留运行态字段。
-- 当前处于项目开发初期，不要求兼容历史数据；若现有 Project 状态、拓扑或运行数据与当前实现不一致，优先直接修正当前数据与实现，不额外为旧数据添加兼容分支。
-- LangGraph 现已接管 Task 调度运行时；每个 Task 都会以 `taskId` 作为 graph `thread_id` 持久化 checkpoint，并在恢复时以该 checkpoint 作为调度真源。
+- 当前 CLI / GUI 只关注当前 `cwd` 的单 Task 会话；`.agentflow/` 保存当前工作区的拓扑、Task、消息与运行态数据。
+- 拓扑不再自动推断，也不再由前端保存；新建 Task 时必须显式提供团队拓扑 JSON 文件。
+- Task 不再快照 Agent 的 prompt / permission 定义；运行时只认当前拓扑 `nodeRecords` 中的 `prompt / writable` 元数据与 `Build` 的 OpenCode 内置 prompt。
+- 当前处于开发初期，不要求兼容历史 Project 数据；旧的 Project registry / projectId 模型均已移除。
+- LangGraph 是唯一调度运行时；每个 Task 都以 `taskId` 作为 graph `thread_id` 持久化 checkpoint，并在恢复时以该 checkpoint 作为调度真源。
 
 ### 2.3 用户数据目录与日志
 
-- 全局 Project 注册信息位于用户数据目录下的 `projects.json`。
 - 命令执行失败等诊断日志统一写入用户数据目录下的 `logs/agentflow.log`。
 - Windows 默认日志路径为 `%APPDATA%\agentflow\logs\agentflow.log`。
-- CLI 不再在 `<project>/.agentflow/projects.json` 静默回退创建本地 Project registry；若默认全局目录不可写，必须显式设置 `AGENTFLOW_USER_DATA_DIR`。
+- 当前不再维护全局 `projects.json` registry；若默认用户数据目录不可写，必须显式设置 `AGENTFLOW_USER_DATA_DIR`。
 
 ## 3. 运行时与编排约定
 
 ### 3.1 OpenCode 注入与运行时
 
-- 每个 Project 都会启动各自独立的 `opencode serve`。
-- 实例会优先监听 `127.0.0.1:4096`；若端口被占用，则自动切换到本机空闲端口，并让该 Project 的 pane attach / 健康检查跟随实际端口。
-- 启动 `opencode serve` 前，只会一次性注入当前 Project 中真正需要自定义 prompt / permission 的 Agent 配置；单个 serve 运行中不会做 reload / 二次注入。
-- 只有当前 Project 中真正需要自定义 prompt / permission 的 Agent 才会写入 `OPENCODE_CONFIG_CONTENT`。
-- `Build` 这类继续复用 OpenCode 内置 prompt 的 Agent 不会出现在 `OPENCODE_CONFIG_CONTENT` 中；若当前 Project 只有这类 Agent，则不会额外生成注入内容。
-- 不同 Project 的请求会继续携带 `x-opencode-directory` 请求头，保持会话与工作区目录一致。
+- 每个工作区都会启动各自独立的 `opencode serve`。
+- 实例会优先监听 `127.0.0.1:4096`；若端口被占用，则自动切换到本机空闲端口，并让当前工作区的 attach / 健康检查跟随实际端口。
+- 启动 `opencode serve` 前，只会一次性注入当前工作区里真正需要自定义 prompt / permission 的 Agent 配置；单个 serve 运行中不会做 reload / 二次注入。
+- 注入内容优先取当前拓扑 `nodeRecords` 里的 Agent prompt / writable；不会再被用户目录或前端配置覆盖。
+- 只有当前工作区中真正需要自定义 prompt / permission 的 Agent 才会写入 `OPENCODE_CONFIG_CONTENT`。
+- `Build` 这类继续复用 OpenCode 内置 prompt 的 Agent 不会出现在 `OPENCODE_CONFIG_CONTENT` 中；若当前工作区只有这类 Agent，则不会额外生成注入内容。
+- 请求会继续携带 `x-opencode-directory` 请求头，保持会话与工作区目录一致。
 - Session 创建对齐官方 `POST /session`；消息发送对齐官方 `POST /session/:id/message`，请求体使用 `parts` 数组。
 - 若本机未安装或无法连接 `opencode serve`，系统会直接报错并写入日志，不再退化为 mock 响应。
 
 ### 3.2 Task 初始化与状态流转
 
-- 每个 Task 对应独立 Zellij session，并为当前 Project 的全部 Agent 建立 `panel <-> agent` 运行时映射。
-- CLI 与 GUI 都支持先单独执行 `task init`：先创建 Task，并把当前 Project 的全部 Agent OpenCode session / Zellij pane 初始化完成。
+- CLI 通过 `task run`、`task show`、`task chat` 管理当前工作区 Task 会话；GUI 只负责展示当前 Task，不再承担初始化或配置职责。
 - 若当前节点执行完成后，拓扑里不存在可自动继续推进的下游节点，Task 会进入 `waiting` 状态；左侧 Task 列表与群聊系统消息必须同步反映该状态。
 - 当 Task 进入 `finished` 状态时，右侧拓扑面板中的每个 Agent 节点都统一显示为 `已完成`，不再保留 `未启动 / 运行中` 等中间状态；聊天区会追加一条“任务已经结束”的系统消息。
 - Agent 运行态成功码统一使用 `completed`。
@@ -79,7 +71,7 @@
 ### 3.3 拓扑与调度
 
 - LangGraph 现作为唯一调度运行时核心；`TopologyRecord` 继续是产品真源，运行时会在主进程内把它编译为图状态与调度索引。
-- 拓扑边只保留一种触发语义：`success`，表示当前 Agent 审查通过或执行完成后自动触发下游。
+- 拓扑边持久化 `source / target / triggerOn`；`triggerOn` 只允许 `association`、`approved`、`needs_revision`。
 - 当某个 Agent 存在“直接下游通过 `association` 触发、且该下游会用 `needs_revision` 直接回流给自己、同时该下游没有 `approved` 下游”的审查回路时，系统会先只放行这类直接审查回路；只有这些回路全部通过后，才会继续放行该 Agent 其余直接 `association` 下游，避免 Build 与单个审查 Agent 多轮对话时反复提前触发无关下游。
 - 同一轮里若某个 Agent 需要同时触发多个直接 `association` 下游 reviewer，这批 reviewer 会并发启动；只有当前整批 reviewer 都返回后，系统才会决定是否回流给上游修复，或继续补跑这一轮尚未确认通过的 reviewer，避免把并发批次错误串成“一次只放行一个”。
 - 团队成员列表支持直接调整 Agent 顺序；该顺序会持久化到拓扑配置，并直接决定拓扑图从左到右的节点排列。
@@ -109,86 +101,62 @@
 
 ### 3.5 GUI 交互
 
-- 右下角团队成员面板顶部仅展示当前 Task 的 panel 绑定摘要，不再额外显示最后一条群聊消息预览。
+- 右下角团队成员面板只展示当前 Task 的 Agent 运行态与 attach 入口，不再提供任何配置按钮。
 - 右上角拓扑图支持整块面板放大查看；放大视图会直接把当前拓扑图放大，Agent 卡片会随视口横向和纵向一起拉伸铺满面板，连线固定走在 Agent 顶部上方的通道内，不会越出拓扑 panel；节点下游关系仍可通过点击节点编辑。
 - 拓扑图历史区会优先展示 Agent 最近的运行活动，并明确区分思考、普通消息、步骤与 Tool Call 参数摘要，而不只是单行运行状态。
 - 每个 Agent 都会按名称自动分配一套稳定配色；聊天记录里会使用对应的浅色底、描边与标签色来区分不同 Agent。
-- 右下角展示 Project 全量 Agent，以及它们在当前 Task 语境下的状态。
-- GUI 中点击 Agent 支持直接编辑并保存当前 Agent 的名称、prompt 与可写状态；内置模板仍是可选项，不会自动写入当前 Project。可先单独编辑可编辑模板的 prompt，再按需写入为 Agent，且模板修改只影响当前 Project，不影响新项目默认值。
-- 内置模板阶段统一不允许选择“设为可写 Agent”；`Build` 模板使用 OpenCode 自带 prompt，这里只负责选择是否加入当前 Project 或删除已写入项。
-- 一旦当前 Project 出现 Task 启动记录，Agent 与内置模板配置都会被锁定，不允许继续修改。
-- 前端不嵌入终端，也不复刻 Zellij panel；GUI 只展示 Task 级聊天流、拓扑和 Agent 状态。
+- 右下角展示当前工作区拓扑中的全部 Agent，以及它们在当前 Task 语境下的状态。
+- 前端不再提供 Agent、Prompt、拓扑、Project、Task 的创建、删除、编辑与保存入口。
+- 前端不嵌入终端，也不复刻 Zellij panel；GUI 只展示当前 Task 的聊天流、拓扑和 Agent 状态，并允许继续发消息。
 
 ### 3.6 Zellij 与终端行为
 
-- GUI 聊天区标题栏支持直接打开当前 Task 对应的 Zellij session；打开前会先补齐当前 Task 的全部 Agent pane。
-- GUI 聊天区里的 `Task Started` 系统消息会附带当前 Task 的 `Zellij Session` 名称与可直接执行的 attach 调试命令，方便 debug 当前会话。
-- 右下角团队成员面板中，每个 Agent 名称旁都会提供“打开终端”按钮；点击后会优先补齐当前 Task 的 pane 绑定，并直接打开该 Agent 自己的 OpenCode attach 独立终端窗口，而不是带出整个 Zellij session 网格。
-- Zellij pane 顺序只跟随前端拓扑 / 团队成员区里用户拖拽后保存的 Agent 排序，不再根据运行态动态重排。
-- 全新 Task 首次初始化且当前还没有托管 pane 时，Zellij 会优先按“先横向后换行”的 tiled grid 创建初始 pane 布局，并限制最多两排；内部 pane 会按当前保存的 Agent 顺序排布。
-- 左侧 Task 列表会定期与 Zellij session 状态同步；如果对应 session 已被外部删除，或只剩 `EXITED - attach to resurrect` 这类非活跃残留，只有已经结束的 Task 才会自动从列表中移除；`pending / running / waiting` 等未结束 Task 会保留，避免正在运行的任务被误删。
-- 左侧 Project 卡片支持右键删除 Project；删除时会同时清理该 Project 的 Task 记录、`.agentflow/` 运行态数据、用户目录里的自定义 Agent 配置，以及相关 Zellij session / `opencode serve`，但不会删除项目源码目录。
-- 左侧 Task 列表支持右键删除 Task；删除时会同时清理该 Task 对应的 Zellij session。
+- GUI 和 CLI 都通过 OpenCode session attach 到单个 Agent，会话调试入口统一围绕 OpenCode，而不是 Zellij pane。
+- 右下角团队成员面板中，每个 Agent 名称旁都会提供“attach”按钮，直接打开该 Agent 自己的 OpenCode attach 独立终端窗口。
 - 运行中的 Agent 会通过 OpenCode HTTP session 消息接口轮询实时工具调用与摘要，并显示在拓扑图节点内。
-- Zellij pane 内部启动命令会按平台生成：macOS / Linux 使用 `/bin/sh`，Windows 使用 `cmd.exe`，不再把 POSIX shell 语法直接下发到 Windows pane。
-- macOS / Linux 仍要求本机可执行 `zellij`；Windows 会优先使用打包产物内的 `resources/bin/zellij.exe`，开发期回退到项目内置的 `download/zellij.exe`；只有这两个位置都缺失时才会追加系统提醒。
-- macOS 下会固定新开独立 Terminal 窗口后再 attach；Windows 下会以普通窗口的最大化状态打开新拉起的终端，不再自动切到全屏。
-- 如果当前环境缺少可用的 `zellij`，GUI 和 CLI 会给出显式提醒；Task 群聊也会追加系统消息说明当前不会创建真实 Zellij pane。
+- 应用退出时，会统一关闭当前工作区相关的 `opencode serve` 与其派生会话。
 
 ## 4. CLI 约定
 
-- CLI 默认使用当前目录作为 project cwd。
-- CLI 只支持当前 Agent 名称。
-- `task init` 会先创建 Task，并把全部 Agent 的 OpenCode session / Zellij pane 启动完成；GUI 输入框会优先弹出候选 Agent，并默认把未显式 `@` 的消息发给 `Build`。若当前 Project 尚未写入 `Build`，GUI 会直接禁止发送，直到补齐 `Build`；CLI 仍通过 `task send <agent> <message...>` 指定目标。
-- `task send <agent> <message...>` 成功后会打印可复制的 panel 打开命令。
-- `task debug-info` 默认读取当前 Project 最新 Task，并只输出聊天区里实际展示的合并消息；追加 `--full` 后，才会输出 `zellijSessionId`、`opencodeSessionId`、panel 打开命令和完整运行态数据；也可以显式传入 `taskId`。
-- `task show <taskId>` 与 `task init` 在交互式终端里默认直接进入对应 Zellij session。
-- `npm run cli -- ...` 需要在仓库根目录执行；若从其他目录排查目标 Project，请改用外层包装脚本并显式传入 `--cwd`。
-- CLI 与 GUI 复用同一套 Project / Task / Agent / 拓扑 / panel 运行时能力。
+- CLI 默认使用当前目录作为工作目录。
+- CLI 只保留 `task run`、`task show`、`task chat`、`task attach`。
+- `task run --file <topology.json> --message <message>` 会新建当前 Task，打印本轮群聊，任务结束后退出到 shell。
+- `task show <taskId>` 会打印当前工作区指定 Task 的历史群聊；若任务仍在运行，会继续打印到结束。
+- `task chat --file <topology.json> --message <message>` 会新建当前 Task，任务开始后继续保留命令行会话，可持续发送消息。
+- `task chat --task <taskId> [--message <message>]` 会恢复已有 Task，先回放历史群聊，再进入可继续输入的会话。
+- `task attach <agentName>` 会 attach 到当前工作区最近一个 Task 的目标 Agent OpenCode session；所有用户可见 attach 文案都统一显示这条高层命令，不展示底层 `opencode attach ...`。
+- `task run --ui`、`task show --ui`、`task chat --ui` 会同步拉起前端界面。
+- `npm run cli -- ...` 需要在仓库根目录执行；若从其他目录排查目标工作区，请显式传入 `--cwd`。
 
 常用命令示例：
 
 ```bash
 npm run cli -- help
 
-npm run cli -- agent list
-npm run cli -- agent show <agentName>
-npm run cli -- agent cat <agentName>
-
-npm run cli -- task list
-npm run cli -- task init --title "初始化手动测试"
-npm run cli -- task send <agentName> "请先分析需求并推进实现。"
-npm run cli -- task send <agentName> "请先分析需求并推进实现。" --task <taskId>
+npm run cli -- task run --file config/team-topologies/development-team.topology.json --message "请开始一轮开发团队协作。"
+npm run cli -- task run --file config/team-topologies/development-team.topology.json --message "请开始一轮开发团队协作。" --ui
 npm run cli -- task show <taskId>
-npm run cli -- task messages <taskId>
-npm run cli -- task panels <taskId>
-npm run cli -- task debug-info --json
-npm run cli -- task debug-info --json --full
-
-npm run cli -- topology show
-npm run cli -- topology set-downstream <sourceAgent> <targetAgent1> <targetAgent2>
-
-npm run cli -- panel focus <taskId> <agentName>
+npm run cli -- task chat --file config/team-topologies/development-team.topology.json --message "@BA 请继续推进"
+npm run cli -- task chat --task <taskId>
+npm run cli -- task attach <agentName>
 ```
 
 CLI 能力分组：
 
-- `project`：Project 列表、当前 Project 展示、创建 Project。
-- `task`：Task 列表、Task 初始化、Task 群聊查看、排障信息查看、向特定 Agent 发消息、查看当前 Task 的 panel 绑定。
-- `agent`：Project 级 Agent 列表、查看 Agent 元信息、读取 Agent prompt。
-- `topology`：查看当前 Project 拓扑、修改某个 Agent 的下游关系。
-- `panel`：通过 `panel focus` 直接打开指定 Task / Agent 的 OpenCode 独立终端窗口。
+- `task run`：运行一轮任务，结束后退出 CLI。
+- `task show`：查看已有 Task 的群聊记录。
+- `task chat`：运行或恢复任务后进入持续聊天会话。
+- `task attach`：attach 到当前工作区最近一个 Task 的指定 Agent OpenCode 会话。
 
 ## 5. 存储布局与仓库结构
 
 ### 5.1 存储布局
 
-- 全局 Project 注册信息位于用户数据目录下的 `projects.json`。
-- 自定义 Agent 配置位于用户数据目录下的 `custom-agents.json`。
 - 命令执行失败等诊断日志位于用户数据目录下的 `logs/agentflow.log`。
-- 每个 Project 自己的拓扑、Task、消息、panel 绑定等数据位于 `<project>/.agentflow/state.json`。
-- 每个 Task 的 LangGraph checkpoint 位于 `<project>/.agentflow/langgraph/`。
-- OpenCode runtime 和 pane runtime 也统一落到 `.agentflow/` 下，便于随 Project 一起迁移。
+- 当前工作区的拓扑、Task、消息与运行态数据位于 `<cwd>/.agentflow/state.json`。
+- 团队拓扑 JSON 编译后的 Agent prompt / writable 元数据会跟随当前拓扑保存在 `<cwd>/.agentflow/state.json` 的 `topology.nodeRecords` 中。
+- 每个 Task 的 LangGraph checkpoint 位于 `<cwd>/.agentflow/langgraph/`。
+- OpenCode runtime 也统一落到 `.agentflow/` 下，便于随当前工作区一起迁移。
 
 ### 5.2 仓库结构
 
@@ -203,7 +171,6 @@ agentflow/
 │   │   ├── gating-router.ts
 │   │   ├── langgraph-host.ts
 │   │   ├── langgraph-runtime.ts
-│   │   ├── langgraph-studio-entry.ts
 │   │   ├── orchestrator.ts
 │   │   ├── topology-compiler.ts
 │   │   ├── store.ts
@@ -227,7 +194,6 @@ agentflow/
 │   └── opencode.example.json
 ├── download/
 │   └── zellij.exe
-├── langgraph.json
 └── AGENTS.md
 ```
 

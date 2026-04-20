@@ -45,15 +45,8 @@ export interface ToolPermission {
   mode: PermissionMode;
 }
 
-export interface ProjectRecord {
-  id: string;
-  name: string;
-  path: string;
-  createdAt: string;
-}
-
-export function getProjectNameFromPath(projectPath: string): string {
-  const normalized = projectPath.trim().replace(/[\\/]+$/, "");
+export function getWorkspaceNameFromPath(workspacePath: string): string {
+  const normalized = workspacePath.trim().replace(/[\\/]+$/, "");
   if (!normalized) {
     return "";
   }
@@ -63,7 +56,6 @@ export function getProjectNameFromPath(projectPath: string): string {
 
 export interface TaskRecord {
   id: string;
-  projectId: string;
   title: string;
   status: TaskStatus;
   cwd: string;
@@ -75,15 +67,10 @@ export interface TaskRecord {
   initializedAt: string | null;
 }
 
-export interface AgentFileRecord {
+export interface AgentRecord {
   name: string;
   prompt: string;
   isWritable?: boolean;
-}
-
-export interface BuiltinAgentTemplateRecord {
-  name: string;
-  prompt: string;
 }
 
 export interface TopologyAgentSeed {
@@ -121,12 +108,13 @@ export interface TopologyNodeRecord {
   templateName: string;
   spawnRuleId?: string;
   spawnEnabled?: boolean;
+  prompt?: string;
+  writable?: boolean;
 }
 
 export interface TaskAgentRecord {
   id: string;
   taskId: string;
-  projectId: string;
   name: string;
   opencodeSessionId: string | null;
   status: AgentStatus;
@@ -136,7 +124,6 @@ export interface TaskAgentRecord {
 export interface TaskPanelRecord {
   id: string;
   taskId: string;
-  projectId: string;
   sessionName: string;
   paneId: string;
   agentName: string;
@@ -156,7 +143,6 @@ export interface TopologyEdge {
 }
 
 export interface TopologyRecord {
-  projectId: string;
   nodes: string[];
   edges: TopologyEdge[];
   nodeRecords?: TopologyNodeRecord[];
@@ -216,7 +202,6 @@ export function getNeedsRevisionEdgeLoopLimit(
 
 export interface MessageRecord {
   id: string;
-  projectId: string;
   taskId: string | null;
   content: string;
   sender: string;
@@ -233,7 +218,6 @@ export interface AgentRuntimeActivity {
 }
 
 export interface AgentRuntimeSnapshot {
-  projectId: string;
   taskId: string;
   agentId: string;
   sessionId: string | null;
@@ -253,17 +237,24 @@ export interface TaskSnapshot {
   topology: TopologyRecord;
 }
 
-export interface ProjectSnapshot {
-  project: ProjectRecord;
-  agentFiles: AgentFileRecord[];
-  builtinAgentTemplates: BuiltinAgentTemplateRecord[];
+export interface WorkspaceSnapshot {
+  cwd: string;
+  name: string;
+  agents: AgentRecord[];
   topology: TopologyRecord;
   messages: MessageRecord[];
   tasks: TaskSnapshot[];
 }
 
+export interface UiBootstrapPayload {
+  workspace: WorkspaceSnapshot | null;
+  task: TaskSnapshot | null;
+  launchTaskId: string | null;
+  launchCwd: string | null;
+}
+
 export interface SubmitTaskPayload {
-  projectId: string;
+  cwd?: string;
   taskId?: string | null;
   content: string;
   mentionAgent?: string;
@@ -274,80 +265,29 @@ export interface CopyToClipboardPayload {
 }
 
 export interface InitializeTaskPayload {
-  projectId: string;
+  cwd: string;
   title?: string;
 }
 
-export interface CreateProjectPayload {
-  path: string;
-}
-
-export interface ReadAgentFilePayload {
-  projectId: string;
-  agentName: string;
-}
-
-export interface ReadBuiltinAgentTemplatePayload {
-  projectId: string;
-  templateName: string;
-}
-
-export interface SaveAgentPromptPayload {
-  projectId: string;
-  currentAgentName: string;
-  nextAgentName: string;
-  prompt: string;
-  isWritable?: boolean;
-}
-
-export interface SaveBuiltinAgentTemplatePayload {
-  projectId: string;
-  templateName: string;
-  prompt: string;
-}
-
-export interface ResetBuiltinAgentTemplatePayload {
-  projectId: string;
-  templateName: string;
-}
-
 export interface UpdateTopologyPayload {
-  projectId: string;
+  cwd: string;
   topology: TopologyRecord;
 }
 
 export interface GetTaskRuntimePayload {
-  projectId: string;
+  cwd: string;
   taskId: string;
-}
-
-export interface OpenTaskSessionPayload {
-  projectId: string;
-  taskId: string;
-}
-
-export interface OpenLangGraphStudioPayload {
-  projectId: string;
 }
 
 export interface OpenAgentTerminalPayload {
-  projectId: string;
+  cwd: string;
   taskId: string;
   agentName: string;
 }
 
 export interface DeleteTaskPayload {
-  projectId: string;
+  cwd: string;
   taskId: string;
-}
-
-export interface DeleteProjectPayload {
-  projectId: string;
-}
-
-export interface DeleteAgentPayload {
-  projectId: string;
-  agentName: string;
 }
 
 export interface RuntimeUpdatedEventPayload {
@@ -357,14 +297,13 @@ export interface RuntimeUpdatedEventPayload {
 
 export interface AgentFlowEvent {
   type:
-    | "project-created"
-    | "project-updated"
+    | "workspace-updated"
     | "task-created"
     | "task-updated"
     | "message-created"
     | "agent-status-changed"
     | "runtime-updated";
-  projectId: string;
+  cwd: string;
   payload: unknown;
 }
 
@@ -382,33 +321,6 @@ export const DEFAULT_TOOL_PERMISSIONS: ToolPermission[] = [
   { name: "todowrite", mode: "allow" },
   { name: "webfetch", mode: "allow" },
   { name: "skill", mode: "allow" },
-];
-
-export const DEFAULT_BUILTIN_AGENT_TEMPLATES: BuiltinAgentTemplateRecord[] = [
-  {
-    name: BUILD_AGENT_NAME,
-    prompt: "",
-  },
-  {
-    name: "BA",
-    prompt:
-      "你是 BA。\n你的职责：\n1. 润色原始 User Story，输出完善、可执行的需求，不直接编写实现代码\n2. 主动阅读当前项目相关代码、目录结构与已有实现，根据代码现状给出可落地的实施建议，而不是脱离现有工程空谈方案\n3. 明确目标、范围、约束、验收标准以及建议修改的模块、接口、数据流和风险点，让实现方可以直接推进",
-  },
-  {
-    name: "UnitTest",
-    prompt:
-      "你是单元测试审查角色，必须主动阅读本轮改动里的实现代码与测试代码，判断测试是否真的覆盖了这次实现，而不是只看测试文件是否存在。\n\n先检查当前改动是否提供了测试；如果没有测试，要明确指出缺失测试。若存在测试，再继续结合实现代码检查单元测试是否遵循四条标准：一个功能点一个测试、分支覆盖完全、每个测试有注释、执行极快、尽量使用纯函数而不是 Mock。\n\n同时检查测试断言是否真正覆盖了核心分支、边界条件和失败路径，是否出现“代码改了但测试没有跟上”或“测试存在但没有验证关键行为”的情况。\n\n并给出修改建议。",
-  },
-  {
-    name: "TaskReview",
-    prompt:
-      "你是任务交付审视角色，负责站在用户价值、业务目标与功能交付结果的角度，判断本轮结果是否已经达到可交付标准。\n\n你必须主动阅读实际代码实现，并结合当前交付说明、运行结果与其他 Agent 的反馈，判断核心功能是否真的已经实现，而不是只根据口头结论做判断。\n\n请重点检查：\n1. 用户真正要解决的问题、业务目标和核心功能是否已经被完整实现，并且能被代码与当前证据共同证明。\n2. 验收路径、关键交互、边界场景与回归影响是否已经达到可交付标准，而不是只停留在“代码看起来像实现了”。\n3. 最终交付是否自洽，关键说明、验证结论与必要文档是否同步，是否足以支持他人直接验收和使用。\n4. 其他 Agent 的反馈里是否存在站不住脚的前提、证据缺口或逻辑漏洞。\n\n不要评价代码风格问题；代码是否优雅、是否简洁属于 CodeReview。只有当某个实现问题已经直接导致功能不成立、验收失败或交付风险时，才作为任务交付问题指出。\n\n若发现问题，不要只给修改建议，而是要明确输出你自己的意见，推动对方继续响应。",
-  },
-  {
-    name: "CodeReview",
-    prompt:
-      "你是代码审查角色，必须主动阅读实际代码实现，不能只根据他人的结论做判断。\n\n请专注检查两件事：\n1. 代码实现是否优雅。\n2. 代码实现是否最简洁。\n\n请重点识别重复实现、不必要的分支、可以合并的状态流转、绕远路的写法，以及其他会让实现变得不够优雅或不够简洁的问题。\n\n不要关注测试、验收结论、业务是否成立或其他非代码实现层面的逻辑；这些属于其他角色。\n\n发现问题时，要明确输出你自己的判断，说明哪里不优雅或不简洁，以及更合理的实现方向。",
-  },
 ];
 
 export function getTopologyEdgeId(edge: Pick<TopologyEdge, "source" | "target" | "triggerOn">): string {
@@ -475,7 +387,6 @@ export function resolveTopologyAgentOrder(
 }
 
 export function createDefaultTopology(
-  projectId: string,
   agents: TopologyAgentSeed[],
 ): TopologyRecord {
   const nodes = resolveTopologyAgentOrder(agents);
@@ -514,7 +425,6 @@ export function createDefaultTopology(
   push(startAgent?.name, nextAgent?.name, "association");
 
   return {
-    projectId,
     nodes,
     edges,
     nodeRecords: nodes.map((name) => ({

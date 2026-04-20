@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { resolveBuildAgentName, type ProjectSnapshot, type TaskSnapshot } from "@shared/types";
+import { resolveBuildAgentName, type TaskSnapshot, type WorkspaceSnapshot } from "@shared/types";
 import { resolveTaskSubmissionTarget } from "@shared/task-submission";
 import { cn } from "@/lib/utils";
 import { getAgentColorToken } from "@/lib/agent-colors";
@@ -9,11 +9,11 @@ import {
   getMentionOptionItems,
   type MentionContext,
 } from "@/lib/chat-mentions";
-import { getPanelHeaderActionButtonClass } from "@/lib/panel-header-action-button";
+import { PANEL_HEADER_ACTION_BUTTON_CLASS, cn } from "@/lib/panel-header-action-button";
 import { formatChatTranscript, getChatSenderLabel } from "@/lib/chat-transcript";
 
 interface ChatWindowProps {
-  project: ProjectSnapshot | undefined;
+  workspace: WorkspaceSnapshot | undefined;
   task: TaskSnapshot | undefined;
   availableAgents: string[];
   onSubmit: (payload: { content: string; mentionAgent?: string }) => Promise<void>;
@@ -186,7 +186,7 @@ function MessageBubble({
 }
 
 export function ChatWindow({
-  project,
+  workspace,
   task,
   availableAgents,
   onSubmit,
@@ -339,7 +339,7 @@ export function ChatWindow({
 
   async function handleSubmit() {
     const content = draft.trim();
-    if (!content || !project || submitting) {
+    if (!content || !workspace || submitting) {
       return;
     }
     const resolution = resolveTaskSubmissionTarget({
@@ -428,7 +428,8 @@ export function ChatWindow({
               onClick={() => {
                 void handleCopyTranscript();
               }}
-              className={getPanelHeaderActionButtonClass(
+              className={cn(
+                PANEL_HEADER_ACTION_BUTTON_CLASS,
                 "no-drag disabled:cursor-not-allowed disabled:opacity-50",
               )}
             >
@@ -439,7 +440,7 @@ export function ChatWindow({
               onClick={() => {
                 void handleOpenTaskSession();
               }}
-              className={getPanelHeaderActionButtonClass("no-drag")}
+              className={cn(PANEL_HEADER_ACTION_BUTTON_CLASS, "no-drag")}
             >
               打开 Zellij
             </button>

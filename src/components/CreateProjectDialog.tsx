@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { getProjectNameFromPath } from "@shared/types";
+import { getWorkspaceNameFromPath } from "@shared/types";
 
 interface CreateProjectDialogProps {
   onCreated: (path: string) => Promise<void>;
@@ -62,7 +62,7 @@ export function CreateProjectDialog({ onCreated }: CreateProjectDialogProps) {
               </div>
               <p className="mt-2 text-xs text-muted-foreground">
                 {path.trim()
-                  ? `将自动使用“${getProjectNameFromPath(path) || "未识别到目录名"}”作为项目名称`
+                  ? `将自动使用“${getWorkspaceNameFromPath(path) || "未识别到目录名"}”作为项目名称`
                   : "选择目录后会自动使用文件夹名称作为项目名称"}
               </p>
             </label>
@@ -79,7 +79,7 @@ export function CreateProjectDialog({ onCreated }: CreateProjectDialogProps) {
             </Dialog.Close>
             <button
               type="button"
-              disabled={!path.trim() || !getProjectNameFromPath(path)}
+              disabled={!path.trim() || !getWorkspaceNameFromPath(path)}
               className="rounded-[8px] bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground"
               onClick={async () => {
                 await onCreated(path.trim());

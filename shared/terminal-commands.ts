@@ -121,6 +121,18 @@ export function buildCliPanelFocusCommand(
   return `npm run cli -- panel focus ${quotePortableShellArg(taskId)} ${quotePortableShellArg(agentName)}`;
 }
 
+export function buildCliTaskShowCommand(
+  taskId: string,
+): string {
+  return `npm run cli -- task show ${quotePortableShellArg(taskId)}`;
+}
+
+export function buildCliAttachAgentCommand(
+  agentName: string,
+): string {
+  return `npm run cli -- task attach ${quotePortableShellArg(agentName)}`;
+}
+
 export function buildCliAttachSessionCommand(
   sessionName: string,
   options: CliAttachCommandOptions = {},
@@ -128,6 +140,22 @@ export function buildCliAttachSessionCommand(
   const command = options.command ?? "zellij";
   const renderedCommand = /[\s"]/.test(command) ? quotePortableShellArg(command) : command;
   return `${renderedCommand} attach ${quotePortableShellArg(sessionName)} --create`;
+}
+
+export function buildCliOpencodeAttachCommand(
+  attachBaseUrl: string,
+  sessionId: string,
+  cwd: string,
+): string {
+  return [
+    "opencode",
+    "attach",
+    quotePortableShellArg(attachBaseUrl),
+    "--session",
+    quotePortableShellArg(sessionId),
+    "--dir",
+    quotePortableShellArg(cwd),
+  ].join(" ");
 }
 
 export function buildWindowsPaneLaunchArtifacts(

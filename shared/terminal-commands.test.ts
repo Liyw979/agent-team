@@ -2,8 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildCliAttachAgentCommand,
   buildCliAttachSessionCommand,
+  buildCliOpencodeAttachCommand,
   buildCliPanelFocusCommand,
+  buildCliTaskShowCommand,
   buildOpencodePaneCommand,
   buildWindowsPaneLaunchArtifacts,
 } from "./terminal-commands";
@@ -12,6 +15,20 @@ test("CLI 打开的 panel 命令使用跨平台双引号参数", () => {
   assert.equal(
     buildCliPanelFocusCommand("task 123", "Code Review"),
     'npm run cli -- panel focus "task 123" "Code Review"',
+  );
+});
+
+test("CLI 打开的 attach 命令统一走顶层 attach 子命令", () => {
+  assert.equal(
+    buildCliAttachAgentCommand("Code Review"),
+    'npm run cli -- task attach "Code Review"',
+  );
+});
+
+test("CLI 支持直接构造 task show 命令", () => {
+  assert.equal(
+    buildCliTaskShowCommand("task 123"),
+    'npm run cli -- task show "task 123"',
   );
 });
 
@@ -29,6 +46,13 @@ test("CLI 打开的 zellij attach 命令支持 Windows 内置二进制路径", (
       platform: "win32",
     }),
     '"C:\\Program Files\\Agent Flow\\resources\\bin\\zellij.exe" attach "session 123" --create',
+  );
+});
+
+test("CLI 支持直接构造 OpenCode attach agent session 命令", () => {
+  assert.equal(
+    buildCliOpencodeAttachCommand("http://127.0.0.1:43127", "session-123", "/tmp/agent team"),
+    'opencode attach "http://127.0.0.1:43127" --session "session-123" --dir "/tmp/agent team"',
   );
 });
 

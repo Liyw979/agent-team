@@ -9,29 +9,16 @@ import { resolveTaskSubmissionTarget } from "@shared/task-submission";
 import {
   type AgentFlowEvent,
   type AgentRuntimeSnapshot,
-  type BuiltinAgentTemplateRecord,
+  type AgentRecord,
   BUILD_AGENT_NAME,
   createDefaultTopology,
   normalizeNeedsRevisionMaxRounds,
-  type AgentFileRecord,
-  type CreateProjectPayload,
-  type DeleteProjectPayload,
-  type DeleteAgentPayload,
   type DeleteTaskPayload,
   type GetTaskRuntimePayload,
   type InitializeTaskPayload,
-  getProjectNameFromPath,
+  getWorkspaceNameFromPath,
   type MessageRecord,
   type OpenAgentTerminalPayload,
-  type OpenLangGraphStudioPayload,
-  type OpenTaskSessionPayload,
-  type ProjectRecord,
-  type ProjectSnapshot,
-  type ReadAgentFilePayload,
-  type ReadBuiltinAgentTemplatePayload,
-  type ResetBuiltinAgentTemplatePayload,
-  type SaveAgentPromptPayload,
-  type SaveBuiltinAgentTemplatePayload,
   resolveBuildAgentName,
   resolveTopologyAgentOrder,
   type SubmitTaskPayload,
@@ -42,6 +29,7 @@ import {
   type TopologyEdge,
   type TopologyRecord,
   type UpdateTopologyPayload,
+  type WorkspaceSnapshot,
   isReviewAgentInTopology,
 } from "@shared/types";
 import {
@@ -51,8 +39,6 @@ import {
 import {
   stripReviewResponseMarkup,
 } from "@shared/review-response";
-import { buildZellijMissingReminder } from "@shared/zellij";
-import { CustomAgentConfigService } from "./custom-agent-config";
 import { buildAgentSystemPrompt } from "./agent-system-prompt";
 import {
   parseReview as parseReviewPure,
@@ -62,7 +48,6 @@ import {
 import { OpenCodeClient } from "./opencode-client";
 import { OpenCodeRunner } from "./opencode-runner";
 import { StoreService } from "./store";
-import { ZellijManager } from "./zellij-manager";
 import {
   resolveAgentStatusFromReview,
 } from "./gating-rules";
@@ -80,11 +65,18 @@ import {
 } from "./task-lifecycle-rules";
 import { LangGraphRuntime } from "./langgraph-runtime";
 import type { LangGraphTaskLoopHost } from "./langgraph-host";
-import { LangGraphStudioManager } from "./langgraph-studio";
 import type { GraphDispatchBatch, GraphAgentResult } from "./gating-router";
 import type { GraphTaskState } from "./gating-state";
 import { buildTaskCompletionMessageContent } from "./task-completion-message";
 import { getRuntimeNode, getRuntimeTemplateName } from "./runtime-topology-graph";
+import type { CompiledTeamDsl } from "./team-dsl";
+import { shouldScheduleEventStreamReconnect } from "./event-stream-lifecycle";
+import {
+  buildInjectedConfigFromAgents,
+  extractDslAgentsFromTopology,
+  resolveProjectAgents,
+  validateProjectAgents,
+} from "./project-agent-source";
 
 const execFileAsync = promisify(execFile);
 
@@ -93,7 +85,11 @@ interface OrchestratorOptions {
   autoOpenTaskSession?: boolean;
   enableEventStream?: boolean;
   runtimeRefreshDebounceMs?: number;
-  zellijManager?: ZellijManager;
+  zellijManager?: unknown;
+}
+
+interface DisposeOrchestratorOptions {
+  awaitPendingTaskRuns?: boolean;
 }
 
 interface ParsedSignal {
@@ -103,6 +99,11 @@ interface ParsedSignal {
 interface GitSummaryCommandResult {
   stdout: string;
   unavailable: boolean;
+}
+
+interface WorkspaceRecord {
+  cwd: string;
+  name: string;
 }
 
 type AgentExecutionPrompt =
@@ -133,62 +134,50 @@ function isTerminalTaskStatus(status: TaskRecord["status"]) {
 
 export class Orchestrator {
   private readonly store: StoreService;
-  private readonly customAgentConfig: CustomAgentConfigService;
   private readonly opencodeClient: OpenCodeClient;
   private readonly opencodeRunner: OpenCodeRunner;
-  private readonly zellijManager: ZellijManager;
-  private readonly langGraphStudioManager: LangGraphStudioManager;
   private readonly events = new EventEmitter();
   private readonly langGraphRuntimes = new Map<string, LangGraphRuntime>();
   private readonly autoOpenTaskSession: boolean;
   private readonly enableEventStream: boolean;
-  private readonly connectedEventProjects = new Set<string>();
-  private readonly pendingRuntimeRefreshProjects = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly connectedEventWorkspaces = new Set<string>();
+  private readonly pendingRuntimeRefreshWorkspaces = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly pendingEventReconnects = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly pendingTaskRuns = new Set<Promise<void>>();
+  private readonly knownWorkspaces = new Set<string>();
   private readonly runtimeRefreshDebounceMs: number;
+  private isDisposing = false;
   private window: BrowserWindow | null = null;
 
   constructor(options: OrchestratorOptions) {
     this.store = new StoreService(options.userDataPath);
-    this.customAgentConfig = new CustomAgentConfigService(options.userDataPath);
     this.opencodeClient = new OpenCodeClient(options.userDataPath);
     this.opencodeRunner = new OpenCodeRunner(this.opencodeClient);
     this.autoOpenTaskSession = options.autoOpenTaskSession ?? false;
     this.enableEventStream = options.enableEventStream ?? true;
     this.runtimeRefreshDebounceMs = options.runtimeRefreshDebounceMs ?? 120;
-    this.zellijManager = options.zellijManager ?? new ZellijManager();
-    this.langGraphStudioManager = new LangGraphStudioManager({
-      runtimeRoot: path.join(options.userDataPath, "langgraph-studio"),
-    });
   }
 
   async initialize() {
-    if (this.store.listProjects().length === 0) {
-      await this.ensureProjectForPath(process.cwd());
-    }
-
-    const projects = this.store.listProjects();
     const cwd = path.resolve(process.cwd());
-    const currentProject =
-      projects.find((project) => path.resolve(project.path) === cwd) ??
-      projects[0] ??
-      null;
-    this.setInjectedConfigForProject(currentProject);
-
-    await this.ensureEventStream();
+    this.ensureWorkspaceRecord(cwd);
+    this.setInjectedConfigForWorkspace(cwd);
+    await this.ensureEventStream(cwd);
   }
 
-  async dispose() {
-    this.pendingRuntimeRefreshProjects.forEach((timer) => clearTimeout(timer));
-    this.pendingRuntimeRefreshProjects.clear();
+  async dispose(options: DisposeOrchestratorOptions = {}) {
+    this.isDisposing = true;
+    this.pendingRuntimeRefreshWorkspaces.forEach((timer) => clearTimeout(timer));
+    this.pendingRuntimeRefreshWorkspaces.clear();
     this.pendingEventReconnects.forEach((timer) => clearTimeout(timer));
     this.pendingEventReconnects.clear();
-    if (this.pendingTaskRuns.size > 0) {
+    const awaitPendingTaskRuns = options.awaitPendingTaskRuns ?? true;
+    if (awaitPendingTaskRuns && this.pendingTaskRuns.size > 0) {
       await Promise.allSettled([...this.pendingTaskRuns]);
+    } else if (!awaitPendingTaskRuns) {
+      this.pendingTaskRuns.clear();
     }
     this.langGraphRuntimes.clear();
-    await this.langGraphStudioManager.shutdownAll();
     await this.opencodeClient.shutdown();
   }
 
@@ -199,260 +188,129 @@ export class Orchestrator {
     });
   }
 
-  async bootstrap(): Promise<ProjectSnapshot[]> {
-    await this.reconcileTasksWithZellijSessions();
-
-    const snapshots: ProjectSnapshot[] = [];
-    for (const project of this.store.listProjects()) {
-      await this.reconcilePersistedProjectTasks(project.id);
-      snapshots.push(this.hydrateProject(project.id));
-    }
-    return snapshots;
+  async bootstrap(cwd = process.cwd()): Promise<WorkspaceSnapshot> {
+    const normalizedCwd = path.resolve(cwd);
+    await this.reconcilePersistedWorkspaceTasks(normalizedCwd);
+    await this.ensureEventStream(normalizedCwd);
+    return this.hydrateWorkspace(normalizedCwd);
   }
 
-  async getProjectSnapshot(projectId: string): Promise<ProjectSnapshot> {
-    await this.reconcilePersistedProjectTasks(projectId);
-    return this.hydrateProject(projectId);
+  async getWorkspaceSnapshot(cwd: string): Promise<WorkspaceSnapshot> {
+    const normalizedCwd = path.resolve(cwd);
+    await this.reconcilePersistedWorkspaceTasks(normalizedCwd);
+    await this.ensureEventStream(normalizedCwd);
+    return this.hydrateWorkspace(normalizedCwd);
   }
 
-  async getTaskSnapshot(taskId: string): Promise<TaskSnapshot> {
-    await this.reconcilePersistedTaskStatus(taskId);
-    return this.hydrateTask(taskId);
+  async getTaskSnapshot(taskId: string, cwd = process.cwd()): Promise<TaskSnapshot> {
+    const resolvedCwd = this.resolveTaskCwd(taskId, cwd);
+    await this.reconcilePersistedTaskStatus(resolvedCwd, taskId);
+    return this.hydrateTask(resolvedCwd, taskId);
   }
 
-  async findProjectByPath(projectPath: string): Promise<ProjectSnapshot | null> {
-    const normalizedPath = path.resolve(projectPath);
-    this.store.reconcileLegacyProjectRegistry(normalizedPath);
-    const project = this.store.listProjects().find((item) => path.resolve(item.path) === normalizedPath);
-    if (!project) {
-      return null;
-    }
-    await this.reconcilePersistedProjectTasks(project.id);
-    return this.hydrateProject(project.id);
-  }
-
-  async ensureProjectForPath(projectPath: string): Promise<ProjectSnapshot> {
-    const normalizedPath = path.resolve(projectPath);
-    const existing = await this.findProjectByPath(normalizedPath);
-    if (existing) {
-      return existing;
-    }
-
-    return this.createProject({
-      path: normalizedPath,
-    });
-  }
-
-  async createProject(payload: CreateProjectPayload): Promise<ProjectSnapshot> {
-    const projectId = randomUUID();
-    const projectPath = path.resolve(payload.path);
-    const record: ProjectRecord = {
-      id: projectId,
-      name: getProjectNameFromPath(projectPath),
-      path: projectPath,
-      createdAt: new Date().toISOString(),
-    };
-
-    this.store.insertProject(record);
-    const agentFiles = this.listProjectAgents(record);
-    const topology = this.syncTopology(record, agentFiles);
-
-    const welcome: MessageRecord = {
-      id: randomUUID(),
-      projectId,
-      taskId: null,
-      content:
-        "项目已初始化：支持 Project/Task 两层结构、Task 级独立会话、用户目录下的自定义 Agent 配置，以及项目级拓扑编辑。",
-      sender: "system",
-      timestamp: new Date().toISOString(),
-    };
-    this.store.insertMessage(welcome);
-
-    const snapshot = this.hydrateProject(projectId);
-    this.emit({
-      type: "project-created",
-      projectId,
-      payload: snapshot,
-    });
-
-    await this.ensureEventStream(record.path);
-
+  private ensureWorkspaceRecord(cwd: string): WorkspaceRecord {
+    const normalizedCwd = path.resolve(cwd);
+    this.knownWorkspaces.add(normalizedCwd);
+    this.store.getTopology(normalizedCwd);
     return {
-      ...snapshot,
-      topology,
+      cwd: normalizedCwd,
+      name: getWorkspaceNameFromPath(normalizedCwd),
     };
   }
 
-  async readAgentFile(payload: ReadAgentFilePayload): Promise<AgentFileRecord> {
-    const project = this.store.getProject(payload.projectId);
-    return this.customAgentConfig.getProjectAgent(project.path, payload.agentName);
-  }
+  private resolveTaskCwd(taskId: string, preferredCwd?: string): string {
+    const candidates = [
+      preferredCwd ? path.resolve(preferredCwd) : null,
+      ...this.knownWorkspaces,
+    ].filter((value, index, list): value is string => Boolean(value) && list.indexOf(value) === index);
 
-  async readBuiltinAgentTemplate(
-    payload: ReadBuiltinAgentTemplatePayload,
-  ): Promise<BuiltinAgentTemplateRecord> {
-    const project = this.store.getProject(payload.projectId);
-    return this.customAgentConfig.getBuiltinAgentTemplate(project.path, payload.templateName);
-  }
-
-  async saveAgentPrompt(payload: SaveAgentPromptPayload): Promise<ProjectSnapshot> {
-    const project = this.store.getProject(payload.projectId);
-    const hasTaskRecords = this.store.listTasks(project.id).length > 0;
-    if (hasTaskRecords) {
-      throw new Error("当前 Project 已有 Task 启动记录，不允许再修改 Agent 配置。");
+    for (const candidate of candidates) {
+      const task = this.store.listTasks(candidate).find((item) => item.id === taskId);
+      if (task) {
+        return task.cwd;
+      }
     }
-    this.customAgentConfig.saveProjectAgentPrompt(
-      project.path,
-      payload.currentAgentName,
-      payload.nextAgentName,
-      payload.prompt,
-      payload.isWritable ?? false,
+
+    throw new Error(`Task ${taskId} not found`);
+  }
+
+  async readAgent(cwd: string, agentName: string): Promise<AgentRecord> {
+    const matched = this.listWorkspaceAgents(cwd).find((agent) => agent.name === agentName);
+    if (!matched) {
+      throw new Error(`Agent 配置不存在：${agentName}`);
+    }
+    return matched;
+  }
+
+  private listWorkspaceAgents(cwd: string): AgentRecord[] {
+    return resolveProjectAgents({
+      dslAgents: extractDslAgentsFromTopology(this.store.getTopology(cwd)),
+    });
+  }
+
+  async saveTopology(payload: UpdateTopologyPayload): Promise<WorkspaceSnapshot> {
+    const normalizedCwd = path.resolve(payload.cwd);
+    const agents = this.listWorkspaceAgents(normalizedCwd);
+    const normalized = this.normalizeTopology(agents, payload.topology);
+    this.store.upsertTopology(normalizedCwd, normalized);
+    this.syncWorkspaceTaskPanelOrders(normalizedCwd, agents, normalized);
+    await this.rebuildWorkspaceTaskPanels(normalizedCwd, agents, normalized);
+    const updated = this.hydrateWorkspace(normalizedCwd);
+    this.emit({
+      type: "workspace-updated",
+      cwd: normalizedCwd,
+      payload: updated,
+    });
+    return updated;
+  }
+
+  async applyTeamDsl(payload: {
+    cwd: string;
+    compiled: CompiledTeamDsl;
+  }): Promise<WorkspaceSnapshot> {
+    const normalizedCwd = path.resolve(payload.cwd);
+    const normalized = this.normalizeTopology(
+      payload.compiled.agents.map((agent) => ({
+        name: agent.name,
+        prompt: agent.prompt ?? "",
+        isWritable: agent.isWritable,
+      })),
+      payload.compiled.topology,
     );
-    this.customAgentConfig.validateProjectAgents(project.path);
-    const updated = this.hydrateProject(project.id, true);
+    this.store.upsertTopology(normalizedCwd, normalized);
+    this.setInjectedConfigForWorkspace(normalizedCwd);
+    const updated = this.hydrateWorkspace(normalizedCwd);
     this.emit({
-      type: "project-updated",
-      projectId: project.id,
+      type: "workspace-updated",
+      cwd: normalizedCwd,
       payload: updated,
     });
     return updated;
   }
 
-  async saveBuiltinAgentTemplate(
-    payload: SaveBuiltinAgentTemplatePayload,
-  ): Promise<ProjectSnapshot> {
-    const project = this.store.getProject(payload.projectId);
-    const hasTaskRecords = this.store.listTasks(project.id).length > 0;
-    if (hasTaskRecords) {
-      throw new Error("当前 Project 已有 Task 启动记录，不允许再修改内置模板。");
-    }
-    this.customAgentConfig.saveBuiltinAgentTemplate(
-      project.path,
-      payload.templateName,
-      payload.prompt,
-    );
-    const updated = this.hydrateProject(project.id);
-    this.emit({
-      type: "project-updated",
-      projectId: project.id,
-      payload: updated,
-    });
-    return updated;
-  }
-
-  async resetBuiltinAgentTemplate(
-    payload: ResetBuiltinAgentTemplatePayload,
-  ): Promise<ProjectSnapshot> {
-    const project = this.store.getProject(payload.projectId);
-    const hasTaskRecords = this.store.listTasks(project.id).length > 0;
-    if (hasTaskRecords) {
-      throw new Error("当前 Project 已有 Task 启动记录，不允许再修改内置模板。");
-    }
-    this.customAgentConfig.resetBuiltinAgentTemplate(project.path, payload.templateName);
-    const updated = this.hydrateProject(project.id);
-    this.emit({
-      type: "project-updated",
-      projectId: project.id,
-      payload: updated,
-    });
-    return updated;
-  }
-
-  async deleteAgent(payload: DeleteAgentPayload): Promise<ProjectSnapshot> {
-    const project = this.store.getProject(payload.projectId);
-    const hasTaskRecords = this.store.listTasks(project.id).length > 0;
-    if (hasTaskRecords) {
-      throw new Error("当前 Project 已进入任务驱动阶段，不允许删除 Agent。");
-    }
-    this.customAgentConfig.deleteProjectAgent(project.path, payload.agentName);
-    this.customAgentConfig.validateProjectAgents(project.path);
-    const updated = this.hydrateProject(project.id, true);
-    this.emit({
-      type: "project-updated",
-      projectId: project.id,
-      payload: updated,
-    });
-    return updated;
-  }
-
-  private listProjectAgents(project: ProjectRecord): AgentFileRecord[] {
-    return this.customAgentConfig.listProjectAgents(project.path);
-  }
-
-  async saveTopology(payload: UpdateTopologyPayload): Promise<ProjectSnapshot> {
-    const project = this.store.getProject(payload.projectId);
-    const agentFiles = this.listProjectAgents(project);
-    const normalized = this.normalizeTopology(project.id, agentFiles, payload.topology);
-    this.store.upsertTopology(normalized);
-    this.syncProjectTaskPanelOrders(project.id, agentFiles, normalized);
-    await this.rebuildProjectTaskPanels(project, agentFiles, normalized);
-    const updated = this.hydrateProject(project.id);
-    this.emit({
-      type: "project-updated",
-      projectId: project.id,
-      payload: updated,
-    });
-    return updated;
-  }
-
-  async deleteTask(payload: DeleteTaskPayload): Promise<ProjectSnapshot> {
-    const task = this.store.getTask(payload.taskId);
-    if (task.projectId !== payload.projectId) {
-      throw new Error(`Task ${payload.taskId} 不属于 Project ${payload.projectId}`);
-    }
-
+  async deleteTask(payload: DeleteTaskPayload): Promise<WorkspaceSnapshot> {
+    const normalizedCwd = path.resolve(payload.cwd);
+    const task = this.store.getTask(normalizedCwd, payload.taskId);
     await this.deleteTaskGraphRuntime(task);
-    await this.zellijManager.deleteTaskSession(task.zellijSessionId).catch(() => undefined);
-    this.store.deleteTask(task.id);
-
-    const updated = this.hydrateProject(payload.projectId);
+    this.store.deleteTask(normalizedCwd, task.id);
+    const updated = this.hydrateWorkspace(normalizedCwd);
     this.emit({
-      type: "project-updated",
-      projectId: payload.projectId,
+      type: "workspace-updated",
+      cwd: normalizedCwd,
       payload: updated,
     });
     return updated;
-  }
-
-  async deleteProject(payload: DeleteProjectPayload): Promise<ProjectSnapshot[]> {
-    const project = this.store.getProject(payload.projectId);
-    const tasks = this.store.listTasks(project.id);
-
-    for (const task of tasks) {
-      await this.deleteTaskGraphRuntime(task);
-      await this.zellijManager.deleteTaskSession(task.zellijSessionId).catch(() => undefined);
-    }
-
-    await this.opencodeClient.deleteProject(project.path).catch(() => undefined);
-    this.connectedEventProjects.delete(path.resolve(project.path));
-    this.customAgentConfig.deleteProject(project.path);
-    this.store.deleteProject(project.id);
-
-    const remainingProjects = this.store.listProjects();
-    const nextCurrentProject =
-      remainingProjects.find((item) => path.resolve(item.path) === path.resolve(process.cwd()))
-      ?? remainingProjects[0]
-      ?? null;
-    this.setInjectedConfigForProject(nextCurrentProject);
-
-    const snapshots: ProjectSnapshot[] = [];
-    for (const remainingProject of remainingProjects) {
-      await this.reconcilePersistedProjectTasks(remainingProject.id);
-      snapshots.push(this.hydrateProject(remainingProject.id));
-    }
-
-    return snapshots;
   }
 
   async submitTask(payload: SubmitTaskPayload): Promise<TaskSnapshot> {
-    const project = this.store.getProject(payload.projectId);
-    const agentFiles = this.listProjectAgents(project);
-    this.customAgentConfig.validateProjectAgents(project.path);
-    this.syncTopology(project, agentFiles);
+    const normalizedCwd = path.resolve(payload.cwd ?? process.cwd());
+    const agents = this.listWorkspaceAgents(normalizedCwd);
+    validateProjectAgents(agents);
+    this.syncTopology(normalizedCwd, agents);
     const resolution = resolveTaskSubmissionTarget({
       content: payload.content,
       mentionAgent: payload.mentionAgent,
-      availableAgents: agentFiles.map((agent) => agent.name),
+      availableAgents: agents.map((agent) => agent.name),
     });
     if (!resolution.ok) {
       throw new Error(resolution.message);
@@ -460,110 +318,66 @@ export class Orchestrator {
     const mentionName = resolution.targetAgent;
 
     if (payload.taskId) {
-      return this.continueTask(project, payload.taskId, payload.content, mentionName, agentFiles);
+      return this.continueTask(normalizedCwd, payload.taskId, payload.content, mentionName, agents);
     }
 
-    const initialized = await this.createTask(project, agentFiles, {
+    const initialized = await this.createTask(normalizedCwd, agents, {
       title: this.createTaskTitle(payload.content),
       source: "submit",
     });
 
     return this.continueTask(
-      project,
+      normalizedCwd,
       initialized.task.id,
       payload.content,
       mentionName,
-      agentFiles,
+      agents,
     );
   }
 
   async initializeTask(payload: InitializeTaskPayload): Promise<TaskSnapshot> {
-    const project = this.store.getProject(payload.projectId);
-    const agentFiles = this.listProjectAgents(project);
-    this.customAgentConfig.validateProjectAgents(project.path);
-    this.syncTopology(project, agentFiles);
+    const normalizedCwd = path.resolve(payload.cwd);
+    const agents = this.listWorkspaceAgents(normalizedCwd);
+    validateProjectAgents(agents);
+    this.syncTopology(normalizedCwd, agents);
 
-    return this.createTask(project, agentFiles, {
+    return this.createTask(normalizedCwd, agents, {
       title: (payload.title ?? "").trim() || "未命名任务",
       source: "initialize",
     });
   }
 
   async openAgentTerminal(payload: OpenAgentTerminalPayload) {
-    const project = this.store.getProject(payload.projectId);
-    const task = this.store.getTask(payload.taskId);
-    if (task.projectId !== project.id) {
-      throw new Error("Task 不属于当前 Project");
-    }
-
+    const normalizedCwd = path.resolve(payload.cwd);
+    const task = this.store.getTask(normalizedCwd, payload.taskId);
     const snapshot = await this.ensureTaskInitialized(
-      project,
+      normalizedCwd,
       task,
-      this.customAgentConfig.listProjectAgents(project.path),
+      this.listWorkspaceAgents(normalizedCwd),
     );
     this.emit({
       type: "task-updated",
-      projectId: project.id,
+      cwd: normalizedCwd,
       payload: snapshot,
     });
 
-    const panel = this.store.listTaskPanels(task.id).find((item) => item.agentName === payload.agentName);
-    const taskAgent = this.store.listTaskAgents(task.id).find((item) => item.name === payload.agentName);
-    if (!panel || !taskAgent) {
+    const taskAgent = this.store.listTaskAgents(normalizedCwd, task.id).find((item) => item.name === payload.agentName);
+    if (!taskAgent) {
       throw new Error(`未找到 Agent ${payload.agentName} 对应的运行信息。`);
     }
-    await this.syncOpenCodeAttachEndpoint(project.path);
-    await this.zellijManager.openAgentTerminal({
-      sessionName: panel.sessionName,
-      cwd: panel.cwd,
-      agentName: payload.agentName,
-      opencodeSessionId: taskAgent.opencodeSessionId,
-    });
-  }
-
-  async openTaskSession(payload: OpenTaskSessionPayload): Promise<void> {
-    const project = this.store.getProject(payload.projectId);
-    const task = this.store.getTask(payload.taskId);
-    if (task.projectId !== project.id) {
-      throw new Error("Task 不属于当前 Project");
+    await this.syncOpenCodeAttachEndpoint(normalizedCwd);
+    if (!taskAgent.opencodeSessionId) {
+      throw new Error(`Agent ${payload.agentName} 当前还没有可 attach 的 OpenCode session。`);
     }
-
-    await this.zellijManager.assertAvailable("无法打开 Zellij Session");
-    const snapshot = await this.ensureTaskInitialized(
-      project,
-      task,
-      this.listProjectAgents(project),
-    );
-    this.emit({
-      type: "task-updated",
-      projectId: project.id,
-      payload: snapshot,
-    });
-
-    const sessionName =
-      task.zellijSessionId ?? `oap-${task.projectId.slice(0, 6)}-${task.id.slice(0, 6)}`;
-    await this.zellijManager.openTaskSession(sessionName, task.cwd);
-  }
-
-  async openLangGraphStudio(payload: OpenLangGraphStudioPayload): Promise<string> {
-    const project = this.store.getProject(payload.projectId);
-    const agentFiles = this.listProjectAgents(project);
-    this.syncTopology(project, agentFiles);
-    return this.langGraphStudioManager.open(project.path);
   }
 
   async getTaskRuntime(payload: GetTaskRuntimePayload): Promise<AgentRuntimeSnapshot[]> {
-    const project = this.store.getProject(payload.projectId);
-    const task = this.store.getTask(payload.taskId);
-    if (task.projectId !== project.id) {
-      throw new Error("Task 不属于当前 Project");
-    }
-
-    const agents = this.store.listTaskAgents(task.id);
+    const normalizedCwd = path.resolve(payload.cwd);
+    const task = this.store.getTask(normalizedCwd, payload.taskId);
+    const agents = this.store.listTaskAgents(normalizedCwd, task.id);
     return Promise.all(
       agents.map(async (agent) => {
         const baseSnapshot: AgentRuntimeSnapshot = {
-          projectId: project.id,
           taskId: task.id,
           agentId: agent.name,
           sessionId: agent.opencodeSessionId,
@@ -581,7 +395,7 @@ export class Orchestrator {
 
         try {
           const runtime = await this.opencodeClient.getSessionRuntime(
-            project.path,
+            normalizedCwd,
             agent.opencodeSessionId,
           );
           return {
@@ -603,135 +417,108 @@ export class Orchestrator {
   }
 
   private async createTask(
-    project: ProjectRecord,
-    agentFiles: AgentFileRecord[],
+    cwd: string,
+    agents: AgentRecord[],
     options: {
       title: string;
       source: "initialize" | "submit";
     },
   ): Promise<TaskSnapshot> {
-    if (agentFiles.length === 0) {
-      throw new Error("当前项目没有可用的 Agent");
+    if (agents.length === 0) {
+      throw new Error("当前工作区没有可用的 Agent");
     }
 
     const taskId = randomUUID();
-    const zellijSessionId = await this.zellijManager.createTaskSession(project.id, taskId);
+    const normalizedCwd = path.resolve(cwd);
 
     const task: TaskRecord = {
       id: taskId,
-      projectId: project.id,
       title: options.title,
       status: "pending",
-      cwd: project.path,
-      zellijSessionId,
+      cwd: normalizedCwd,
+      zellijSessionId: null,
       opencodeSessionId: null,
-      agentCount: agentFiles.length,
+      agentCount: agents.length,
       createdAt: new Date().toISOString(),
       completedAt: null,
       initializedAt: null,
     };
 
     this.store.insertTask(task);
-    for (const agentFile of agentFiles) {
-      this.store.insertTaskAgent({
+    for (const agent of agents) {
+      this.store.insertTaskAgent(normalizedCwd, {
         id: randomUUID(),
         taskId,
-        projectId: project.id,
-        name: agentFile.name,
+        name: agent.name,
         opencodeSessionId: null,
         status: "idle",
         runCount: 0,
       });
     }
 
-    await this.ensureTaskInitialized(project, task, agentFiles);
-
-    const zellijSessionSummary = task.zellijSessionId
-      ? `, Zellij Session: ${task.zellijSessionId}`
-      : "";
+    await this.ensureTaskInitialized(normalizedCwd, task, agents);
 
     const taskCreatedMessage: MessageRecord = {
       id: randomUUID(),
-      projectId: project.id,
       taskId,
       content:
         options.source === "initialize"
-          ? `Task 已初始化${zellijSessionSummary}`
-          : `Task 已创建并完成初始化${zellijSessionSummary}`,
+          ? "Task 已初始化"
+          : "Task 已创建并完成初始化",
       sender: "system",
       timestamp: new Date().toISOString(),
       meta: {
         kind: "task-created",
       },
     };
-    this.store.insertMessage(taskCreatedMessage);
+    this.store.insertMessage(normalizedCwd, taskCreatedMessage);
 
-    if (!(await this.zellijManager.isAvailable())) {
-      this.store.insertMessage({
-        id: randomUUID(),
-        projectId: project.id,
-        taskId,
-        content: buildZellijMissingReminder(),
-        sender: "system",
-        timestamp: new Date().toISOString(),
-        meta: {
-          kind: "zellij-missing",
-        },
-      });
-    }
-
-    const snapshot = this.hydrateTask(taskId);
+    const snapshot = this.hydrateTask(normalizedCwd, taskId);
     this.emit({
       type: "task-created",
-      projectId: project.id,
+      cwd: normalizedCwd,
       payload: snapshot,
     });
-
-    if (this.autoOpenTaskSession && snapshot.task.zellijSessionId) {
-      await this.zellijManager.openTaskSession(snapshot.task.zellijSessionId, project.path).catch(() => undefined);
-    }
 
     return snapshot;
   }
 
   private async continueTask(
-    project: ProjectRecord,
+    cwd: string,
     taskId: string,
     content: string,
     mentionAgent: string,
-    agentFiles: AgentFileRecord[],
+    agents: AgentRecord[],
   ): Promise<TaskSnapshot> {
-    const task = this.store.getTask(taskId);
-    if (task.projectId !== project.id) {
-      throw new Error("Task 不属于当前 Project");
-    }
+    const normalizedCwd = path.resolve(cwd);
+    const task = this.store.getTask(normalizedCwd, taskId);
     if (isTerminalTaskStatus(task.status)) {
-      this.store.updateTaskStatus(task.id, "running", null);
+      this.store.updateTaskStatus(normalizedCwd, task.id, "running", null);
     }
 
-    this.syncTaskAgents(task, agentFiles);
-    const targetAgent = this.findAgentFile(agentFiles, mentionAgent);
+    this.syncTaskAgents(task, agents);
+    const targetAgent = this.findAgent(agents, mentionAgent);
 
     if (!targetAgent) {
       throw new Error(`未找到被 @ 的 Agent：${mentionAgent}`);
     }
 
-    await this.ensureTaskInitialized(project, task, agentFiles);
+    await this.ensureTaskInitialized(normalizedCwd, task, agents);
 
-    const message = this.createUserMessage(project.id, task.id, task.title, content, targetAgent.name);
-    this.store.insertMessage(message);
+    const message = this.createUserMessage(task.id, task.title, content, targetAgent.name);
+    this.store.insertMessage(normalizedCwd, message);
     this.emit({
       type: "message-created",
-      projectId: project.id,
+      cwd: normalizedCwd,
       payload: message,
     });
 
     const forwardedContent = stripTargetMentionPure(content, targetAgent.name);
-    const topology = this.store.getTopology(project.id);
-    const runtime = this.getLangGraphRuntime(project);
+    const topology = this.store.getTopology(normalizedCwd);
+    const runtime = this.getLangGraphRuntime(normalizedCwd);
     this.trackBackgroundTask(runtime.resumeTask({
       taskId: task.id,
-      projectId: project.id,
+      workspaceCwd: normalizedCwd,
       topology,
       event: {
         type: "user_message",
@@ -742,7 +529,7 @@ export class Orchestrator {
       taskId: task.id,
       agentName: targetAgent.name,
     });
-    return this.hydrateTask(task.id);
+    return this.hydrateTask(normalizedCwd, task.id);
   }
 
   private trackBackgroundTask(
@@ -767,7 +554,6 @@ export class Orchestrator {
   }
 
   private createUserMessage(
-    projectId: string,
     taskId: string,
     taskTitle: string,
     content: string,
@@ -776,7 +562,6 @@ export class Orchestrator {
     const normalizedContent = buildUserHistoryContentPure(content, targetAgentId);
     return {
       id: randomUUID(),
-      projectId,
       taskId,
       content: normalizedContent,
       sender: "user",
@@ -789,67 +574,63 @@ export class Orchestrator {
     };
   }
 
-  private syncTaskAgents(task: TaskRecord, agentFiles: AgentFileRecord[]) {
-    const orderedAgentFiles = this.orderAgentFiles(task.projectId, agentFiles);
-    const existingByName = new Set(this.store.listTaskAgents(task.id).map((item) => item.name));
-    for (const agentFile of orderedAgentFiles) {
-      if (existingByName.has(agentFile.name)) {
+  private syncTaskAgents(task: TaskRecord, agents: AgentRecord[]) {
+    const orderedAgents = this.orderAgents(task.cwd, agents);
+    const existingByName = new Set(this.store.listTaskAgents(task.cwd, task.id).map((item) => item.name));
+    for (const agent of orderedAgents) {
+      if (existingByName.has(agent.name)) {
         continue;
       }
-      this.store.insertTaskAgent({
+      this.store.insertTaskAgent(task.cwd, {
         id: randomUUID(),
         taskId: task.id,
-        projectId: task.projectId,
-        name: agentFile.name,
+        name: agent.name,
         opencodeSessionId: null,
         status: "idle",
         runCount: 0,
       });
     }
 
-    const existingPanels = new Set(this.store.listTaskPanels(task.id).map((item) => item.agentName));
-    const nextPanels = this.zellijManager.createPanelBindings({
-      projectId: task.projectId,
+    const existingPanels = new Set(this.store.listTaskPanels(task.cwd, task.id).map((item) => item.agentName));
+    const nextPanels = orderedAgents.map((item, index) => ({
+      id: `${task.id}:${item.name}`,
       taskId: task.id,
-      sessionName: task.zellijSessionId ?? `oap-${task.projectId.slice(0, 6)}-${task.id.slice(0, 6)}`,
+      sessionName: "",
+      paneId: item.name,
+      agentName: item.name,
       cwd: task.cwd,
-      agents: orderedAgentFiles.map((item) => ({
-        name: item.name,
-        opencodeSessionId: null,
-        status: "idle",
-      })),
-    });
+      order: index,
+    }));
     for (const panel of nextPanels) {
       if (!existingPanels.has(panel.agentName)) {
-        this.store.insertTaskPanel(panel);
+        this.store.insertTaskPanel(task.cwd, panel);
       }
     }
 
-    this.store.updateTaskAgentCount(task.id, agentFiles.length);
+    this.store.updateTaskAgentCount(task.cwd, task.id, agents.length);
   }
 
   private ensureRuntimeTaskAgent(
     task: TaskRecord,
     runtimeAgentName: string,
   ): void {
-    const existing = this.store.listTaskAgents(task.id).find((item) => item.name === runtimeAgentName);
+    const existing = this.store.listTaskAgents(task.cwd, task.id).find((item) => item.name === runtimeAgentName);
     if (existing) {
       return;
     }
-    this.store.insertTaskAgent({
+    this.store.insertTaskAgent(task.cwd, {
       id: randomUUID(),
       taskId: task.id,
-      projectId: task.projectId,
       name: runtimeAgentName,
       opencodeSessionId: null,
       status: "idle",
       runCount: 0,
     });
-    this.store.updateTaskAgentCount(task.id, this.store.listTaskAgents(task.id).length);
+    this.store.updateTaskAgentCount(task.cwd, task.id, this.store.listTaskAgents(task.cwd, task.id).length);
   }
 
   private async runAgent(
-    project: ProjectRecord,
+    cwd: string,
     task: TaskRecord,
     agentName: string,
     prompt: AgentExecutionPrompt,
@@ -860,7 +641,7 @@ export class Orchestrator {
     }
 
     const result = await this.executeLangGraphAgentOnce(
-      project,
+      cwd,
       task,
       null,
       agentName,
@@ -872,10 +653,10 @@ export class Orchestrator {
       return;
     }
 
-    const latestTask = this.store.getTask(task.id);
+    const latestTask = this.store.getTask(task.cwd, task.id);
     if (isTerminalTaskStatus(latestTask.status)) {
       if (latestTask.status === "failed" && latestTask.completedAt === null) {
-        await this.completeTask(task.id, "failed");
+        await this.completeTask(task.cwd, task.id, "failed");
       }
       return;
     }
@@ -886,31 +667,31 @@ export class Orchestrator {
 
     const nextTaskStatus = resolveStandaloneTaskStatusAfterAgentRun({
       latestAgentStatus: result.agentStatus,
-      agentStatuses: this.store.listTaskAgents(task.id),
+      agentStatuses: this.store.listTaskAgents(task.cwd, task.id),
     });
 
     if (nextTaskStatus === "finished") {
-      await this.completeTask(task.id, "finished");
+      await this.completeTask(task.cwd, task.id, "finished");
       return;
     }
 
     if (nextTaskStatus === "failed") {
-      await this.completeTask(task.id, "failed");
+      await this.completeTask(task.cwd, task.id, "failed");
       return;
     }
 
-    this.moveTaskToWaiting(project.id, task.id, agentName);
+    this.moveTaskToWaiting(task.cwd, task.id, agentName);
   }
 
   private shouldSuppressDuplicateDispatchMessage(
-    projectId: string,
+    cwd: string,
     taskId: string,
     sourceAgentId: string,
     targetAgentIds: string[],
   ): boolean {
     const now = Date.now();
     const incomingTargets = [...targetAgentIds].sort().join(",");
-    const messages = this.store.listMessages(projectId, taskId);
+    const messages = this.store.listMessages(cwd, taskId);
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const message = messages[index];
       const timestamp = Date.parse(message.timestamp);
@@ -947,39 +728,37 @@ export class Orchestrator {
     return targetAgentName !== BUILD_AGENT_NAME && !this.isReviewAgent({ name: targetAgentName }, topology);
   }
 
-  private isTaskTerminal(taskId: string): boolean {
-    return isTerminalTaskStatus(this.store.getTask(taskId).status);
-  }
-
   private updateTaskStatusIfActive(
+    cwd: string,
     taskId: string,
     status: TaskRecord["status"],
     completedAt: string | null = null,
   ): boolean {
-    if (this.isTaskTerminal(taskId)) {
+    const task = this.store.getTask(cwd, taskId);
+    if (isTerminalTaskStatus(task.status)) {
       return false;
     }
-    this.store.updateTaskStatus(taskId, status, completedAt);
+    this.store.updateTaskStatus(cwd, taskId, status, completedAt);
     return true;
   }
 
-  private async reconcilePersistedTaskStatus(taskId: string) {
-    const task = this.store.getTask(taskId);
+  private async reconcilePersistedTaskStatus(cwd: string, taskId: string) {
+    const task = this.store.getTask(cwd, taskId);
     if (!shouldFinishTaskFromPersistedStatePure({
       taskStatus: task.status,
-      topology: this.store.getTopology(task.projectId),
-      agents: this.store.listTaskAgents(taskId),
-      messages: this.store.listMessages(task.projectId, taskId),
+      topology: this.store.getTopology(task.cwd),
+      agents: this.store.listTaskAgents(task.cwd, taskId),
+      messages: this.store.listMessages(task.cwd, taskId),
     })) {
       return;
     }
 
-    await this.completeTask(taskId, "finished");
+    await this.completeTask(task.cwd, taskId, "finished");
   }
 
-  private async reconcilePersistedProjectTasks(projectId: string) {
-    for (const task of this.store.listTasks(projectId)) {
-      await this.reconcilePersistedTaskStatus(task.id);
+  private async reconcilePersistedWorkspaceTasks(cwd: string) {
+    for (const task of this.store.listTasks(cwd)) {
+      await this.reconcilePersistedTaskStatus(cwd, task.id);
     }
   }
 
@@ -1217,120 +996,113 @@ export class Orchestrator {
   }
 
   private async ensureAgentSession(
-    project: ProjectRecord,
+    cwd: string,
     task: TaskRecord,
     agent: TaskAgentRecord,
   ): Promise<string> {
-    this.setInjectedConfigForProject(project);
+    this.setInjectedConfigForWorkspace(cwd);
     if (agent.opencodeSessionId) {
       return agent.opencodeSessionId;
     }
 
     const sessionId = await this.opencodeClient.createSession(
-      project.path,
+      task.cwd,
       `${task.title}:${agent.name}`,
     );
-    this.store.updateTaskAgentSessionId(task.id, agent.name, sessionId);
+    this.store.updateTaskAgentSessionId(task.cwd, task.id, agent.name, sessionId);
     return sessionId;
   }
 
   private async ensureTaskPanels(task: TaskRecord) {
-    const project = this.store.getProject(task.projectId);
-    await this.ensureTaskInitialized(project, task, this.listProjectAgents(project));
+    await this.ensureTaskInitialized(task.cwd, task, this.listWorkspaceAgents(task.cwd));
   }
 
-  private async ensureTaskAgentSessions(project: ProjectRecord, task: TaskRecord): Promise<Map<string, string>> {
+  private async ensureTaskAgentSessions(cwd: string, task: TaskRecord): Promise<Map<string, string>> {
     const sessions = await Promise.all(
-      this.store.listTaskAgents(task.id).map(async (agent) => [
+      this.store.listTaskAgents(task.cwd, task.id).map(async (agent) => [
         agent.name,
-        await this.ensureAgentSession(project, task, agent),
+        await this.ensureAgentSession(cwd, task, agent),
       ] as const),
     );
     return new Map(sessions);
   }
 
   private async ensureTaskInitialized(
-    project: ProjectRecord,
+    cwd: string,
     task: TaskRecord,
-    agentFiles: AgentFileRecord[],
+    agents: AgentRecord[],
   ): Promise<TaskSnapshot> {
-    await this.ensureEventStream(project.path);
-    this.setInjectedConfigForProject(project);
-    this.syncTaskAgents(task, agentFiles);
-    const currentTask = this.store.getTask(task.id);
-    const agents = this.orderTaskAgents(task.id, this.store.listTaskAgents(task.id));
-    const agentSessions = await this.ensureTaskAgentSessions(project, currentTask);
-    await this.syncOpenCodeAttachEndpoint(project.path);
-    const panels = await this.zellijManager.materializePanelBindings({
-      projectId: currentTask.projectId,
-      taskId: currentTask.id,
-      sessionName:
-        currentTask.zellijSessionId ?? `oap-${currentTask.projectId.slice(0, 6)}-${currentTask.id.slice(0, 6)}`,
-      cwd: currentTask.cwd,
-      agents: agents.map((agent) => ({
-        name: agent.name,
-        opencodeSessionId: agentSessions.get(agent.name) ?? null,
-        status: agent.status,
-      })),
-    });
-    for (const panel of panels) {
-      this.store.upsertTaskPanel(panel);
+    await this.ensureEventStream(cwd);
+    this.setInjectedConfigForWorkspace(cwd);
+    this.syncTaskAgents(task, agents);
+    const currentTask = this.store.getTask(task.cwd, task.id);
+    const orderedTaskAgents = this.orderTaskAgents(task.cwd, task.id, this.store.listTaskAgents(task.cwd, task.id));
+    await this.ensureTaskAgentSessions(cwd, currentTask);
+    for (const [index, agent] of orderedTaskAgents.entries()) {
+      this.store.upsertTaskPanel(task.cwd, {
+        id: `${currentTask.id}:${agent.name}`,
+        taskId: currentTask.id,
+        sessionName: "",
+        paneId: agent.name,
+        agentName: agent.name,
+        cwd: currentTask.cwd,
+        order: index,
+      });
     }
 
-    const refreshedTask = this.store.getTask(task.id);
+    const refreshedTask = this.store.getTask(task.cwd, task.id);
     if (!refreshedTask.initializedAt) {
-      this.store.updateTaskInitialized(task.id, new Date().toISOString());
+      this.store.updateTaskInitialized(task.cwd, task.id, new Date().toISOString());
     }
 
-    return this.hydrateTask(task.id);
+    return this.hydrateTask(task.cwd, task.id);
   }
 
   private getOrderedAgentNames(
-    projectId: string,
-    agentFiles: Array<Pick<AgentFileRecord, "name">>,
+    cwd: string,
+    agents: Array<Pick<AgentRecord, "name">>,
     topologyOverride?: TopologyRecord,
   ): string[] {
-    const topology = topologyOverride ?? this.store.getTopology(projectId);
-    return resolveTopologyAgentOrder(agentFiles, topology.nodes);
+    const topology = topologyOverride ?? this.store.getTopology(cwd);
+    return resolveTopologyAgentOrder(agents, topology.nodes);
   }
 
-  private orderAgentFiles(
-    projectId: string,
-    agentFiles: AgentFileRecord[],
+  private orderAgents(
+    cwd: string,
+    agents: AgentRecord[],
     topologyOverride?: TopologyRecord,
-  ): AgentFileRecord[] {
-    const orderedNames = this.getOrderedAgentNames(projectId, agentFiles, topologyOverride);
-    const fileByName = new Map(agentFiles.map((agent) => [agent.name, agent]));
-    return orderedNames.map((name) => fileByName.get(name)).filter((agent): agent is AgentFileRecord => Boolean(agent));
+  ): AgentRecord[] {
+    const orderedNames = this.getOrderedAgentNames(cwd, agents, topologyOverride);
+    const agentByName = new Map(agents.map((agent) => [agent.name, agent]));
+    return orderedNames.map((name) => agentByName.get(name)).filter((agent): agent is AgentRecord => Boolean(agent));
   }
 
   private orderTaskAgents(
+    cwd: string,
     taskId: string,
     agents: TaskAgentRecord[],
     topologyOverride?: TopologyRecord,
   ): TaskAgentRecord[] {
-    const task = this.store.getTask(taskId);
-    const project = this.store.getProject(task.projectId);
     const orderedNames = this.getOrderedAgentNames(
-      task.projectId,
-      this.listProjectAgents(project),
+      cwd,
+      this.listWorkspaceAgents(cwd),
       topologyOverride,
     );
     const agentByName = new Map(agents.map((agent) => [agent.name, agent]));
     return orderedNames.map((name) => agentByName.get(name)).filter((agent): agent is TaskAgentRecord => Boolean(agent));
   }
 
-  private syncProjectTaskPanelOrders(
-    projectId: string,
-    agentFiles: AgentFileRecord[],
+  private syncWorkspaceTaskPanelOrders(
+    cwd: string,
+    agents: AgentRecord[],
     topology: TopologyRecord,
   ) {
-    const orderedNames = this.getOrderedAgentNames(projectId, agentFiles, topology);
+    const orderedNames = this.getOrderedAgentNames(cwd, agents, topology);
     const orderIndex = new Map(orderedNames.map((name, index) => [name, index]));
-    for (const task of this.store.listTasks(projectId)) {
-      const taskPanels = this.store.listTaskPanels(task.id);
+    for (const task of this.store.listTasks(cwd)) {
+      const taskPanels = this.store.listTaskPanels(task.cwd, task.id);
       for (const [fallbackIndex, panel] of taskPanels.entries()) {
-        this.store.upsertTaskPanel({
+        this.store.upsertTaskPanel(task.cwd, {
           ...panel,
           order: orderIndex.get(panel.agentName) ?? orderedNames.length + fallbackIndex,
         });
@@ -1338,38 +1110,33 @@ export class Orchestrator {
     }
   }
 
-  private async rebuildProjectTaskPanels(
-    project: ProjectRecord,
-    agentFiles: AgentFileRecord[],
+  private async rebuildWorkspaceTaskPanels(
+    cwd: string,
+    agents: AgentRecord[],
     topology: TopologyRecord,
   ) {
-    for (const task of this.store.listTasks(project.id)) {
-      if (!task.initializedAt || !task.zellijSessionId) {
+    for (const task of this.store.listTasks(cwd)) {
+      if (!task.initializedAt) {
         continue;
       }
 
       try {
         const orderedAgents = this.orderTaskAgents(
+          cwd,
           task.id,
-          this.store.listTaskAgents(task.id),
+          this.store.listTaskAgents(task.cwd, task.id),
           topology,
         );
-        const agentSessions = await this.ensureTaskAgentSessions(project, task);
-        await this.syncOpenCodeAttachEndpoint(project.path);
-        const panels = await this.zellijManager.materializePanelBindings({
-          projectId: task.projectId,
-          taskId: task.id,
-          sessionName: task.zellijSessionId,
-          cwd: task.cwd,
-          agents: orderedAgents.map((agent) => ({
-            name: agent.name,
-            opencodeSessionId: agentSessions.get(agent.name) ?? null,
-            status: agent.status,
-          })),
-          forceRebuild: true,
-        });
-        for (const panel of panels) {
-          this.store.upsertTaskPanel(panel);
+        for (const [index, agent] of orderedAgents.entries()) {
+          this.store.upsertTaskPanel(task.cwd, {
+            id: `${task.id}:${agent.name}`,
+            taskId: task.id,
+            sessionName: "",
+            paneId: agent.name,
+            agentName: agent.name,
+            cwd: task.cwd,
+            order: index,
+          });
         }
       } catch (error) {
         console.error("[orchestrator] 重建 Task pane 顺序失败", {
@@ -1382,19 +1149,18 @@ export class Orchestrator {
 
   private async syncOpenCodeAttachEndpoint(projectPath: string) {
     const attachBaseUrl = await this.opencodeClient.getAttachBaseUrl(projectPath);
-    this.zellijManager.setOpenCodeAttachBaseUrl(attachBaseUrl);
     return attachBaseUrl;
   }
 
   private isReviewAgent(
-    agent: Pick<AgentFileRecord, "name">,
+    agent: Pick<AgentRecord, "name">,
     topology: Pick<TopologyRecord, "edges">,
   ): boolean {
     return isReviewAgentInTopology(topology, agent.name);
   }
 
   private createSystemPrompt(
-    agent: AgentFileRecord,
+    agent: AgentRecord,
     topology: Pick<TopologyRecord, "edges">,
     prompt: AgentExecutionPrompt,
   ): string {
@@ -1418,35 +1184,35 @@ export class Orchestrator {
     return (firstLine ?? "未命名任务").slice(0, 80);
   }
 
-  private setInjectedConfigForProject(project: ProjectRecord | null) {
-    if (!project) {
+  private setInjectedConfigForWorkspace(cwd: string | null) {
+    if (!cwd) {
       return;
     }
     this.opencodeClient.setInjectedConfigContent(
-      project.path,
-      this.customAgentConfig.buildInjectedConfigContent(project.path),
+      cwd,
+      buildInjectedConfigFromAgents(this.listWorkspaceAgents(cwd)),
     );
   }
 
-  private findAgentFile(agentFiles: AgentFileRecord[], name: string | undefined): AgentFileRecord | undefined {
+  private findAgent(agents: AgentRecord[], name: string | undefined): AgentRecord | undefined {
     if (!name) {
       return undefined;
     }
-    return agentFiles.find((agent) => agent.name === name);
+    return agents.find((agent) => agent.name === name);
   }
 
   private resolveExecutableAgentName(
-    project: ProjectRecord,
+    cwd: string,
     state: GraphTaskState | null,
     runtimeAgentName: string,
   ): string {
-    const projectAgentFiles = this.listProjectAgents(project);
-    if (projectAgentFiles.some((agent) => agent.name === runtimeAgentName)) {
+    const workspaceAgents = this.listWorkspaceAgents(cwd);
+    if (workspaceAgents.some((agent) => agent.name === runtimeAgentName)) {
       return runtimeAgentName;
     }
 
     const templateName = state ? getRuntimeTemplateName(state, runtimeAgentName) : null;
-    if (templateName && projectAgentFiles.some((agent) => agent.name === templateName)) {
+    if (templateName && workspaceAgents.some((agent) => agent.name === templateName)) {
       return templateName;
     }
 
@@ -1460,72 +1226,71 @@ export class Orchestrator {
     if (!state) {
       return runtimeAgentName;
     }
-    return getRuntimeNode(state, runtimeAgentName)?.displayName ?? runtimeAgentName;
+    return state.runtimeNodes.find((node) => node.id === runtimeAgentName)?.displayName ?? runtimeAgentName;
   }
 
-  private hydrateProject(projectId: string, forceSyncTopology = false): ProjectSnapshot {
-    const project = this.store.getProject(projectId);
-    const agentFiles = this.listProjectAgents(project);
-    const builtinAgentTemplates = this.customAgentConfig.listBuiltinAgentTemplates(project.path);
+  private hydrateWorkspace(cwd: string, forceSyncTopology = false): WorkspaceSnapshot {
+    const normalizedCwd = path.resolve(cwd);
+    const workspace = this.ensureWorkspaceRecord(normalizedCwd);
+    const agents = this.listWorkspaceAgents(normalizedCwd);
     const topology = forceSyncTopology
-      ? this.syncTopology(project, agentFiles)
-      : this.ensureTopologyExists(project, agentFiles);
-    const tasks = this.store.listTasks(project.id);
+      ? this.syncTopology(normalizedCwd, agents)
+      : this.ensureTopologyExists(normalizedCwd, agents);
+    const tasks = this.store.listTasks(normalizedCwd);
     for (const task of tasks) {
-      this.syncTaskAgents(task, agentFiles);
+      this.syncTaskAgents(task, agents);
     }
 
     return {
-      project,
-      agentFiles,
-      builtinAgentTemplates,
+      cwd: workspace.cwd,
+      name: workspace.name,
+      agents,
       topology,
-      messages: this.store.listMessages(project.id),
-      tasks: tasks.map((task) => this.hydrateTask(task.id)),
+      messages: this.store.listMessages(normalizedCwd),
+      tasks: tasks.map((task) => this.hydrateTask(normalizedCwd, task.id)),
     };
   }
 
-  private hydrateTask(taskId: string): TaskSnapshot {
-    const task = this.store.getTask(taskId);
-    const project = this.store.getProject(task.projectId);
-    const agentFiles = this.listProjectAgents(project);
-    this.syncTaskAgents(task, agentFiles);
+  private hydrateTask(cwd: string, taskId: string): TaskSnapshot {
+    const task = this.store.getTask(cwd, taskId);
+    const agents = this.listWorkspaceAgents(task.cwd);
+    this.syncTaskAgents(task, agents);
     return {
-      task: this.store.getTask(taskId),
-      agents: this.store.listTaskAgents(taskId),
-      panels: this.store.listTaskPanels(taskId),
-      messages: this.store.listMessages(task.projectId, taskId),
-      topology: this.store.getTopology(task.projectId),
+      task: this.store.getTask(task.cwd, taskId),
+      agents: this.store.listTaskAgents(task.cwd, taskId),
+      panels: this.store.listTaskPanels(task.cwd, taskId),
+      messages: this.store.listMessages(task.cwd, taskId),
+      topology: this.store.getTopology(task.cwd),
     };
   }
 
-  private ensureTopologyExists(project: ProjectRecord, agentFiles: AgentFileRecord[]): TopologyRecord {
-    const current = this.store.getTopology(project.id);
+  private ensureTopologyExists(cwd: string, agents: AgentRecord[]): TopologyRecord {
+    const current = this.store.getTopology(cwd);
     if (current.nodes.length === 0 && current.edges.length === 0) {
-      const fallback = createDefaultTopology(project.id, agentFiles);
-      this.store.upsertTopology(fallback);
+      const fallback = createDefaultTopology(agents);
+      this.store.upsertTopology(cwd, fallback);
       return fallback;
     }
-    return this.normalizeTopology(project.id, agentFiles, current);
+    return this.normalizeTopology(agents, current);
   }
 
-  private syncTopology(project: ProjectRecord, agentFiles: AgentFileRecord[]): TopologyRecord {
-    const current = this.store.getTopology(project.id);
+  private syncTopology(cwd: string, agents: AgentRecord[]): TopologyRecord {
+    const current = this.store.getTopology(cwd);
     const next =
       current.nodes.length === 0 && current.edges.length === 0
-        ? createDefaultTopology(project.id, agentFiles)
-        : this.normalizeTopology(project.id, agentFiles, current);
+        ? createDefaultTopology(agents)
+        : this.normalizeTopology(agents, current);
 
-    this.store.upsertTopology(next);
+    this.store.upsertTopology(cwd, next);
     return next;
   }
 
   private normalizeTopology(
-    projectId: string,
-    agentFiles: AgentFileRecord[],
+    agents: AgentRecord[],
     topology: TopologyRecord,
   ): TopologyRecord {
-    const validNames = new Set(agentFiles.map((item) => item.name));
+    const validNames = new Set(agents.map((item) => item.name));
+    const agentByName = new Map(agents.map((agent) => [agent.name, agent]));
     const seenEdges = new Set<string>();
     const seenPairs = new Set<string>();
     const edges = topology.edges
@@ -1563,10 +1328,17 @@ export class Orchestrator {
           : {}),
       }));
     const nodes = resolveTopologyAgentOrder(
-      agentFiles.map((file) => ({ name: file.name })),
+      agents.map((agent) => ({ name: agent.name })),
       topology.nodes.filter((item) => validNames.has(item)),
     );
-    const nodeRecords = topology.nodeRecords?.filter(
+    const rawNodeRecords = topology.nodeRecords
+      ? topology.nodeRecords
+      : nodes.map((name) => ({
+          id: name,
+          kind: "agent" as const,
+          templateName: name,
+        }));
+    const nodeRecords = rawNodeRecords.filter(
       (node) =>
         node.id
         && node.templateName
@@ -1577,6 +1349,12 @@ export class Orchestrator {
       templateName: node.templateName,
       spawnRuleId: node.spawnRuleId,
       spawnEnabled: node.spawnEnabled === true,
+      prompt: node.kind === "agent"
+        ? (agentByName.get(node.templateName)?.prompt || undefined)
+        : (typeof node.prompt === "string" ? node.prompt : undefined),
+      writable: node.kind === "agent"
+        ? agentByName.get(node.templateName)?.isWritable === true
+        : node.writable === true,
     }));
     const spawnRules = topology.spawnRules?.filter(
       (rule) =>
@@ -1596,7 +1374,6 @@ export class Orchestrator {
     }));
 
     return {
-      projectId,
       nodes,
       edges,
       nodeRecords,
@@ -1604,64 +1381,38 @@ export class Orchestrator {
     };
   }
 
-  private async reconcileTasksWithZellijSessions(): Promise<void> {
-    const liveSessions = await this.zellijManager.listSessionNames();
-    if (liveSessions === null) {
-      return;
-    }
-
-    for (const project of this.store.listProjects()) {
-      const staleTaskIds = this.store
-        .listTasks(project.id)
-        .filter(
-          (task) =>
-            task.zellijSessionId
-            && !liveSessions.has(task.zellijSessionId)
-            && (task.status === "finished" || task.status === "failed"),
-        )
-        .map((task) => task.id);
-
-      for (const taskId of staleTaskIds) {
-        const task = this.store.getTask(taskId);
-        await this.deleteTaskGraphRuntime(task);
-        this.store.deleteTask(taskId);
-      }
-    }
-  }
-
-  private getLangGraphRuntime(project: ProjectRecord): LangGraphRuntime {
-    let runtime = this.langGraphRuntimes.get(project.id);
+  private getLangGraphRuntime(cwd: string): LangGraphRuntime {
+    let runtime = this.langGraphRuntimes.get(cwd);
     if (runtime) {
       return runtime;
     }
 
     const host: LangGraphTaskLoopHost = {
       createBatchRunners: async ({ taskId, state, batch }) =>
-        this.createLangGraphBatchRunners(project, taskId, state, batch),
+        this.createLangGraphBatchRunners(cwd, taskId, state, batch),
       moveTaskToWaiting: async ({ taskId, state }) =>
         this.moveTaskToWaiting(
-          project.id,
+          cwd,
           taskId,
           this.resolveWaitingSourceAgentId(taskId, state),
         ),
       completeTask: async ({ taskId, status, failureReason }) =>
-        this.completeTask(taskId, status, failureReason),
+        this.completeTask(cwd, taskId, status, failureReason),
     };
     runtime = new LangGraphRuntime({
-      checkpointDir: path.join(project.path, ".agentflow", "langgraph"),
+      checkpointDir: path.join(cwd, ".agentflow", "langgraph"),
       host,
     });
-    this.langGraphRuntimes.set(project.id, runtime);
+    this.langGraphRuntimes.set(cwd, runtime);
     return runtime;
   }
 
-  private async deleteTaskGraphRuntime(task: Pick<TaskRecord, "id" | "projectId">) {
-    const project = this.store.getProject(task.projectId);
-    await this.getLangGraphRuntime(project).deleteTask(task.id);
+  private async deleteTaskGraphRuntime(task: Pick<TaskRecord, "id" | "cwd">) {
+    await this.getLangGraphRuntime(task.cwd).deleteTask(task.id);
   }
 
   private resolveWaitingSourceAgentId(taskId: string, state: GraphTaskState): string {
-    const latestAgentMessage = [...this.store.listMessages(state.projectId, taskId)]
+    const latestAgentMessage = [...this.store.listMessages(state.workspaceCwd, taskId)]
       .reverse()
       .find((message) => message.meta?.kind === "agent-final");
     return latestAgentMessage?.sender ?? state.topology.nodes[0] ?? "Orchestrator";
@@ -1676,21 +1427,20 @@ export class Orchestrator {
   }
 
   private async createLangGraphBatchRunners(
-    project: ProjectRecord,
+    cwd: string,
     taskId: string,
     state: GraphTaskState,
     batch: GraphDispatchBatch,
   ) {
-    const task = this.store.getTask(taskId);
-    const topology = this.store.getTopology(project.id);
+    const task = this.store.getTask(cwd, taskId);
+    const topology = this.store.getTopology(cwd);
     const batchSize = batch.jobs.length;
 
     if (batch.jobs.every((job) => job.kind === "association" || job.kind === "approved")) {
       const sourceAgentId = batch.sourceAgentId ?? "System";
-      if (!this.shouldSuppressDuplicateDispatchMessage(project.id, taskId, sourceAgentId, batch.triggerTargets)) {
+      if (!this.shouldSuppressDuplicateDispatchMessage(cwd, taskId, sourceAgentId, batch.triggerTargets)) {
         const triggerMessage: MessageRecord = {
           id: randomUUID(),
-          projectId: project.id,
           taskId,
           sender: sourceAgentId,
           timestamp: new Date().toISOString(),
@@ -1705,10 +1455,10 @@ export class Orchestrator {
             senderDisplayName: this.resolveMessageSenderDisplayName(state, sourceAgentId),
           },
         };
-        this.store.insertMessage(triggerMessage);
+        this.store.insertMessage(cwd, triggerMessage);
         this.emit({
           type: "message-created",
-          projectId: project.id,
+          cwd,
           payload: triggerMessage,
         });
       }
@@ -1721,18 +1471,18 @@ export class Orchestrator {
       : false;
     const forwardedContext = batch.sourceAgentId
       ? buildDownstreamForwardedContextFromMessages(
-        this.store.listMessages(task.projectId, taskId),
+        this.store.listMessages(task.cwd, taskId),
         batch.sourceContent ?? "",
         includeInitialTask,
       )
       : null;
     const initialUserContent = includeInitialTask
-      ? getInitialUserMessageContentPure(this.store.listMessages(task.projectId, taskId))
+      ? getInitialUserMessageContentPure(this.store.listMessages(task.cwd, taskId))
       : "";
 
     return batch.jobs.map((job, index) => {
       this.ensureRuntimeTaskAgent(task, job.agentName);
-      const executableAgentName = this.resolveExecutableAgentName(project, state, job.agentName);
+      const executableAgentName = this.resolveExecutableAgentName(cwd, state, job.agentName);
       let prompt: AgentExecutionPrompt;
       if (job.kind === "raw") {
         prompt = {
@@ -1760,7 +1510,6 @@ export class Orchestrator {
         };
         const remediationMessage: MessageRecord = {
           id: randomUUID(),
-          projectId: project.id,
           taskId,
           sender: batch.sourceAgentId ?? "Reviewer",
           timestamp: new Date().toISOString(),
@@ -1773,15 +1522,15 @@ export class Orchestrator {
             sourceAgentId: batch.sourceAgentId ?? "Reviewer",
             targetAgentId: job.agentName,
             senderDisplayName:
-              batch.sourceAgentId
+            batch.sourceAgentId
                 ? this.resolveMessageSenderDisplayName(state, batch.sourceAgentId)
                 : "Reviewer",
           },
         };
-        this.store.insertMessage(remediationMessage);
+        this.store.insertMessage(cwd, remediationMessage);
         this.emit({
           type: "message-created",
-          projectId: project.id,
+          cwd,
           payload: remediationMessage,
         });
       } else {
@@ -1798,7 +1547,7 @@ export class Orchestrator {
         id: `${batch.sourceAgentId ?? "user"}:${job.agentName}:${index}:${Date.now()}`,
         agentName: job.agentName,
         promise: this.executeLangGraphAgentOnce(
-          project,
+          cwd,
           task,
           state,
           job.agentName,
@@ -1811,7 +1560,7 @@ export class Orchestrator {
   }
 
   private async executeLangGraphAgentOnce(
-    project: ProjectRecord,
+    cwd: string,
     task: TaskRecord,
     state: GraphTaskState | null,
     runtimeAgentName: string,
@@ -1819,10 +1568,10 @@ export class Orchestrator {
     prompt: AgentExecutionPrompt,
     concurrentBatchSize: number,
   ): Promise<GraphAgentResult> {
-    this.setInjectedConfigForProject(project);
-    this.store.updateTaskAgentRun(task.id, runtimeAgentName, "running");
-    this.updateTaskStatusIfActive(task.id, "running", null);
-    const currentAgent = this.store.listTaskAgents(task.id).find((item) => item.name === runtimeAgentName);
+    this.setInjectedConfigForWorkspace(cwd);
+    this.store.updateTaskAgentRun(task.cwd, task.id, runtimeAgentName, "running");
+    this.updateTaskStatusIfActive(task.cwd, task.id, "running", null);
+    const currentAgent = this.store.listTaskAgents(task.cwd, task.id).find((item) => item.name === runtimeAgentName);
     if (!currentAgent) {
       return {
         agentName: runtimeAgentName,
@@ -1839,17 +1588,17 @@ export class Orchestrator {
     }
 
     try {
-      const currentTask = this.store.getTask(task.id);
+      const currentTask = this.store.getTask(task.cwd, task.id);
       await this.ensureTaskPanels(currentTask);
-      const agentSessionId = await this.ensureAgentSession(project, currentTask, currentAgent);
-      const latestAgentFile = this.findAgentFile(this.listProjectAgents(project), executableAgentName);
-      if (!latestAgentFile) {
-        throw new Error(`当前 Project 缺少 Agent ${executableAgentName}`);
+      const agentSessionId = await this.ensureAgentSession(cwd, currentTask, currentAgent);
+      const latestAgent = this.findAgent(this.listWorkspaceAgents(cwd), executableAgentName);
+      if (!latestAgent) {
+        throw new Error(`当前工作区缺少 Agent ${executableAgentName}`);
       }
 
       this.emit({
         type: "agent-status-changed",
-        projectId: project.id,
+        cwd,
         payload: {
           taskId: task.id,
           agentId: runtimeAgentName,
@@ -1859,18 +1608,18 @@ export class Orchestrator {
       });
       this.emit({
         type: "task-updated",
-        projectId: project.id,
-        payload: this.hydrateTask(task.id),
+        cwd,
+        payload: this.hydrateTask(task.cwd, task.id),
       });
 
-      const topology = this.store.getTopology(project.id);
+      const topology = this.store.getTopology(cwd);
       const dispatchedContent = this.buildAgentExecutionPrompt(prompt);
       const response = await this.opencodeRunner.run({
-        projectPath: project.path,
+        projectPath: cwd,
         sessionId: agentSessionId,
         content: dispatchedContent,
         agent: executableAgentName,
-        system: this.createSystemPrompt(latestAgentFile, topology, prompt),
+        system: this.createSystemPrompt(latestAgent, topology, prompt),
       });
 
       if (response.status === "error") {
@@ -1879,7 +1628,7 @@ export class Orchestrator {
         );
       }
 
-      const reviewAgent = this.isReviewAgent(latestAgentFile, topology);
+      const reviewAgent = this.isReviewAgent(latestAgent, topology);
       const parsedReview = this.parseReview(response.finalMessage, reviewAgent);
       const agentContextContent = this.resolveAgentContextContent(
         parsedReview,
@@ -1888,7 +1637,6 @@ export class Orchestrator {
       );
       const taskMessage: MessageRecord = {
         id: response.messageId,
-        projectId: project.id,
         taskId: task.id,
         content: this.createDisplayContent(parsedReview, response.fallbackMessage),
         sender: runtimeAgentName,
@@ -1904,7 +1652,7 @@ export class Orchestrator {
           senderDisplayName: this.resolveMessageSenderDisplayName(state, runtimeAgentName),
         },
       };
-      this.store.insertMessage(taskMessage);
+      this.store.insertMessage(cwd, taskMessage);
 
       const reviewFailureTargets =
         parsedReview.decision === "needs_revision"
@@ -1914,40 +1662,41 @@ export class Orchestrator {
         reviewDecision: parsedReview.decision,
         reviewAgent,
       });
-      this.store.updateTaskAgentStatus(task.id, runtimeAgentName, agentStatus);
+      this.store.updateTaskAgentStatus(task.cwd, task.id, runtimeAgentName, agentStatus);
       if (parsedReview.decision === "needs_revision" && reviewFailureTargets.length > 0) {
         this.updateTaskStatusIfActive(
+          task.cwd,
           task.id,
           concurrentBatchSize > 1 ? "running" : "needs_revision",
           null,
         );
       } else if (agentStatus === "failed") {
-        this.updateTaskStatusIfActive(task.id, "failed", null);
+        this.updateTaskStatusIfActive(task.cwd, task.id, "failed", null);
       } else {
-        this.updateTaskStatusIfActive(task.id, "running", null);
+        this.updateTaskStatusIfActive(task.cwd, task.id, "running", null);
       }
 
       this.emit({
         type: "message-created",
-        projectId: project.id,
+        cwd,
         payload: taskMessage,
       });
       this.emit({
         type: "agent-status-changed",
-        projectId: project.id,
+        cwd,
         payload: {
           taskId: task.id,
           agentId: runtimeAgentName,
           status: agentStatus,
           runCount:
-            this.store.listTaskAgents(task.id).find((item) => item.name === runtimeAgentName)?.runCount ??
+            this.store.listTaskAgents(task.cwd, task.id).find((item) => item.name === runtimeAgentName)?.runCount ??
             currentAgent.runCount,
         },
       });
       this.emit({
         type: "task-updated",
-        projectId: project.id,
-        payload: this.hydrateTask(task.id),
+        cwd,
+        payload: this.hydrateTask(task.cwd, task.id),
       });
 
       const signal = this.parseSignal(response.finalMessage);
@@ -1963,38 +1712,37 @@ export class Orchestrator {
         signalDone: signal.done,
       };
     } catch (error) {
-      const topology = this.store.getTopology(project.id);
+      const topology = this.store.getTopology(cwd);
       const reviewAgent = this.isReviewAgent({ name: runtimeAgentName }, topology);
-      this.store.updateTaskAgentStatus(task.id, runtimeAgentName, "failed");
+      this.store.updateTaskAgentStatus(task.cwd, task.id, runtimeAgentName, "failed");
       const failedMessage: MessageRecord = {
         id: randomUUID(),
-        projectId: project.id,
         taskId: task.id,
         content: `[${runtimeAgentName}] 执行失败：${error instanceof Error ? error.message : "未知错误"}`,
         sender: "system",
         timestamp: new Date().toISOString(),
       };
-      this.store.insertMessage(failedMessage);
-      this.updateTaskStatusIfActive(task.id, "failed", null);
+      this.store.insertMessage(cwd, failedMessage);
+      this.updateTaskStatusIfActive(task.cwd, task.id, "failed", null);
       this.emit({
         type: "message-created",
-        projectId: project.id,
+        cwd,
         payload: failedMessage,
       });
       this.emit({
         type: "agent-status-changed",
-        projectId: project.id,
+        cwd,
         payload: {
           taskId: task.id,
           agentId: runtimeAgentName,
           status: "failed",
-          runCount: this.store.listTaskAgents(task.id).find((item) => item.name === runtimeAgentName)?.runCount ?? 0,
+          runCount: this.store.listTaskAgents(task.cwd, task.id).find((item) => item.name === runtimeAgentName)?.runCount ?? 0,
         },
       });
       this.emit({
         type: "task-updated",
-        projectId: project.id,
-        payload: this.hydrateTask(task.id),
+        cwd,
+        payload: this.hydrateTask(task.cwd, task.id),
       });
 
       return {
@@ -2013,25 +1761,26 @@ export class Orchestrator {
   }
 
   private async completeTask(
+    cwd: string,
     taskId: string,
     status: TaskRecord["status"],
     failureReason?: string | null,
   ) {
-    const currentTask = this.store.getTask(taskId);
+    const currentTask = this.store.getTask(cwd, taskId);
     if (currentTask.status === status && currentTask.completedAt) {
       return;
     }
 
     const completedAt = status === "finished" || status === "failed" ? new Date().toISOString() : null;
     if (status === "finished") {
-      for (const agent of this.store.listTaskAgents(taskId)) {
+      for (const agent of this.store.listTaskAgents(cwd, taskId)) {
         if (agent.status === "completed") {
           continue;
         }
-        this.store.updateTaskAgentStatus(taskId, agent.name, "completed");
+        this.store.updateTaskAgentStatus(cwd, taskId, agent.name, "completed");
         this.emit({
           type: "agent-status-changed",
-          projectId: agent.projectId,
+          cwd,
           payload: {
             taskId,
             agentId: agent.name,
@@ -2041,11 +1790,10 @@ export class Orchestrator {
         });
       }
     }
-    this.store.updateTaskStatus(taskId, status, completedAt);
-    const snapshot = this.hydrateTask(taskId);
+    this.store.updateTaskStatus(cwd, taskId, status, completedAt);
+    const snapshot = this.hydrateTask(cwd, taskId);
     const completionMessage: MessageRecord = {
       id: randomUUID(),
-      projectId: snapshot.task.projectId,
       taskId,
       sender: "system",
       timestamp: new Date().toISOString(),
@@ -2059,15 +1807,15 @@ export class Orchestrator {
         status,
       },
     };
-    this.store.insertMessage(completionMessage);
+    this.store.insertMessage(cwd, completionMessage);
     this.emit({
       type: "message-created",
-      projectId: snapshot.task.projectId,
+      cwd,
       payload: completionMessage,
     });
     this.emit({
       type: "task-updated",
-      projectId: snapshot.task.projectId,
+      cwd,
       payload: snapshot,
     });
   }
@@ -2082,18 +1830,17 @@ export class Orchestrator {
     );
   }
 
-  private moveTaskToWaiting(projectId: string, taskId: string, sourceAgentId: string) {
-    const currentTask = this.store.getTask(taskId);
+  private moveTaskToWaiting(cwd: string, taskId: string, sourceAgentId: string) {
+    const currentTask = this.store.getTask(cwd, taskId);
     if (currentTask.status === "waiting") {
       return;
     }
 
-    if (!this.updateTaskStatusIfActive(taskId, "waiting", null)) {
+    if (!this.updateTaskStatusIfActive(cwd, taskId, "waiting", null)) {
       return;
     }
     const waitingMessage = {
       id: randomUUID(),
-      projectId,
       taskId,
       content: `Orchestrator 已收到 ${sourceAgentId} 的结果，但当前拓扑下没有可自动继续推进的下游节点，Task 保持等待状态。`,
       sender: "system",
@@ -2103,16 +1850,16 @@ export class Orchestrator {
         sourceAgentId,
       },
     } satisfies MessageRecord;
-    this.store.insertMessage(waitingMessage);
+    this.store.insertMessage(cwd, waitingMessage);
     this.emit({
       type: "message-created",
-      projectId,
+      cwd,
       payload: waitingMessage,
     });
     this.emit({
       type: "task-updated",
-      projectId,
-      payload: this.hydrateTask(taskId),
+      cwd,
+      payload: this.hydrateTask(cwd, taskId),
     });
   }
 
@@ -2124,11 +1871,13 @@ export class Orchestrator {
     return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   }
 
-  private findProjectRecordByPath(projectPath: string): ProjectRecord | null {
-    const normalized = path.resolve(projectPath);
-    return (
-      this.store.listProjects().find((project) => path.resolve(project.path) === normalized) ?? null
-    );
+  private hasWorkspaceRecord(cwd: string): boolean {
+    try {
+      this.store.getState(cwd);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private extractSessionIdFromOpenCodeEvent(event: unknown): string | null {
@@ -2153,40 +1902,49 @@ export class Orchestrator {
     return null;
   }
 
-  private scheduleRuntimeRefresh(projectPath: string, sessionId: string | null) {
-    const project = this.findProjectRecordByPath(projectPath);
-    if (!project) {
+  private scheduleRuntimeRefresh(cwd: string, sessionId: string | null) {
+    const normalizedCwd = path.resolve(cwd);
+    if (!this.hasWorkspaceRecord(normalizedCwd)) {
       return;
     }
 
-    const existing = this.pendingRuntimeRefreshProjects.get(project.id);
+    const existing = this.pendingRuntimeRefreshWorkspaces.get(normalizedCwd);
     if (existing) {
       clearTimeout(existing);
     }
 
     const timer = setTimeout(() => {
-      this.pendingRuntimeRefreshProjects.delete(project.id);
+      this.pendingRuntimeRefreshWorkspaces.delete(normalizedCwd);
       this.emit({
         type: "runtime-updated",
-        projectId: project.id,
+        cwd: normalizedCwd,
         payload: {
           sessionId,
           timestamp: new Date().toISOString(),
         },
       });
     }, this.runtimeRefreshDebounceMs);
-    this.pendingRuntimeRefreshProjects.set(project.id, timer);
+    this.pendingRuntimeRefreshWorkspaces.set(normalizedCwd, timer);
   }
 
-  private scheduleEventStreamReconnect(projectPath: string) {
-    const normalized = path.resolve(projectPath);
+  private scheduleEventStreamReconnect(cwd: string) {
+    const normalized = path.resolve(cwd);
+    if (!shouldScheduleEventStreamReconnect({
+      hasProjectRecord: this.hasWorkspaceRecord(normalized),
+      isDisposing: this.isDisposing,
+    })) {
+      return;
+    }
     if (this.pendingEventReconnects.has(normalized)) {
       return;
     }
 
     const timer = setTimeout(() => {
       this.pendingEventReconnects.delete(normalized);
-      if (!this.findProjectRecordByPath(normalized)) {
+      if (!shouldScheduleEventStreamReconnect({
+        hasProjectRecord: this.hasWorkspaceRecord(normalized),
+        isDisposing: this.isDisposing,
+      })) {
         return;
       }
       void this.ensureEventStream(normalized);
@@ -2198,30 +1956,26 @@ export class Orchestrator {
     this.events.emit("agentflow-event", event);
   }
 
-  private async ensureEventStream(projectPath?: string) {
+  private async ensureEventStream(cwd?: string) {
     if (!this.enableEventStream) {
       return;
     }
 
-    if (projectPath) {
-      const normalized = path.resolve(projectPath);
-      if (this.connectedEventProjects.has(normalized)) {
+    if (cwd) {
+      const normalized = path.resolve(cwd);
+      if (this.connectedEventWorkspaces.has(normalized)) {
         return;
       }
-      this.connectedEventProjects.add(normalized);
+      this.connectedEventWorkspaces.add(normalized);
       void this.opencodeClient.connectEvents(normalized, (event) => {
         this.scheduleRuntimeRefresh(normalized, this.extractSessionIdFromOpenCodeEvent(event));
       })
         .catch(() => undefined)
         .finally(() => {
-          this.connectedEventProjects.delete(normalized);
+          this.connectedEventWorkspaces.delete(normalized);
           this.scheduleEventStreamReconnect(normalized);
         });
       return;
     }
-
-    await Promise.all(
-      this.store.listProjects().map((project) => this.ensureEventStream(project.path)),
-    );
   }
 }
