@@ -83,6 +83,13 @@ function getContentType(filePath: string): string {
   }
 }
 
+export function buildStaticFileHeaders(filePath: string): Record<string, string> {
+  return {
+    "content-type": getContentType(filePath),
+    "cache-control": "no-store",
+  };
+}
+
 function resolveStaticFilePath(webRoot: string, pathname: string): string {
   const sanitized = pathname === "/" ? "/index.html" : pathname;
   const nextPath = path.normalize(path.join(webRoot, sanitized));
@@ -178,9 +185,7 @@ export async function startWebHost(
       }
 
       const filePath = resolveStaticFilePath(options.webRoot, url.pathname);
-      response.writeHead(200, {
-        "content-type": getContentType(filePath),
-      });
+      response.writeHead(200, buildStaticFileHeaders(filePath));
       fs.createReadStream(filePath).pipe(response);
     } catch (error) {
       json(response, 500, {

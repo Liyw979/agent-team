@@ -2,8 +2,6 @@ export function getChatMarkdownStaticStyleSheet(): string {
   return `
     .chat-markdown {
       min-width: 0;
-      font-size: var(--chat-markdown-font-size);
-      line-height: var(--chat-markdown-line-height);
       word-break: break-word;
     }
 
@@ -20,13 +18,13 @@ export function getChatMarkdownStaticStyleSheet(): string {
     }
 
     .chat-markdown :is(h1, h2, h3, h4, h5, h6) {
-      font-size: var(--chat-markdown-heading-font-size);
+      font-size: var(--chat-markdown-heading-font-size, inherit);
       font-weight: inherit;
     }
 
     .chat-markdown :is(h1, h2, h3, h4, h5, h6, p, li, blockquote, th, td) {
-      font-size: var(--chat-markdown-font-size);
-      line-height: var(--chat-markdown-line-height);
+      font-size: var(--chat-markdown-font-size, inherit);
+      line-height: var(--chat-markdown-line-height, inherit);
     }
 
     .chat-markdown p {
@@ -34,7 +32,7 @@ export function getChatMarkdownStaticStyleSheet(): string {
     }
 
     .chat-markdown :is(ul, ol) {
-      padding-left: 1.35rem;
+      padding-left: var(--chat-markdown-list-padding-left, 1.35rem);
     }
 
     .chat-markdown li + li {
@@ -57,17 +55,17 @@ export function getChatMarkdownStaticStyleSheet(): string {
 
     .chat-markdown pre {
       overflow-x: auto;
-      padding: 0.3rem 0.65rem;
+      padding: var(--chat-markdown-pre-padding, 0.3rem 0.65rem);
       border-radius: 10px;
       background: rgba(23, 32, 25, 0.1);
       box-shadow: inset 0 0 0 1px rgba(23, 32, 25, 0.06);
-      line-height: var(--chat-markdown-line-height);
+      line-height: var(--chat-markdown-line-height, inherit);
     }
 
     .chat-markdown code {
       font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
-      font-size: var(--chat-markdown-code-font-size);
-      line-height: var(--chat-markdown-line-height);
+      font-size: var(--chat-markdown-code-font-size, inherit);
+      line-height: var(--chat-markdown-line-height, inherit);
     }
 
     .chat-markdown pre > code {
@@ -82,7 +80,7 @@ export function getChatMarkdownStaticStyleSheet(): string {
     }
 
     .chat-markdown :not(pre) > code {
-      padding: 0.12rem 0.35rem;
+      padding: var(--chat-markdown-inline-code-padding, 0.12rem 0.35rem);
       border-radius: 6px;
       background: rgba(23, 32, 25, 0.08);
     }

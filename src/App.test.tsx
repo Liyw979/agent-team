@@ -29,8 +29,12 @@ test("团队成员卡片里的 prompt 只显示单行缩略，悬停时展示完
   assert.match(APP_SOURCE, /calculateAgentCardPromptLineCount/);
   assert.match(APP_SOURCE, /WebkitLineClamp: promptLineCount/);
   assert.match(APP_SOURCE, /color: color\.mutedText/);
+  assert.match(APP_SOURCE, /className="min-w-0 overflow-hidden break-all text-\[13px\] leading-\[18px\]"/);
+  assert.match(APP_SOURCE, /className="mt-1 min-w-0 text-\[13px\] leading-5"/);
   assert.doesNotMatch(APP_SOURCE, /className="min-w-0 truncate text-\[0\.9rem\] leading-5 text-foreground\/78"/);
   assert.doesNotMatch(APP_SOURCE, /className="min-w-0 overflow-hidden break-all text-\[0\.9rem\] leading-\[18px\] text-foreground\/78"/);
+  assert.doesNotMatch(APP_SOURCE, /className="min-w-0 overflow-hidden break-all text-\[0\.9rem\] leading-\[18px\]"/);
+  assert.doesNotMatch(APP_SOURCE, /className="mt-1 min-w-0 text-\[0\.9rem\] leading-5"/);
 });
 
 test("团队成员卡片保留消息统计，并把 agent 名称改成和聊天记录一致的有色标题条", () => {

@@ -39,10 +39,12 @@ export function MarkdownMessage({
   content,
   className,
   inheritTypography = false,
+  style,
 }: {
   content: string;
   className?: string;
   inheritTypography?: boolean;
+  style?: React.CSSProperties;
 }) {
   return (
     <div
@@ -50,6 +52,7 @@ export function MarkdownMessage({
       style={{
         ...getChatMarkdownSpacingStyle(),
         ...(inheritTypography ? {} : getChatMarkdownTypographyStyle()),
+        ...style,
       }}
     >
       <MarkdownContent content={content} />

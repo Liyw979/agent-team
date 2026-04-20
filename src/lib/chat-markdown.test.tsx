@@ -18,19 +18,35 @@ test("renderMarkdownToStaticHtml 会把标题列表和代码块渲染成 HTML", 
   assert.match(html, /--chat-markdown-code-font-size:1em/);
 });
 
+test("renderMarkdownToStaticHtml 继续服务消息记录，保留消息记录自己的字号变量", () => {
+  const html = renderMarkdownToStaticHtml("普通消息");
+
+  assert.match(html, /--chat-markdown-font-size:0\.875rem/);
+  assert.match(html, /--chat-markdown-line-height:1\.36em/);
+});
+
 test("renderMarkdownToStaticHtml 会内联统一字号和压缩后的行高规则", () => {
   const html = renderMarkdownToStaticHtml("## 标题\n\n- 列表项\n\n`code`");
 
   assert.match(html, /--chat-markdown-line-height:1\.36em/);
   assert.match(html, /<style>/);
-  assert.match(html, /\.chat-markdown :is\(h1, h2, h3, h4, h5, h6, p, li, blockquote, th, td\)\s*\{\s*font-size: var\(--chat-markdown-font-size\);/);
-  assert.match(html, /\.chat-markdown :is\(h1, h2, h3, h4, h5, h6, p, li, blockquote, th, td\)\s*\{[^}]*line-height: var\(--chat-markdown-line-height\);/);
+  assert.match(html, /\.chat-markdown :is\(h1, h2, h3, h4, h5, h6, p, li, blockquote, th, td\)\s*\{\s*font-size: var\(--chat-markdown-font-size, inherit\);/);
+  assert.match(html, /\.chat-markdown :is\(h1, h2, h3, h4, h5, h6, p, li, blockquote, th, td\)\s*\{[^}]*line-height: var\(--chat-markdown-line-height, inherit\);/);
+});
+
+test("renderMarkdownToStaticHtml 会为字号和行高提供 inherit 回退，避免拓扑历史正文比工具标签更大", () => {
+  const html = renderMarkdownToStaticHtml("glob · 参数: path=/Users/liyw/code/empty, pattern=**/*test*.py");
+
+  assert.doesNotMatch(html, /\.chat-markdown \{[^}]*font-size: var\(--chat-markdown-font-size, inherit\);/);
+  assert.doesNotMatch(html, /\.chat-markdown \{[^}]*line-height: var\(--chat-markdown-line-height, inherit\);/);
+  assert.match(html, /\.chat-markdown :is\(h1, h2, h3, h4, h5, h6, p, li, blockquote, th, td\) \{[^}]*font-size: var\(--chat-markdown-font-size, inherit\);/);
+  assert.match(html, /\.chat-markdown :is\(h1, h2, h3, h4, h5, h6, p, li, blockquote, th, td\) \{[^}]*line-height: var\(--chat-markdown-line-height, inherit\);/);
 });
 
 test("renderMarkdownToStaticHtml 会压缩代码块上下内边距，避免代码块内部留白过大", () => {
   const html = renderMarkdownToStaticHtml("```py\ndef add(a, b):\n    return a + b\n```");
 
-  assert.match(html, /\.chat-markdown pre \{[^}]*padding: 0\.3rem 0\.65rem;/);
+  assert.match(html, /\.chat-markdown pre \{[^}]*padding: var\(--chat-markdown-pre-padding, 0\.3rem 0\.65rem\);/);
 });
 
 test("renderMarkdownToStaticHtml 会把标题降级成普通文本，但保留 strong 的加粗语义", () => {

@@ -335,7 +335,7 @@ function App() {
                           <div className="mt-1 min-w-0">
                             <p
                               title={promptPreview}
-                              className="min-w-0 overflow-hidden break-all text-[0.9rem] leading-[18px]"
+                              className="min-w-0 overflow-hidden break-all text-[13px] leading-[18px]"
                               style={{
                                 color: color.mutedText,
                                 display: "-webkit-box",
@@ -347,7 +347,7 @@ function App() {
                             </p>
                           </div>
                         ) : (
-                          <div className="mt-1 min-w-0 text-[0.9rem] leading-5" style={{ color: color.mutedText }}>
+                          <div className="mt-1 min-w-0 text-[13px] leading-5" style={{ color: color.mutedText }}>
                             -
                           </div>
                         )}

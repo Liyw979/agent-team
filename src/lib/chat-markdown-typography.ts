@@ -17,11 +17,15 @@ type ChatMarkdownTypographyStyle = CSSProperties & Record<
 
 export function getChatMarkdownTypography(): ChatMarkdownTypography {
   return {
-    bodyFontSizeRem: 0.875,
+    bodyFontSizeRem: 0.8125,
     headingFontSizeEm: 1,
     codeFontSizeEm: 1,
     lineHeightEm: 1.36,
   };
+}
+
+export function getMessageMarkdownTypography(): ChatMarkdownTypography {
+  return getChatMarkdownTypography();
 }
 
 export function isChatMarkdownFontSizeUnified(typography: ChatMarkdownTypography): boolean {
@@ -29,7 +33,7 @@ export function isChatMarkdownFontSizeUnified(typography: ChatMarkdownTypography
 }
 
 export function getChatMarkdownTypographyStyle(): ChatMarkdownTypographyStyle {
-  const typography = getChatMarkdownTypography();
+  const typography = getMessageMarkdownTypography();
   return {
     "--chat-markdown-font-size": `${typography.bodyFontSizeRem}rem`,
     "--chat-markdown-heading-font-size": `${typography.headingFontSizeEm}em`,
