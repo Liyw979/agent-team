@@ -17,6 +17,7 @@ import {
 import { getAgentColorToken } from "./lib/agent-colors";
 import { calculateAgentCardListGap, calculateAgentCardPromptLineCount } from "./lib/agent-card-layout";
 import { getAppShellClassName } from "./lib/app-shell-layout";
+import { getAppWorkspaceLayoutMetrics } from "./lib/app-workspace-layout";
 import { buildAgentPromptPreviewText } from "./lib/agent-prompt-preview";
 import {
   PANEL_HEADER_CLASS,
@@ -41,6 +42,7 @@ import { getUiSnapshotPollingIntervalMs } from "./lib/ui-snapshot-polling";
 function App() {
   const launchParams = useMemo(() => readLaunchParams(), []);
   const appShellClassName = getAppShellClassName();
+  const workspaceLayoutMetrics = getAppWorkspaceLayoutMetrics();
   const [uiSnapshot, setUiSnapshot] = useState<UiSnapshotPayload | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [runtimeSnapshots, setRuntimeSnapshots] = useState<Record<string, AgentRuntimeSnapshot>>({});
@@ -320,7 +322,10 @@ function App() {
   return (
     <div className="flex h-screen flex-col overflow-hidden text-foreground">
       <main className={`min-h-0 flex-1 overflow-hidden ${appShellClassName}`}>
-        <div className="grid h-full overflow-hidden grid-rows-[minmax(320px,42%)_minmax(0,1fr)] gap-[10px]">
+        <div
+          className="grid h-full overflow-hidden grid-rows-[minmax(320px,42%)_minmax(0,1fr)]"
+          style={{ gap: `${workspaceLayoutMetrics.panelGapPx}px` }}
+        >
           <TopologyGraph
             workspace={workspace}
             task={task}
@@ -333,7 +338,13 @@ function App() {
             runtimeSnapshots={runtimeSnapshots}
           />
 
-          <div className="grid min-h-0 overflow-hidden grid-cols-[minmax(0,1fr)_minmax(340px,380px)] gap-[10px]">
+          <div
+            className="grid min-h-0 overflow-hidden"
+            style={{
+              gap: `${workspaceLayoutMetrics.panelGapPx}px`,
+              gridTemplateColumns: `minmax(0, 1fr) minmax(${workspaceLayoutMetrics.teamPanelMinWidthPx}px, ${workspaceLayoutMetrics.teamPanelMaxWidthPx}px)`,
+            }}
+          >
             <div className="min-h-0">
               <ChatWindow
                 workspace={workspace}
