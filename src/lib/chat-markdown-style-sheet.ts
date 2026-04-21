@@ -31,6 +31,14 @@ export function getChatMarkdownStaticStyleSheet(): string {
       white-space: pre-wrap;
     }
 
+    .chat-markdown ul {
+      list-style-type: disc;
+    }
+
+    .chat-markdown ol {
+      list-style-type: decimal;
+    }
+
     .chat-markdown :is(ul, ol) {
       padding-left: var(--chat-markdown-list-padding-left, 1.35rem);
     }
