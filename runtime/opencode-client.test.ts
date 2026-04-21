@@ -496,3 +496,55 @@ test("getAttachBaseUrl 在未注册外部 runtime 时会启动当前 task 自己
   assert.equal(baseUrl, "http://127.0.0.1:43128");
   assert.equal(startServerCalled, true);
 });
+
+test("buildRuntimeSnapshot 会保留同一条消息内 thinking 和 tool 的原始顺序", () => {
+  const { client } = createClient();
+  const typed = client as OpenCodeClient & {
+    buildRuntimeSnapshot: (sessionId: string, messages: unknown[]) => {
+      activities: Array<{ kind: string; detail: string; label: string }>;
+    };
+  };
+
+  const snapshot = typed.buildRuntimeSnapshot("session-1", [
+    {
+      id: "msg-1",
+      role: "assistant",
+      createdAt: "2026-04-21T12:52:26.000Z",
+      completedAt: "2026-04-21T12:52:26.000Z",
+      parts: [
+        {
+          type: "reasoning",
+          text: "Determining project structure",
+        },
+        {
+          type: "tool-call",
+          tool: { name: "glob" },
+          input: {
+            pattern: "**/*",
+            path: "/Users/liyw/code/empty",
+          },
+        },
+      ],
+    },
+  ]);
+
+  assert.deepEqual(
+    snapshot.activities.map((activity) => ({
+      kind: activity.kind,
+      label: activity.label,
+      detail: activity.detail,
+    })),
+    [
+      {
+        kind: "thinking",
+        label: "Determining project structure",
+        detail: "Determining project structure",
+      },
+      {
+        kind: "tool",
+        label: "glob",
+        detail: "参数: pattern=**/*, path=/Users/liyw/code/empty",
+      },
+    ],
+  );
+});
