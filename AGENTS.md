@@ -127,6 +127,7 @@
 - CLI 提供 `task headless`、`task ui`。
 - `task headless --file <topology.json> --message <message>` 会新建当前 Task，打印本轮群聊，任务结束后退出到 shell。
 - `task ui --file <topology.json> --message <message> [--cwd <path>]` 会新建当前 Task，启动本地 Web Host，并在浏览器中打开当前 Task 页面；CLI 进程会继续驻留，直到收到 `Ctrl+C` / `SIGTERM` 才清理当前命令持有的 OpenCode 实例并退出。
+- `task ui` 打开的浏览器地址与本地 Web Host 监听地址统一使用 `localhost` 回环主机名，而不是 `127.0.0.1`，以兼容 Windows 上仅 `localhost` 可访问的本地浏览器环境。
 - CLI / 终端里所有用户可见 attach 文案都直接显示底层 `opencode attach ...`，不再展示 `task attach` 包装命令。
 - `bun run cli -- ...` 需要在仓库根目录执行；若从其他目录排查目标工作区，`task headless` / `task ui` 请显式传入 `--cwd`。
 

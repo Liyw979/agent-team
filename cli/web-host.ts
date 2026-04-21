@@ -10,6 +10,7 @@ import type {
   UiSnapshotPayload,
 } from "@shared/types";
 import type { Orchestrator } from "../runtime/orchestrator";
+import { UI_LOOPBACK_HOST } from "./ui-host-launch";
 
 interface StartWebHostOptions {
   orchestrator: Orchestrator;
@@ -124,7 +125,7 @@ export async function startWebHost(
       return;
     }
 
-    const url = new URL(request.url, `http://${request.headers.host ?? "127.0.0.1"}`);
+    const url = new URL(request.url, `http://${request.headers.host ?? UI_LOOPBACK_HOST}`);
     try {
       if (request.method === "GET" && url.pathname === "/healthz") {
         json(response, 200, {
@@ -202,7 +203,7 @@ export async function startWebHost(
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(options.port, "127.0.0.1", () => resolve());
+    server.listen(options.port, UI_LOOPBACK_HOST, () => resolve());
   });
 
   return {

@@ -24,7 +24,7 @@ import { resolveCliTaskStreamingPlan } from "./task-streaming-policy";
 import { renderTaskSessionSummary } from "./task-session-summary";
 import { renderTaskAttachCommands } from "./task-attach-display";
 import { renderOpenCodeCleanupReport } from "./opencode-cleanup-report";
-import { buildUiUrl } from "./ui-host-launch";
+import { buildUiUrl, UI_LOOPBACK_HOST } from "./ui-host-launch";
 import { startWebHost } from "./web-host";
 
 const DEFAULT_UI_PORT = 4310;
@@ -242,13 +242,13 @@ async function reservePort(
 }
 
 async function resolveUiPort() {
-  const preferred = await reservePort("127.0.0.1", DEFAULT_UI_PORT);
+  const preferred = await reservePort(UI_LOOPBACK_HOST, DEFAULT_UI_PORT);
   if (preferred) {
     const port = preferred.port;
     await preferred.close();
     return port;
   }
-  const fallback = await reservePort("127.0.0.1", 0);
+  const fallback = await reservePort(UI_LOOPBACK_HOST, 0);
   if (!fallback) {
     fail("无法为网页界面分配可用端口。");
   }

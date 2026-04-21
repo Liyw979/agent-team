@@ -1,3 +1,5 @@
+export const UI_LOOPBACK_HOST = "localhost";
+
 export function buildUiUrl(input: {
   port: number;
   taskId: string;
@@ -5,5 +7,5 @@ export function buildUiUrl(input: {
   const query = new URLSearchParams({
     taskId: input.taskId,
   });
-  return `http://127.0.0.1:${input.port}/?${query.toString()}`;
+  return `http://${UI_LOOPBACK_HOST}:${input.port}/?${query.toString()}`;
 }
