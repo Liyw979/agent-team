@@ -7,6 +7,7 @@ import { buildSubmitMessageBody } from "./opencode-request-body";
 import { toOpenCodeAgentName } from "./opencode-agent-name";
 import { appendAppLog } from "./app-log";
 import { resolveOpenCodeRequestTimeoutMs } from "./opencode-request-timeout";
+import { pickRecentPartIndexes } from "./runtime-activity-order";
 
 interface ServeHandle {
   process: ChildProcessWithoutNullStreams | null;
@@ -1345,7 +1346,7 @@ export class OpenCodeClient {
   ): OpenCodeRuntimeActivity[] {
     const activities: OpenCodeRuntimeActivity[] = [];
 
-    for (let partIndex = parts.length - 1; partIndex >= 0 && activities.length < 4; partIndex -= 1) {
+    for (const partIndex of pickRecentPartIndexes(parts.length, 4)) {
       const activity = this.partToRuntimeActivity(parts[partIndex], message, messageIndex, partIndex);
       if (activity) {
         activities.push(activity);
