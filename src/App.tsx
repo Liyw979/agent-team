@@ -16,7 +16,6 @@ import {
 } from "./lib/web-api";
 import { getAgentColorToken } from "./lib/agent-colors";
 import { calculateAgentCardListGap, calculateAgentCardPromptLineCount } from "./lib/agent-card-layout";
-import { buildAgentPanelAttachButtonState } from "./lib/agent-panel-attach-button";
 import { buildAgentPromptPreviewText } from "./lib/agent-prompt-preview";
 import {
   PANEL_HEADER_CLASS,
@@ -170,7 +169,6 @@ function App() {
         prompt: agent.prompt,
         promptPreview,
         status: taskAgent?.status ?? "idle",
-        hasAttachSession: Boolean(taskAgent?.opencodeSessionId),
       };
     });
   }, [workspace, task]);
@@ -326,11 +324,6 @@ function App() {
                   {agentCards.map((agent) => {
                     const color = getAgentColorToken(agent.name);
                     const promptPreviewLine = agent.promptPreview.replace(/\s+/gu, "");
-                    const attachButtonState = buildAgentPanelAttachButtonState({
-                      agentName: agent.name,
-                      hasSession: agent.hasAttachSession,
-                      isOpening: openingAgentTerminalId === agent.name,
-                    });
                     return (
                       <div
                         key={agent.name}
@@ -353,7 +346,7 @@ function App() {
                         }}
                       >
                         <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0 flex items-center gap-2">
+                          <div className="min-w-0">
                             <span
                               className="inline-flex max-w-full shrink-0 rounded-[8px] px-2 py-px text-center text-[14px] font-semibold leading-[1.2] tracking-[0.02em]"
                               style={{
@@ -363,22 +356,6 @@ function App() {
                             >
                               {agent.name}
                             </span>
-                            <button
-                              type="button"
-                              aria-label={`打开 ${agent.name} 的 attach 终端`}
-                              title={attachButtonState.title}
-                              disabled={attachButtonState.disabled}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                if (attachButtonState.disabled) {
-                                  return;
-                                }
-                                void handleOpenAgentTerminal(agent.name);
-                              }}
-                              className={attachButtonState.className}
-                            >
-                              {attachButtonState.label}
-                            </button>
                           </div>
                         </div>
                         {agent.promptPreview !== "-" ? (

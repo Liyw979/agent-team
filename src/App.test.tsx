@@ -13,10 +13,10 @@ test("App 已裁成单 Task 展示面板", () => {
   assert.doesNotMatch(APP_SOURCE, /createProject|deleteProject|deleteTask/);
 });
 
-test("App 保留聊天输入与 attach 按钮", () => {
+test("App 保留聊天输入，但团队面板不再提供 attach 按钮", () => {
   assert.match(APP_SOURCE, /<ChatWindow/);
-  assert.match(APP_SOURCE, /buildAgentPanelAttachButtonState/);
-  assert.match(APP_SOURCE, /aria-label=\{`打开 \$\{agent\.name\} 的 attach 终端`\}/);
+  assert.doesNotMatch(APP_SOURCE, /buildAgentPanelAttachButtonState/);
+  assert.doesNotMatch(APP_SOURCE, /aria-label=\{`打开 \$\{agent\.name\} 的 attach 终端`\}/);
   assert.match(APP_SOURCE, />团队</);
   assert.doesNotMatch(APP_SOURCE, />当前 Agent</);
   assert.doesNotMatch(APP_SOURCE, /纯展示面板，不提供配置入口/);
@@ -59,11 +59,11 @@ test("团队成员卡片不再显示消息统计，并把 agent 名称改成和�
   assert.match(APP_SOURCE, /calculateAgentCardListGap/);
   assert.match(APP_SOURCE, /style=\{\{ gap: `\$\{agentCardGapPx}px` \}\}/);
   assert.match(APP_SOURCE, /getAgentColorToken/);
-  assert.match(APP_SOURCE, /buildAgentPanelAttachButtonState/);
+  assert.doesNotMatch(APP_SOURCE, /buildAgentPanelAttachButtonState/);
   assert.match(APP_SOURCE, /background: color\.solid/);
   assert.match(APP_SOURCE, /color: color\.badgeText/);
   assert.match(APP_SOURCE, /className="inline-flex max-w-full shrink-0 rounded-\[8px\] px-2 py-px text-center text-\[14px\] font-semibold leading-\[1\.2\] tracking-\[0\.02em\]"/);
-  assert.match(APP_SOURCE, /className="min-w-0 flex items-center gap-2"/);
+  assert.doesNotMatch(APP_SOURCE, /className="min-w-0 flex items-center gap-2"/);
   assert.doesNotMatch(APP_SOURCE, /rounded-full border border-\[#d8cdbd\] bg-\[#fffaf2\] px-2\.5 py-0\.5 text-\[0\.78rem\] font-semibold text-foreground\/76/);
   assert.match(APP_SOURCE, /className="rounded-\[8px\] border px-3 py-2 text-left shadow-sm transition"/);
 });
