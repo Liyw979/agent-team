@@ -32,6 +32,31 @@ test("buildTerminalLaunchSpec uses cmd start to launch a visible Windows attach 
   });
 });
 
+test("buildTerminalLaunchSpec supports a PowerShell fallback launcher on Windows", () => {
+  const spec = buildTerminalLaunchSpec({
+    cwd: "C:\\work\\agent-team",
+    command: "opencode attach http://127.0.0.1:4310 --session session-1",
+    platform: "win32",
+    env: {
+      ComSpec: "C:\\Windows\\System32\\cmd.exe",
+      AGENT_TEAM_WINDOWS_TERMINAL: "powershell",
+    },
+  });
+
+  assert.deepEqual(spec, {
+    command: "powershell.exe",
+    args: [
+      "-NoLogo",
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      "Start-Process -WorkingDirectory 'C:\\work\\agent-team' -FilePath 'powershell.exe' -ArgumentList @('-NoExit', '-Command', 'opencode attach http://127.0.0.1:4310 --session session-1')",
+    ],
+    cwd: "C:\\work\\agent-team",
+  });
+});
+
 test("buildTerminalLaunchSpec still avoids a plain bare start target path on Windows", () => {
   const spec = buildTerminalLaunchSpec({
     cwd: "C:\\work\\agent-team",
@@ -65,6 +90,22 @@ test("buildTerminalLaunchSpec keeps the inner attach command clean on Windows", 
   );
   assert.doesNotMatch(spec.args[10] ?? "", /pause >nul/);
   assert.doesNotMatch(spec.args[10] ?? "", /Attach command exited/);
+});
+
+test("buildTerminalLaunchSpec keeps the PowerShell fallback attach command clean on Windows", () => {
+  const spec = buildTerminalLaunchSpec({
+    cwd: "C:\\work\\agent-team",
+    command: "opencode attach http://127.0.0.1:4310 --session session-1",
+    platform: "win32",
+    env: {
+      AGENT_TEAM_WINDOWS_TERMINAL: "powershell",
+    },
+  });
+
+  assert.equal(spec.command, "powershell.exe");
+  assert.match(spec.args[5] ?? "", /Start-Process -WorkingDirectory 'C:\\work\\agent-team'/);
+  assert.match(spec.args[5] ?? "", /-FilePath 'powershell\.exe'/);
+  assert.match(spec.args[5] ?? "", /@\('-NoExit', '-Command', 'opencode attach http:\/\/127\.0\.0\.1:4310 --session session-1'\)/);
 });
 
 test("buildTerminalLaunchSpec prefers the ComSpec cmd path on Windows", () => {

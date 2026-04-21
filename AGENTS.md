@@ -118,6 +118,7 @@
 
 - GUI 和 CLI 都通过 OpenCode session attach 到单个 Agent，会话调试入口统一围绕 OpenCode。terminal-commands[buildCliOpencodeAttachCommand]、orchestrator[openAgentTerminal, launchAgentTerminal]、task-attach-display[renderTaskAttachCommands]
 - OpenCode attach 入口统一位于拓扑图节点头部。topology-graph-helpers[getTopologyNodeHeaderActionOrder]、TopologyGraph[TopologyGraph]
+- Windows 上 attach 外部终端默认使用 `cmd.exe /k` 拉起可见窗口；若需备用路径，可在启动前设置 `AGENT_TEAM_WINDOWS_TERMINAL=powershell` 切换到 PowerShell 窗口启动。terminal-launcher[buildTerminalLaunchSpec]
 - 运行中的 Agent 会通过 OpenCode HTTP session 消息接口轮询实时工具调用与摘要，并显示在拓扑图节点内。web-api[getTaskRuntime]、App[App]、orchestrator[getTaskRuntime]、opencode-client[getSessionRuntime]
 - 应用退出时，会统一关闭当前工作区相关的 `opencode serve` 与其派生会话。orchestrator[dispose]、opencode-client[shutdown]、cli[disposeCliContext]
 
@@ -138,7 +139,7 @@
 bun run cli -- help
 
 bun run cli -- task headless --file config/team-topologies/development-team.topology.json --message "请开始一轮开发团队协作。"
-bun run cli -- task ui --file config/team-topologies/development-team.topology.json --message "使用node实现一个加法方法" --cwd D:\empty"
+bun run cli -- task ui --file config/team-topologies/development-team.topology.json --message "使用node实现一个加法方法" --cwd "D:\empty"
 ```
 
 CLI 能力分组：

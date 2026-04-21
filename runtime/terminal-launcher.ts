@@ -14,8 +14,21 @@ interface TerminalLaunchSpec {
   cwd: string;
 }
 
+type WindowsTerminalLauncher = "cmd" | "powershell";
+
 function quoteAppleScriptString(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function quotePowerShellString(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function readWindowsTerminalLauncher(
+  env?: NodeJS.ProcessEnv | Record<string, string | undefined>,
+): WindowsTerminalLauncher {
+  const raw = env?.AGENT_TEAM_WINDOWS_TERMINAL?.trim().toLowerCase();
+  return raw === "powershell" ? "powershell" : "cmd";
 }
 
 function buildWindowsStartArgs(input: {
@@ -39,10 +52,44 @@ function buildWindowsStartArgs(input: {
   ];
 }
 
+function buildWindowsPowerShellStartArgs(input: {
+  command: string;
+  cwd: string;
+}): string[] {
+  return [
+    "-NoLogo",
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-Command",
+    [
+      "Start-Process",
+      "-WorkingDirectory",
+      quotePowerShellString(input.cwd),
+      "-FilePath",
+      quotePowerShellString("powershell.exe"),
+      "-ArgumentList",
+      `@('-NoExit', '-Command', ${quotePowerShellString(input.command)})`,
+    ].join(" "),
+  ];
+}
+
 export function buildTerminalLaunchSpec(input: TerminalLaunchInput): TerminalLaunchSpec {
   const platform = input.platform ?? process.platform;
 
   if (platform === "win32") {
+    const launcher = readWindowsTerminalLauncher(input.env);
+    if (launcher === "powershell") {
+      return {
+        command: "powershell.exe",
+        args: buildWindowsPowerShellStartArgs({
+          command: input.command,
+          cwd: input.cwd,
+        }),
+        cwd: input.cwd,
+      };
+    }
+
     const cmdPath = resolveWindowsCmdPath(input.env);
     return {
       command: cmdPath,
