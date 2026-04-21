@@ -213,6 +213,8 @@ export class OpenCodeClient {
         title,
         status: response.status,
         statusText: response.statusText,
+      }, {
+        runtimeKey: normalized.runtimeKey,
       });
       throw new Error(`OpenCode 创建 session 失败: ${response.status}`);
     }
@@ -226,6 +228,8 @@ export class OpenCodeClient {
       projectPath: normalized.projectPath,
       title,
       status: response.status,
+    }, {
+      runtimeKey: normalized.runtimeKey,
     });
     throw new Error("OpenCode 创建 session 响应缺少有效的 session id");
   }
@@ -598,6 +602,8 @@ export class OpenCodeClient {
     }
     appendAppLog("info", "opencode.serve_starting", {
       projectPath: state.projectPath,
+    }, {
+      runtimeKey: state.runtimeKey,
     });
     const launchArgs = ["serve"];
     const spawnSpec = process.platform === "win32"
@@ -647,6 +653,8 @@ export class OpenCodeClient {
         message: error instanceof Error ? error.message : String(error),
         stdout: this.truncateLogPayload(stdoutChunks.join("")),
         stderr: this.truncateLogPayload(stderrChunks.join("")),
+      }, {
+        runtimeKey: state.runtimeKey,
       });
       throw error;
     });
@@ -666,6 +674,8 @@ export class OpenCodeClient {
         message,
         stdout: this.truncateLogPayload(stdoutChunks.join("")),
         stderr: this.truncateLogPayload(stderrChunks.join("")),
+      }, {
+        runtimeKey: state.runtimeKey,
       });
       throw new Error(message);
     }
@@ -676,6 +686,8 @@ export class OpenCodeClient {
       baseUrl,
       command: spawnSpec.command,
       args: spawnSpec.args,
+    }, {
+      runtimeKey: state.runtimeKey,
     });
 
     return {
@@ -907,6 +919,8 @@ export class OpenCodeClient {
         method: options.method,
         url,
         message: error instanceof Error ? error.message : String(error),
+      }, {
+        runtimeKey: normalized.runtimeKey,
       });
       throw error;
     }

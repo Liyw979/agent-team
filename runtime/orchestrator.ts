@@ -348,6 +348,7 @@ export class Orchestrator {
     }
 
     const initialized = await this.createTask(normalizedCwd, agents, {
+      taskId: payload.newTaskId ?? null,
       title: this.createTaskTitle(payload.content),
       source: "submit",
     });
@@ -368,6 +369,7 @@ export class Orchestrator {
     this.syncTopology(normalizedCwd, agents);
 
     return this.createTask(normalizedCwd, agents, {
+      taskId: payload.taskId ?? null,
       title: (payload.title ?? "").trim() || "未命名任务",
       source: "initialize",
     });
@@ -451,6 +453,7 @@ export class Orchestrator {
     cwd: string,
     agents: AgentRecord[],
     options: {
+      taskId?: string | null;
       title: string;
       source: "initialize" | "submit";
     },
@@ -459,7 +462,7 @@ export class Orchestrator {
       throw new Error("当前工作区没有可用的 Agent");
     }
 
-    const taskId = randomUUID();
+    const taskId = options.taskId?.trim() || randomUUID();
     const normalizedCwd = path.resolve(cwd);
 
     const task: TaskRecord = {

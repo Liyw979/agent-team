@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -7,7 +8,7 @@ import process from "node:process";
 import { buildCliOpencodeAttachCommand } from "@shared/terminal-commands";
 import type { TaskSnapshot, WorkspaceSnapshot } from "@shared/types";
 import open from "open";
-import { appendAppLog, initAppFileLogger } from "../runtime/app-log";
+import { appendAppLog, buildTaskLogFilePath, initAppFileLogger } from "../runtime/app-log";
 import { Orchestrator } from "../runtime/orchestrator";
 import { resolveCliUserDataPath } from "../runtime/user-data-path";
 import { compileTeamDsl, matchesAppliedTeamDsl } from "../runtime/team-dsl";
@@ -35,6 +36,7 @@ interface CliContext {
 }
 
 interface TaskRunDiagnostics {
+  taskId: string;
   logFilePath: string;
 }
 
@@ -46,6 +48,9 @@ interface ActiveUiHost {
   close: () => Promise<void>;
 }
 
+let activeTaskDiagnosticsForCrash: TaskRunDiagnostics | null = null;
+let didPrintTaskDiagnosticsForCrash = false;
+
 function fail(message: string): never {
   throw new Error(message);
 }
@@ -54,16 +59,17 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function buildTaskRunDiagnostics(userDataPath: string): TaskRunDiagnostics {
+function buildTaskRunDiagnostics(userDataPath: string, taskId: string): TaskRunDiagnostics {
   return {
-    logFilePath: path.join(userDataPath, "logs", "agent-team.log"),
+    taskId,
+    logFilePath: buildTaskLogFilePath(userDataPath, taskId),
   };
 }
 
-function printTaskRunDiagnostics(diagnostics: TaskRunDiagnostics, taskId: string) {
+function printTaskRunDiagnostics(diagnostics: TaskRunDiagnostics) {
   process.stdout.write(`${renderTaskSessionSummary({
     logFilePath: diagnostics.logFilePath,
-    taskId,
+    taskId: diagnostics.taskId,
   })}\n\n`);
 }
 
@@ -81,10 +87,10 @@ async function disposeCliContext(context: CliContext, options: CliDisposeOptions
 }
 
 async function createCliContext(options?: {
+  userDataPath?: string;
   enableEventStream?: boolean;
 }): Promise<CliContext> {
-  const userDataPath = resolveCliUserDataPath();
-  initAppFileLogger(userDataPath);
+  const userDataPath = options?.userDataPath ?? resolveCliUserDataPath();
   await ensureRuntimeAssets(userDataPath);
   const orchestrator = new Orchestrator({
     userDataPath,
@@ -298,19 +304,18 @@ async function ensureUiAssetsAvailable(userDataPath: string): Promise<string> {
 async function handleTaskHeadlessCommand(
   context: CliContext,
   command: Extract<ParsedCliCommand, { kind: "task.headless" }>,
+  diagnostics: TaskRunDiagnostics,
 ) {
-  validateTaskHeadlessCommand(command);
-  const diagnostics = buildTaskRunDiagnostics(context.userDataPath);
   let workspace = await resolveProject(context, command.cwd);
   workspace = await ensureJsonTopologyApplied(context, workspace, command.file!);
   const initialMessage = command.message!.trim();
 
   const snapshot = await context.orchestrator.submitTask({
     cwd: workspace.cwd,
-    taskId: null,
+    newTaskId: diagnostics.taskId,
     content: initialMessage,
   });
-  printTaskRunDiagnostics(diagnostics, snapshot.task.id);
+  printTaskRunDiagnostics(diagnostics);
 
   const streamingPlan = resolveCliTaskStreamingPlan({
     commandKind: command.kind,
@@ -329,9 +334,8 @@ async function handleTaskHeadlessCommand(
 async function handleTaskUiCommand(
   context: CliContext,
   command: Extract<ParsedCliCommand, { kind: "task.ui" }>,
+  diagnostics: TaskRunDiagnostics,
 ): Promise<ActiveUiHost> {
-  validateTaskUiCommand(command);
-  const diagnostics = buildTaskRunDiagnostics(context.userDataPath);
   const streamingPlan = resolveCliTaskStreamingPlan({
     commandKind: command.kind,
     isResume: false,
@@ -342,10 +346,10 @@ async function handleTaskUiCommand(
   const webRoot = await ensureUiAssetsAvailable(context.userDataPath);
   const snapshot = await context.orchestrator.submitTask({
     cwd: workspace.cwd,
-    taskId: null,
+    newTaskId: diagnostics.taskId,
     content: command.message!.trim(),
   });
-  printTaskRunDiagnostics(diagnostics, snapshot.task.id);
+  printTaskRunDiagnostics(diagnostics);
   const { host, url } = await ensureUiHost(context, snapshot.task.cwd, snapshot.task.id, webRoot);
   process.stdout.write(`[UI] ${url}\n`);
   await open(url);
@@ -381,7 +385,25 @@ async function run() {
     return;
   }
 
-  const context = await createCliContext();
+  let userDataPath: string | null = null;
+  let activeTaskDiagnostics: TaskRunDiagnostics | null = null;
+  if (command.kind === "task.headless") {
+    validateTaskHeadlessCommand(command);
+    userDataPath = resolveCliUserDataPath();
+    initAppFileLogger(userDataPath);
+    activeTaskDiagnostics = buildTaskRunDiagnostics(userDataPath, randomUUID());
+  } else if (command.kind === "task.ui") {
+    validateTaskUiCommand(command);
+    userDataPath = resolveCliUserDataPath();
+    initAppFileLogger(userDataPath);
+    activeTaskDiagnostics = buildTaskRunDiagnostics(userDataPath, randomUUID());
+  }
+  activeTaskDiagnosticsForCrash = activeTaskDiagnostics;
+  didPrintTaskDiagnosticsForCrash = false;
+
+  const context = await createCliContext({
+    userDataPath: userDataPath ?? undefined,
+  });
   let observedSettledTaskState = false;
   let forceProcessExit = false;
   let interrupted = false;
@@ -418,10 +440,12 @@ async function run() {
   process.once("SIGTERM", handleSignal);
   try {
     if (command.kind === "task.headless") {
-      await handleTaskHeadlessCommand(context, command);
+      await handleTaskHeadlessCommand(context, command, activeTaskDiagnostics!);
+      didPrintTaskDiagnosticsForCrash = true;
       observedSettledTaskState = true;
     } else if (command.kind === "task.ui") {
-      activeUiHost = await handleTaskUiCommand(context, command);
+      activeUiHost = await handleTaskUiCommand(context, command, activeTaskDiagnostics!);
+      didPrintTaskDiagnosticsForCrash = true;
       observedSettledTaskState = true;
       const disposeOptions = resolveCliDisposeOptions({
         commandKind: command.kind,
@@ -460,10 +484,19 @@ async function run() {
 
 void run().catch((error) => {
   const message = error instanceof Error ? error.message : String(error);
-  appendAppLog("error", "cli.run_failed", {
-    cwd: process.cwd(),
-    message,
-  });
+  appendAppLog(
+    "error",
+    "cli.run_failed",
+    {
+      cwd: process.cwd(),
+      message,
+    },
+    activeTaskDiagnosticsForCrash ? { taskId: activeTaskDiagnosticsForCrash.taskId } : undefined,
+  );
+  if (activeTaskDiagnosticsForCrash && !didPrintTaskDiagnosticsForCrash) {
+    printTaskRunDiagnostics(activeTaskDiagnosticsForCrash);
+    didPrintTaskDiagnosticsForCrash = true;
+  }
   process.stderr.write(`${message}\n`);
   process.exitCode = 1;
 });

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { buildTaskLogFilePath, initAppFileLogger } from "./app-log";
 import { OpenCodeClient } from "./opencode-client";
 
 function createTempDir() {
@@ -104,6 +105,31 @@ test("createSession throws when the response is missing a session id", async () 
     client.createSession(projectPath, "demo"),
     /session id/,
   );
+});
+
+test("createSession logs invalid responses into the task log file when runtimeKey is provided", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  const taskId = "task-123";
+  initAppFileLogger(userDataPath);
+
+  const client = new OpenCodeClient(userDataPath) as OpenCodeClient & {
+    request: () => Promise<Response>;
+  };
+  client.request = async () => new Response("", { status: 200 });
+
+  await assert.rejects(
+    client.createSession({
+      runtimeKey: taskId,
+      projectPath,
+    }, "demo"),
+    /session id/,
+  );
+
+  const lines = fs.readFileSync(buildTaskLogFilePath(userDataPath, taskId), "utf8").trim().split("\n");
+  const record = JSON.parse(lines.at(-1) ?? "{}");
+  assert.equal(record.event, "opencode.create_session_invalid_response");
+  assert.equal(record.taskId, taskId);
 });
 
 test("session message 请求不注入 AbortSignal，确保长任务不会被请求层超时中断", async () => {

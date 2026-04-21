@@ -42,10 +42,10 @@
 
 ### 2.3 用户数据目录与日志
 
-- CLI 启动时会解析用户数据目录并初始化 `logs/agent-team.log`。user-data-path[resolveCliUserDataPath]、app-log[initAppFileLogger]、cli[createCliContext]
-- Windows 上的默认用户数据目录按 `%APPDATA%\\agent-team` 解析，因此日志路径对应为 `%APPDATA%\\agent-team\\logs\\agent-team.log`。user-data-path[resolveDefaultUserDataPath]、app-log[initAppFileLogger]
+- CLI 启动时会解析用户数据目录并初始化 Task 级日志目录；`task headless` 与 `task ui` 会为每个 Task 预分配独立日志文件。user-data-path[resolveCliUserDataPath]、app-log[initAppFileLogger]、cli[createCliContext]
+- Windows 上的默认用户数据目录按 `%APPDATA%\\agent-team` 解析，因此某个 Task 的日志路径对应为 `%APPDATA%\\agent-team\\logs\\tasks\\<taskId>.log`。user-data-path[resolveDefaultUserDataPath]、app-log[initAppFileLogger]
 - 全局用户数据目录主要承载日志与编译态运行时释放出的 Web 资源；默认目录不可写时需要显式设置 `AGENT_TEAM_USER_DATA_DIR`。user-data-path[resolveCliUserDataPath]、runtime-assets[ensureRuntimeAssets]
-- 诊断日志会以 JSON Lines 形式追加写入 `logs/agent-team.log`。app-log[appendAppLog]
+- 诊断日志会以 JSON Lines 形式按 Task 追加写入 `logs/tasks/<taskId>.log`。app-log[appendAppLog]
 
 ## 3. 运行时与编排功能地图
 
@@ -138,7 +138,7 @@
 bun run cli -- help
 
 bun run cli -- task headless --file config/team-topologies/development-team.topology.json --message "请开始一轮开发团队协作。"
-bun run cli -- task ui --file config/team-topologies/development-team.topology.json --message "请开始一轮开发团队协作。" --cwd /path/to/workspace
+bun run cli -- task ui --file config/team-topologies/development-team.topology.json --message "使用node实现一个加法方法" --cwd D:\empty"
 ```
 
 CLI 能力分组：
@@ -152,7 +152,7 @@ CLI 能力分组：
 
 ### 5.1 存储布局
 
-- 命令执行失败等诊断日志位于用户数据目录下的 `logs/agent-team.log`。
+- 命令执行失败等诊断日志位于用户数据目录下的 `logs/tasks/<taskId>.log`。
 - 当前工作区的拓扑、Task、消息与运行态数据只在当前 CLI 进程内存中维护，不再落盘旧的工作区快照文件。
 - 团队拓扑 JSON 编译后的 Agent prompt / writable 元数据与 LangGraph 边界信息也只保留在当前运行时内存快照中。
 - 每个 Task 的 LangGraph checkpoint 只保存在当前进程内存里，不再额外写入工作区目录。

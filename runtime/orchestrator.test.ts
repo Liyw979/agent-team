@@ -283,6 +283,26 @@ test("task init 会补齐 OpenCode 运行态", async () => {
   assert.equal(task.task.cwd, projectPath);
 });
 
+test("initializeTask reuses a preallocated task id when provided", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  const orchestrator = createTestOrchestrator({
+    userDataPath,
+    enableEventStream: false,
+  });
+  stubOpenCodeSessions(orchestrator);
+
+  let project = await orchestrator.getWorkspaceSnapshot(projectPath);
+  project = await addBuiltinAgents(orchestrator, project.cwd, ["Build"]);
+  const task = await orchestrator.initializeTask({
+    cwd: project.cwd,
+    title: "demo",
+    taskId: "task-preallocated",
+  });
+
+  assert.equal(task.task.id, "task-preallocated");
+});
+
 test("getTaskSnapshot 在新的 Orchestrator 进程里不会再按 taskId 恢复跨进程任务", async () => {
   const userDataPath = createTempDir();
   const workspacePath = createTempDir();

@@ -64,7 +64,9 @@ test("task headless prints the log file path and task id", () => {
   assert.match(CLI_SOURCE, /renderTaskSessionSummary/);
   assert.match(CLI_SOURCE, /logFilePath: diagnostics\.logFilePath/);
   assert.match(CLI_SOURCE, /taskId,/);
-  assert.match(CLI_SOURCE, /agent-team\.log/);
+  assert.match(CLI_SOURCE, /buildTaskLogFilePath/);
+  assert.match(CLI_SOURCE, /buildTaskLogFilePath\(userDataPath, taskId\)/);
+  assert.doesNotMatch(CLI_SOURCE, /agent-team\.log/);
   assert.doesNotMatch(CLI_SOURCE, /task show/);
 });
 
@@ -89,10 +91,26 @@ test("task ui prints diagnostics before starting the web host", () => {
   assert.equal(
     appearsInOrder(
       taskUiSection,
-      "printTaskRunDiagnostics(diagnostics, snapshot.task.id);",
+      "printTaskRunDiagnostics(diagnostics);",
       "const { host, url } = await ensureUiHost(context, snapshot.task.cwd, snapshot.task.id, webRoot);",
     ),
     true,
+  );
+});
+
+test("task commands preallocate a task id before creating the CLI context", () => {
+  assert.equal(
+    appearsInOrder(
+      NORMALIZED_CLI_SOURCE,
+      "activeTaskDiagnostics = buildTaskRunDiagnostics(userDataPath, randomUUID());",
+      "const context = await createCliContext({",
+    ),
+    true,
+  );
+  assert.match(NORMALIZED_CLI_SOURCE, /activeTaskDiagnosticsForCrash = activeTaskDiagnostics;/);
+  assert.match(
+    NORMALIZED_CLI_SOURCE,
+    /appendAppLog\([\s\S]*activeTaskDiagnosticsForCrash \? \{ taskId: activeTaskDiagnosticsForCrash\.taskId \} : undefined/,
   );
 });
 
