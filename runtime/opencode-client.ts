@@ -935,7 +935,6 @@ export class OpenCodeClient {
     },
   ): Promise<Response> {
     const normalized = this.normalizeTarget(options.target ?? options.projectPath ?? globalThis.process.cwd());
-    const server = await this.ensureServer(normalized);
     const headers: Record<string, string> = {};
     if (options.body) {
       headers["content-type"] = "application/json";
@@ -944,17 +943,22 @@ export class OpenCodeClient {
       headers["x-opencode-directory"] = normalized.projectPath;
     }
 
-    const url = `${this.buildBaseUrl(server.port)}${pathname}`;
     const timeoutMs = resolveOpenCodeRequestTimeoutMs({
       pathname,
       method: options.method,
     });
-    try {
-      return await this.fetchWithTimeout(url, {
+    const requestWithServer = async (server: ServeHandle) => {
+      const url = `${this.buildBaseUrl(server.port)}${pathname}`;
+      return this.fetchWithTimeout(url, {
         method: options.method,
         headers,
         body: options.body,
       }, timeoutMs);
+    };
+    const server = await this.ensureServer(normalized);
+    const url = `${this.buildBaseUrl(server.port)}${pathname}`;
+    try {
+      return await requestWithServer(server);
     } catch (error) {
       appendAppLog("error", "opencode.request_failed", {
         projectPath: normalized.projectPath,
