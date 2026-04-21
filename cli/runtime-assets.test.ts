@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  isCompiledRuntimeDir,
   resolveCompiledEmbeddedWebRoot,
   resolveRuntimeWebRoot,
   resolveSourceAssetFallback,
@@ -91,5 +92,12 @@ test("编译态内嵌资源缺少 index.html 时，不应暴露 exe 的前端静
       ],
     }),
     null,
+  );
+});
+
+test("compiled runtime 的 bunfs URL 目录应识别为编译态", () => {
+  assert.equal(
+    isCompiledRuntimeDir("file:///$bunfs/root/compile"),
+    true,
   );
 });

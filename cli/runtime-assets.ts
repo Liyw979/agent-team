@@ -57,7 +57,14 @@ export function resolveSourceAssetFallback(input: {
 
 export function isCompiledRuntime(): boolean {
   const runtimeDir = (import.meta as ImportMeta & { dir?: string }).dir ?? "";
-  return runtimeDir.startsWith("/$bunfs");
+  return isCompiledRuntimeDir(runtimeDir);
+}
+
+export function isCompiledRuntimeDir(runtimeDir: string): boolean {
+  const normalized = runtimeDir.replace(/\\/g, "/");
+  return normalized.startsWith("/$bunfs")
+    || normalized.startsWith("file:///$bunfs/")
+    || normalized === "file:///$bunfs";
 }
 
 function getRepoWebDistRoot(): string {
