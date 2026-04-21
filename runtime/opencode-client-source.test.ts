@@ -1,26 +1,27 @@
-import { expect, test } from "bun:test";
+import assert from "node:assert/strict";
 import fs from "node:fs";
+import test from "node:test";
 
 const OPENCODE_CLIENT_SOURCE = fs.readFileSync(new URL("./opencode-client.ts", import.meta.url), "utf8");
 
 test("OpenCode serve 启动进程时会把目标工作区作为 cwd 传入", () => {
-  expect(OPENCODE_CLIENT_SOURCE).toMatch(/spawn\(\s*[\s\S]*?\{\s*cwd: state\.projectPath,/);
+  assert.match(OPENCODE_CLIENT_SOURCE, /spawn\(\s*[\s\S]*?\{\s*cwd: state\.projectPath,/);
 });
 
 test("OpenCode serve 启动进程时不再注入 OPENCODE_CONFIG_DIR，避免 /session 卡死", () => {
-  expect(OPENCODE_CLIENT_SOURCE).not.toMatch(/serverEnv\.OPENCODE_CONFIG_DIR\s*=/);
+  assert.doesNotMatch(OPENCODE_CLIENT_SOURCE, /serverEnv\.OPENCODE_CONFIG_DIR\s*=/);
 });
 
 test("OpenCode serve 启动进程时不再显式传入 --port，改为解析实际监听地址", () => {
-  expect(OPENCODE_CLIENT_SOURCE).not.toMatch(/["']--port["']/);
+  assert.doesNotMatch(OPENCODE_CLIENT_SOURCE, /["']--port["']/);
 });
 
 test("配置变化时不再触发 scheduleShutdown 重启链路", () => {
-  expect(OPENCODE_CLIENT_SOURCE).not.toMatch(/scheduleShutdown\s*\(/);
+  assert.doesNotMatch(OPENCODE_CLIENT_SOURCE, /scheduleShutdown\s*\(/);
 });
 
 test("createSession 超时后不再 shutdown 后自动重试", () => {
-  expect(OPENCODE_CLIENT_SOURCE).not.toMatch(/create_session_timed_out/);
-  expect(OPENCODE_CLIENT_SOURCE).not.toMatch(/await this\.shutdown\(normalized\.runtimeKey\)/);
-  expect(OPENCODE_CLIENT_SOURCE).not.toMatch(/isRequestTimeoutError\s*\(/);
+  assert.doesNotMatch(OPENCODE_CLIENT_SOURCE, /create_session_timed_out/);
+  assert.doesNotMatch(OPENCODE_CLIENT_SOURCE, /await this\.shutdown\(normalized\.runtimeKey\)/);
+  assert.doesNotMatch(OPENCODE_CLIENT_SOURCE, /isRequestTimeoutError\s*\(/);
 });

@@ -111,16 +111,6 @@ interface WorkspaceRecord {
   name: string;
 }
 
-interface TaskRuntimeSeed {
-  taskId: string;
-  cwd: string;
-  attachBaseUrl: string | null;
-  agentSessions: Array<{
-    agentName: string;
-    sessionId: string;
-  }>;
-}
-
 interface TaskRuntimeOverlay {
   taskId: string;
   cwd: string;
@@ -223,43 +213,6 @@ export class Orchestrator {
     const resolvedCwd = this.resolveTaskCwd(taskId, cwd);
     await this.reconcilePersistedTaskStatus(resolvedCwd, taskId);
     return this.hydrateTask(resolvedCwd, taskId);
-  }
-
-  exportTaskRuntime(taskId: string, cwd = process.cwd()): TaskRuntimeSeed | null {
-    const resolvedCwd = this.resolveTaskCwd(taskId, cwd);
-    const overlay = this.taskRuntimeOverlays.get(taskId);
-    if (!overlay || overlay.cwd !== resolvedCwd) {
-      return null;
-    }
-
-    return {
-      taskId,
-      cwd: overlay.cwd,
-      attachBaseUrl: overlay.attachBaseUrl,
-      agentSessions: [...overlay.agentSessions.entries()].map(([agentName, sessionId]) => ({
-        agentName,
-        sessionId,
-      })),
-    };
-  }
-
-  importTaskRuntime(seed: TaskRuntimeSeed) {
-    const normalizedCwd = path.resolve(seed.cwd);
-    const overlay = this.ensureTaskRuntimeOverlay({
-      id: seed.taskId,
-      cwd: normalizedCwd,
-    });
-    overlay.attachBaseUrl = seed.attachBaseUrl;
-    overlay.agentSessions = new Map(
-      seed.agentSessions.map((entry) => [entry.agentName, entry.sessionId]),
-    );
-    if (seed.attachBaseUrl) {
-      this.opencodeClient.registerExternalServer(overlay.runtimeTarget, seed.attachBaseUrl);
-    }
-    this.setInjectedConfigForTask({
-      id: seed.taskId,
-      cwd: normalizedCwd,
-    });
   }
 
   private ensureWorkspaceRecord(cwd: string): WorkspaceRecord {

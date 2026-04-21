@@ -12,7 +12,7 @@ test("CLI 不再兼容旧的 review relation 别名", () => {
 test("CLI 帮助只包含 task headless/task ui 命令", () => {
   assert.match(CLI_SOURCE, /task headless --file <topology-json> --message <message>/);
   assert.match(CLI_SOURCE, /task ui --file <topology-json> --message <message> \[--cwd <path>\]/);
-  assert.match(CLI_SOURCE, /task ui <taskId> \[--cwd <path>\]/);
+  assert.doesNotMatch(CLI_SOURCE, /task ui <taskId> \[--cwd <path>\]/);
   assert.doesNotMatch(CLI_SOURCE, /task attach <taskId> <agentName>/);
   assert.doesNotMatch(CLI_SOURCE, /task show <taskId>/);
   assert.doesNotMatch(CLI_SOURCE, /task chat --file <topology-json> --message <message>/);
@@ -53,10 +53,11 @@ test("CLI 不再通过 ProjectSnapshot / ensureProjectForPath 驱动当前工作
   assert.doesNotMatch(CLI_SOURCE, /getProjectSnapshot/);
 });
 
-test("CLI 会通过内部 web-host 模式拉起浏览器 UI", () => {
-  assert.match(CLI_SOURCE, /internal web-host/);
+test("CLI 会在当前进程里直接启动 web-host 并打开浏览器 UI", () => {
+  assert.match(CLI_SOURCE, /startWebHost/);
   assert.match(CLI_SOURCE, /openBrowser/);
-  assert.doesNotMatch(CLI_SOURCE, /spawnUi\(/);
+  assert.doesNotMatch(CLI_SOURCE, /internal web-host/);
+  assert.doesNotMatch(CLI_SOURCE, /buildUiHostLaunchSpec/);
 });
 
 test("task ui 不会在用户入口里触发 build:web 编译", () => {
@@ -72,7 +73,7 @@ test("task ui 在任务结束后会继续驻留，等待 Ctrl\\+C 再清理", ()
 
 test("task ui 与 task headless 都会把 command.cwd 传入工作区解析链路", () => {
   assert.match(CLI_SOURCE, /resolveProject\(context, command\.cwd\)/);
-  assert.match(CLI_SOURCE, /resolveTaskProject\(context, command\.taskId, command\.cwd\)/);
+  assert.doesNotMatch(CLI_SOURCE, /resolveTaskProject\(context, command\.taskId, command\.cwd\)/);
 });
 
 test("CLI attach 列表只展示 opencode attach 命令", () => {

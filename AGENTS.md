@@ -125,8 +125,7 @@
 - CLI 提供 `task headless`、`task ui`。
 - `task headless --file <topology.json> --message <message>` 会新建当前 Task，打印本轮群聊，任务结束后退出到 shell。
 - `task ui --file <topology.json> --message <message> [--cwd <path>]` 会新建当前 Task，启动本地 Web Host，并在浏览器中打开当前 Task 页面；CLI 进程会继续驻留，直到收到 `Ctrl+C` / `SIGTERM` 才清理当前命令持有的 OpenCode 实例并退出。
-- `task ui <taskId> [--cwd <path>]` 会恢复已有 Task，并在浏览器中打开当前 Task 页面；传入 `--cwd` 时会作为任务定位的优先工作区；CLI 进程同样会继续驻留，直到收到 `Ctrl+C` / `SIGTERM`。
-- CLI / 终端里所有用户可见 attach 文案都直接显示底层 `opencode attach ...` 命令。
+- CLI / 终端里所有用户可见 attach 文案都直接显示底层 `opencode attach ...`，不再展示 `task attach` 包装命令。
 - `bun run cli -- ...` 需要在仓库根目录执行；若从其他目录排查目标工作区，`task headless` / `task ui` 请显式传入 `--cwd`。
 
 常用命令示例：
@@ -136,13 +135,12 @@ bun run cli -- help
 
 bun run cli -- task headless --file config/team-topologies/development-team.topology.json --message "请开始一轮开发团队协作。"
 bun run cli -- task ui --file config/team-topologies/development-team.topology.json --message "请开始一轮开发团队协作。" --cwd /path/to/workspace
-bun run cli -- task ui <taskId> --cwd /path/to/workspace
 ```
 
 CLI 能力分组：
 
 - `task headless`：运行一轮任务，结束后退出 CLI。
-- `task ui`：运行或恢复任务，并在浏览器里打开当前 Task 页面；命令会保持驻留，直到收到 `Ctrl+C` / `SIGTERM`。
+- `task ui`：新建任务并在浏览器里打开当前 Task 页面；命令会保持驻留，直到收到 `Ctrl+C` / `SIGTERM`。
 - CLI 主进程收到 `Ctrl+C` / `SIGTERM` 时，会先回收当前这次命令启动或连接过的全部 OpenCode serve 实例，再结束当前命令，避免遗留孤儿会话。
 - `task headless` 在任务自然结束退出时会打印本次回收掉的 OpenCode 实例 PID，`task ui` 则只会在收到 `Ctrl+C` / `SIGTERM` 清理退出时打印，便于排查残留进程。
 
@@ -151,9 +149,8 @@ CLI 能力分组：
 ### 5.1 存储布局
 
 - 命令执行失败等诊断日志位于用户数据目录下的 `logs/agent-team.log`。
-- 当前工作区的拓扑、Task、消息与运行态数据位于 `<cwd>/.agent-team/state.json`。
-- 团队拓扑 JSON 编译后的 Agent prompt / writable 元数据会跟随当前拓扑保存在 `<cwd>/.agent-team/state.json` 的 `topology.nodeRecords` 中。
-- 团队拓扑 JSON 编译后的 LangGraph 边界信息会跟随当前拓扑保存在 `<cwd>/.agent-team/state.json` 的 `topology.langgraph` 中。
+- 当前工作区的拓扑、Task、消息与运行态数据只在当前 CLI 进程内存中维护，不再落盘旧的工作区快照文件。
+- 团队拓扑 JSON 编译后的 Agent prompt / writable 元数据与 LangGraph 边界信息也只保留在当前运行时内存快照中。
 - 每个 Task 的 LangGraph checkpoint 位于 `<cwd>/.agent-team/langgraph/`。
 - OpenCode runtime 统一落到 `.agent-team/` 下，便于随当前工作区一起迁移；OpenCode serve 端口、Agent session id 与 Web Host 定位信息由运行时内存态管理。
 
@@ -201,7 +198,7 @@ bun run cli -- help
 ```
 
 - 前端开发或修改 UI 相关文件后，必须执行 `bun run build`，生成最新的 `dist/web/`，避免浏览器继续读取旧 UI 产物。
-- `task ui` 与内部 `web-host` 读取已构建好的 `dist/web/` 或编译产物内嵌的网页资源；源码运行时若缺少最新 `dist/web/`，会直接报错。
+- `task ui` 只会读取已构建好的 `dist/web/` 或编译产物内嵌的网页资源；源码运行时若缺少最新 `dist/web/`，会直接报错，不会再自动起 Vite 开发服务器兜底。
 
 常用构建命令：
 
@@ -240,5 +237,4 @@ bun run dist:mac-x64
 ## 8. 后续建议
 
 - 把协作消息做得更接近 “Agent @ Agent” 的可视化协作流。
-- 为 `.agent-team/state.json` 增加更明确的 schema version 与升级策略。
 - 补充集成测试。

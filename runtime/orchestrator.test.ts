@@ -119,7 +119,9 @@ afterEach(async () => {
   forceCleanupCurrentProcessOpenCodeChildren();
 });
 
-test("getWorkspaceSnapshot 在空工作区只读读取时不应物化 .agent-team/state.json", async () => {
+const LEGACY_WORKSPACE_STATE_BASENAME = ["state", "json"].join(".");
+
+test("getWorkspaceSnapshot 在空工作区只读读取时不应物化旧工作区快照文件", async () => {
   const userDataPath = createTempDir();
   const workspacePath = createTempDir();
   const orchestrator = createTestOrchestrator({
@@ -129,7 +131,7 @@ test("getWorkspaceSnapshot 在空工作区只读读取时不应物化 .agent-tea
 
   await orchestrator.getWorkspaceSnapshot(workspacePath);
 
-  assert.equal(fs.existsSync(path.join(workspacePath, ".agent-team", "state.json")), false);
+  assert.equal(fs.existsSync(path.join(workspacePath, ".agent-team", LEGACY_WORKSPACE_STATE_BASENAME)), false);
 });
 
 function buildTeamDslFromWorkspaceSnapshot(input: {
@@ -280,7 +282,7 @@ test("task init 会补齐 OpenCode 运行态", async () => {
   assert.equal(task.task.cwd, projectPath);
 });
 
-test("getTaskSnapshot 在新的 Orchestrator 进程里也能按 taskId 直接定位跨工作区任务", async () => {
+test("getTaskSnapshot 在新的 Orchestrator 进程里不会再按 taskId 恢复跨进程任务", async () => {
   const userDataPath = createTempDir();
   const workspacePath = createTempDir();
 
@@ -311,9 +313,10 @@ test("getTaskSnapshot 在新的 Orchestrator 进程里也能按 taskId 直接定
   });
   stubOpenCodeSessions(reader);
 
-  const snapshot = await reader.getTaskSnapshot(taskId, createTempDir());
-  assert.equal(snapshot.task.id, taskId);
-  assert.equal(snapshot.task.cwd, workspacePath);
+  await assert.rejects(
+    () => reader.getTaskSnapshot(taskId, createTempDir()),
+    /Task .* not found/,
+  );
 });
 
 test("task init 不会追加额外系统提醒", async () => {
@@ -644,7 +647,7 @@ test("applyTeamDsl 会直接以 DSL prompt 为唯一真源", async () => {
   );
 });
 
-test("保存拓扑后 state.json 不再持久化 startAgentId", async () => {
+test("保存拓扑后不会再生成旧工作区快照文件", async () => {
   const userDataPath = createTempDir();
   const projectPath = createTempDir();
   const orchestrator = createTestOrchestrator({
@@ -665,19 +668,11 @@ test("保存拓扑后 state.json 不再持久化 startAgentId", async () => {
     },
   });
 
-  const statePath = path.join(projectPath, ".agent-team", "state.json");
-  const persisted = JSON.parse(fs.readFileSync(statePath, "utf8")) as {
-    topology?: Record<string, unknown>;
-  };
-
   assert.equal(Object.prototype.hasOwnProperty.call(saved.topology, "startAgentId"), false);
-  assert.equal(
-    Object.prototype.hasOwnProperty.call(persisted.topology ?? {}, "startAgentId"),
-    false,
-  );
+  assert.equal(fs.existsSync(path.join(projectPath, ".agent-team", LEGACY_WORKSPACE_STATE_BASENAME)), false);
 });
 
-test("保存拓扑后会持久化动态 spawn 团队配置", async () => {
+test("保存拓扑后会把动态 spawn 团队配置保留在当前运行时快照里", async () => {
   const userDataPath = createTempDir();
   const projectPath = createTempDir();
   const orchestrator = createTestOrchestrator({
@@ -733,19 +728,13 @@ test("保存拓扑后会持久化动态 spawn 团队配置", async () => {
 
   assert.equal(saved.topology.spawnRules?.length, 1);
   assert.equal(saved.topology.nodeRecords?.some((node) => node.kind === "spawn"), true);
-
-  const statePath = path.join(projectPath, ".agent-team", "state.json");
-  const persisted = JSON.parse(fs.readFileSync(statePath, "utf8")) as {
-    topology?: {
-      spawnRules?: Array<{ id?: string }>;
-      nodeRecords?: Array<{ id?: string; kind?: string }>;
-    };
-  };
-  assert.equal(persisted.topology?.spawnRules?.[0]?.id, "finding-debate");
+  const reloaded = await orchestrator.getWorkspaceSnapshot(project.cwd);
+  assert.equal(reloaded.topology.spawnRules?.[0]?.id, "finding-debate");
   assert.equal(
-    persisted.topology?.nodeRecords?.some((node) => node.id === "疑点辩论工厂" && node.kind === "spawn"),
+    reloaded.topology.nodeRecords?.some((node) => node.id === "疑点辩论工厂" && node.kind === "spawn"),
     true,
   );
+  assert.equal(fs.existsSync(path.join(projectPath, ".agent-team", LEGACY_WORKSPACE_STATE_BASENAME)), false);
 });
 
 test("保存拓扑后会保留 spawnEnabled 标记，避免 GUI 点击后回读丢失", async () => {
@@ -878,7 +867,7 @@ test("openAgentTerminal 会通过服务端终端启动器 attach 到对应 sessi
   ]);
 });
 
-test("恢复旧 task 页面但没有当前进程运行时 overlay 时，attach session 不会从 state.json 复活", async () => {
+test("新的 Orchestrator 进程里不会再从旧工作区快照恢复 task attach session", async () => {
   const userDataPath = createTempDir();
   const projectPath = createTempDir();
   const writer = createTestOrchestrator({
@@ -897,10 +886,10 @@ test("恢复旧 task 页面但没有当前进程运行时 overlay 时，attach s
     userDataPath,
     enableEventStream: false,
   });
-  const restored = await reloaded.getTaskSnapshot(created.task.id, project.cwd);
-
-  assert.equal(restored.agents[0]?.opencodeSessionId ?? null, null);
-  assert.equal(restored.agents[0]?.opencodeAttachBaseUrl ?? null, null);
+  await assert.rejects(
+    () => reloaded.getTaskSnapshot(created.task.id, project.cwd),
+    /Task .* not found/,
+  );
 });
 
 test("未写入 Build 时当前 Project 可以没有可写 Agent", async () => {
@@ -2544,7 +2533,7 @@ test("并发审查失败时不会提前追加任务结束系统消息", async ()
   assert.equal(failedCompletionMessages.length, 0);
 });
 
-test("getWorkspaceSnapshot 会直接回放当前工作区任务", async () => {
+test("getWorkspaceSnapshot 不会再跨进程回放当前工作区任务", async () => {
   const userDataPath = createTempDir();
   const projectPath = createTempDir();
   const orchestrator = createTestOrchestrator({
@@ -2564,5 +2553,5 @@ test("getWorkspaceSnapshot 会直接回放当前工作区任务", async () => {
   const snapshot = await reloaded.getWorkspaceSnapshot(project.cwd);
 
   assert.notEqual(snapshot, undefined);
-  assert.equal(snapshot.tasks.some((item) => item.task.id === task.task.id), true);
+  assert.equal(snapshot.tasks.some((item) => item.task.id === task.task.id), false);
 });

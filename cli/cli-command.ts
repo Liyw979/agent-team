@@ -12,7 +12,6 @@ export type ParsedCliCommand =
       kind: "task.ui";
       cwd?: string;
       file?: string;
-      taskId?: string;
       message?: string;
     };
 
@@ -50,21 +49,16 @@ export function buildCliProgram(onCommand?: (command: ParsedCliCommand) => void)
     });
 
   task
-    .command("ui [taskId]")
-    .description("新建或恢复 task，并在浏览器中打开网页界面")
+    .command("ui")
+    .description("新建 task，并在浏览器中打开网页界面")
     .option("--cwd <path>", "指定工作目录")
     .option("--file <topology-json>", "团队拓扑 JSON 文件路径")
-    .option("--task <taskId>", "恢复已有 task")
     .option("--message <message>", "新建 task 时的首条消息")
-    .action((taskId, options) => {
-      if (taskId && options.task && taskId !== options.task) {
-        throw new Error("task ui 的位置参数 taskId 与 --task <taskId> 不一致。");
-      }
+    .action((options) => {
       emit({
         kind: "task.ui",
         cwd: options.cwd,
         file: options.file,
-        taskId: taskId ?? options.task,
         message: options.message,
       });
     });

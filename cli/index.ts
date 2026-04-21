@@ -5,7 +5,6 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
 import { buildCliOpencodeAttachCommand } from "@shared/terminal-commands";
 import type { TaskSnapshot, WorkspaceSnapshot } from "@shared/types";
 import { appendAppLog, initAppFileLogger } from "../runtime/app-log";
@@ -20,21 +19,18 @@ import {
 } from "./cli-command";
 import { resolveCliDisposeOptions } from "./cli-dispose-policy";
 import { resolveCliSignalPlan } from "./cli-signal-policy";
-import { ensureRuntimeAssets, isCompiledRuntime } from "./runtime-assets";
+import { ensureRuntimeAssets } from "./runtime-assets";
 import { resolveCliTaskStreamingPlan } from "./task-streaming-policy";
 import { renderTaskSessionSummary } from "./task-session-summary";
 import { renderTaskAttachCommands } from "./task-attach-display";
 import { renderOpenCodeCleanupReport } from "./opencode-cleanup-report";
 import {
   buildBrowserOpenSpec,
-  buildUiHostLaunchSpec,
   buildUiUrl,
 } from "./ui-host-launch";
 import { startWebHost } from "./web-host";
 
-const CLI_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_UI_PORT = 4310;
-const HEALTHCHECK_TIMEOUT_MS = 10_000;
 
 interface CliContext {
   orchestrator: Orchestrator;
@@ -49,12 +45,9 @@ interface CliDisposeOptions {
   awaitPendingTaskRuns: boolean;
 }
 
-interface InternalWebHostCommand {
-  taskId: string;
-  port: number;
+interface ActiveUiHost {
+  close: () => Promise<void>;
 }
-
-const INTERNAL_WEB_HOST_RUNTIME_ENV = "AGENT_TEAM_INTERNAL_WEB_HOST_RUNTIME";
 
 function fail(message: string): never {
   throw new Error(message);
@@ -115,26 +108,6 @@ async function resolveProject(
   return context.orchestrator.getWorkspaceSnapshot(path.resolve(cwd || process.cwd()));
 }
 
-async function resolveTaskProject(
-  context: CliContext,
-  taskId: string,
-  cwd?: string,
-): Promise<WorkspaceSnapshot> {
-  const task = await context.orchestrator.getTaskSnapshot(
-    taskId,
-    cwd ? path.resolve(cwd) : undefined,
-  );
-  return context.orchestrator.getWorkspaceSnapshot(task.task.cwd);
-}
-
-function findTaskOrThrow(workspace: WorkspaceSnapshot, taskId: string): TaskSnapshot {
-  const matched = workspace.tasks.find((task) => task.task.id === taskId);
-  if (!matched) {
-    fail(`未找到 Task：${taskId}`);
-  }
-  return matched;
-}
-
 async function loadTeamDslDefinition(file: string) {
   const resolved = path.resolve(file);
   if (path.extname(resolved).toLowerCase() !== ".json") {
@@ -175,16 +148,8 @@ function validateTaskHeadlessCommand(
 function validateTaskUiCommand(
   command: Extract<ParsedCliCommand, { kind: "task.ui" }>,
 ) {
-  const hasTaskId = Boolean(command.taskId?.trim());
   const hasFile = Boolean(command.file?.trim());
   const hasMessage = Boolean(command.message?.trim());
-
-  if (hasTaskId) {
-    if (hasFile || hasMessage) {
-      fail("恢复已有 Task 打开网页界面时，不允许再传 --file 或 --message。");
-    }
-    return;
-  }
 
   if (!hasFile) {
     fail("新建 Task 打开网页界面时必须传 --file <topology.json>。");
@@ -295,25 +260,6 @@ async function resolveUiPort() {
   return port;
 }
 
-async function waitForUiHost(port: number, taskId: string) {
-  const startTime = Date.now();
-  while (Date.now() - startTime < HEALTHCHECK_TIMEOUT_MS) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/healthz`);
-      if (response.ok) {
-        const payload = await response.json() as { taskId?: string };
-        if (payload.taskId === taskId) {
-          return;
-        }
-      }
-    } catch {
-      // ignore and retry
-    }
-    await sleep(200);
-  }
-  fail(`后台网页服务启动超时：${taskId}`);
-}
-
 async function openBrowser(url: string) {
   const spec = buildBrowserOpenSpec({ url });
   const child = spawn(spec.command, spec.args, {
@@ -323,125 +269,32 @@ async function openBrowser(url: string) {
   child.unref();
 }
 
-async function ensureWebAssets(userDataPath: string) {
-  const assets = await ensureRuntimeAssets(userDataPath);
-  if (assets.webRoot) {
-    return assets;
-  }
-  fail("网页资源不可用，无法启动浏览器 UI。源码运行前请先执行 bun run build 生成 dist/web。");
-}
-
 async function ensureUiHost(
   context: CliContext,
   cwd: string,
   taskId: string,
-): Promise<{ port: number; url: string }> {
-  await ensureWebAssets(context.userDataPath);
+) : Promise<{ host: ActiveUiHost; port: number; url: string }> {
+  const assets = await ensureRuntimeAssets(context.userDataPath);
+  const webRoot = assets.webRoot ?? process.env.AGENT_TEAM_WEB_ROOT ?? null;
+  if (!webRoot) {
+    fail("网页资源不可用，无法启动浏览器 UI。源码运行前请先执行 bun run build 生成 dist/web。");
+  }
   const port = await resolveUiPort();
-  const runtimeSeed = context.orchestrator.exportTaskRuntime(taskId, cwd);
-  const spec = isCompiledRuntime()
-    ? buildUiHostLaunchSpec({
-        mode: "compiled",
-        executablePath: process.execPath,
-        taskId,
-        port,
-      })
-    : buildUiHostLaunchSpec({
-        mode: "source",
-        nodeBinary: process.execPath,
-        repoRoot: CLI_REPO_ROOT,
-        taskId,
-        port,
-      });
-  const child = spawn(spec.command, spec.args, {
-    cwd: spec.cwd,
-    env: {
-      ...process.env,
-      AGENT_TEAM_WEB_ROOT: process.env.AGENT_TEAM_WEB_ROOT,
-      [INTERNAL_WEB_HOST_RUNTIME_ENV]: runtimeSeed ? JSON.stringify(runtimeSeed) : "",
-    },
-    detached: true,
-    stdio: "ignore",
+  const host = await startWebHost({
+    orchestrator: context.orchestrator,
+    cwd,
+    taskId,
+    port,
+    webRoot,
   });
-  child.unref();
-  await waitForUiHost(port, taskId);
   return {
+    host,
     port,
     url: buildUiUrl({
       port,
       taskId,
     }),
   };
-}
-
-function parseInternalWebHostCommand(argv: string[]): InternalWebHostCommand | null {
-  if (argv[0] !== "internal" || argv[1] !== "web-host") {
-    return null;
-  }
-
-  const readFlag = (flag: string) => {
-    const index = argv.findIndex((value) => value === flag);
-    if (index < 0) {
-      return null;
-    }
-    return argv[index + 1] ?? null;
-  };
-
-  const taskId = readFlag("--task-id");
-  const port = Number(readFlag("--port"));
-  if (!taskId || !Number.isFinite(port)) {
-    fail("internal web-host 缺少必要参数。");
-  }
-
-  return {
-    taskId,
-    port,
-  };
-}
-
-async function runInternalWebHost(command: InternalWebHostCommand) {
-  const context = await createCliContext({
-    enableEventStream: true,
-  });
-  const assets = await ensureRuntimeAssets(context.userDataPath);
-  const webRoot = assets.webRoot ?? process.env.AGENT_TEAM_WEB_ROOT ?? null;
-  if (!webRoot) {
-    fail("网页资源不可用，无法启动内部 web-host。源码运行前请先执行 bun run build 生成 dist/web。");
-  }
-
-  const task = await context.orchestrator.getTaskSnapshot(command.taskId);
-  const cwd = path.resolve(task.task.cwd);
-  const runtimeSeedRaw = process.env[INTERNAL_WEB_HOST_RUNTIME_ENV];
-  if (runtimeSeedRaw) {
-    try {
-      context.orchestrator.importTaskRuntime(JSON.parse(runtimeSeedRaw));
-    } catch {
-      // ignore invalid runtime seed and fall back to persisted product state only
-    }
-  }
-
-  const host = await startWebHost({
-    orchestrator: context.orchestrator,
-    cwd,
-    taskId: command.taskId,
-    port: command.port,
-    webRoot,
-  });
-
-  const shutdown = async () => {
-    await host.close().catch(() => undefined);
-    await disposeCliContext(context, {
-      awaitPendingTaskRuns: false,
-    }).catch(() => undefined);
-    process.exit(0);
-  };
-
-  process.on("SIGINT", () => {
-    void shutdown();
-  });
-  process.on("SIGTERM", () => {
-    void shutdown();
-  });
 }
 
 async function handleTaskHeadlessCommand(
@@ -478,29 +331,13 @@ async function handleTaskHeadlessCommand(
 async function handleTaskUiCommand(
   context: CliContext,
   command: Extract<ParsedCliCommand, { kind: "task.ui" }>,
-) {
+): Promise<ActiveUiHost> {
   validateTaskUiCommand(command);
   const diagnostics = buildTaskRunDiagnostics(context.userDataPath);
   const streamingPlan = resolveCliTaskStreamingPlan({
     commandKind: command.kind,
-    isResume: Boolean(command.taskId),
+    isResume: false,
   });
-
-  if (command.taskId) {
-    const workspace = await resolveTaskProject(context, command.taskId, command.cwd);
-    const task = findTaskOrThrow(workspace, command.taskId);
-    const { url } = await ensureUiHost(context, task.task.cwd, task.task.id);
-    printTaskRunDiagnostics(diagnostics, task.task.id);
-    process.stdout.write(`[UI] ${url}\n`);
-    await openBrowser(url);
-    if (streamingPlan.enabled) {
-      await renderTaskMessages(context, task.task.id, task.messages, {
-        includeHistory: streamingPlan.includeHistory,
-        printAttach: streamingPlan.printAttach,
-      });
-    }
-    return;
-  }
 
   let workspace = await resolveProject(context, command.cwd);
   workspace = await ensureJsonTopologyApplied(context, workspace, command.file!);
@@ -509,7 +346,7 @@ async function handleTaskUiCommand(
     taskId: null,
     content: command.message!.trim(),
   });
-  const { url } = await ensureUiHost(context, snapshot.task.cwd, snapshot.task.id);
+  const { host, url } = await ensureUiHost(context, snapshot.task.cwd, snapshot.task.id);
   printTaskRunDiagnostics(diagnostics, snapshot.task.id);
   process.stdout.write(`[UI] ${url}\n`);
   await openBrowser(url);
@@ -519,6 +356,7 @@ async function handleTaskUiCommand(
       printAttach: streamingPlan.printAttach,
     });
   }
+  return host;
 }
 
 function buildHelp() {
@@ -528,23 +366,16 @@ function buildHelp() {
     "补充命令示例：",
     "  task headless --file <topology-json> --message <message> [--cwd <path>]",
     "  task ui --file <topology-json> --message <message> [--cwd <path>]",
-    "  task ui <taskId> [--cwd <path>]",
     "",
     "说明：",
     "  - `task headless` 只负责新建任务，运行到本轮任务结束后退出 CLI。",
-    "  - `task ui` 会通过 internal web-host 启动后台网页服务，并打开浏览器；命令本身会保持驻留，按 Ctrl+C 后才清理并退出。",
+    "  - `task ui` 会在当前 CLI 进程里启动本地 Web Host，并打开浏览器；命令本身会保持驻留，按 Ctrl+C 后才清理并退出。",
     "  - 新建任务时必须传 `--file` 和 `--message`。",
   ].join("\n");
   return `${commanderHelp}\n${appendix}`;
 }
 
 async function run() {
-  const internalWebHostCommand = parseInternalWebHostCommand(process.argv.slice(2));
-  if (internalWebHostCommand) {
-    await runInternalWebHost(internalWebHostCommand);
-    return;
-  }
-
   const command = parseCliCommand(process.argv.slice(2));
   if (command.kind === "help") {
     process.stdout.write(`${buildHelp()}\n`);
@@ -555,6 +386,7 @@ async function run() {
   let observedSettledTaskState = false;
   let forceProcessExit = false;
   let interrupted = false;
+  let activeUiHost: ActiveUiHost | null = null;
   const handleSignal = (signal: NodeJS.Signals) => {
     if (interrupted) {
       return;
@@ -568,9 +400,16 @@ async function run() {
       process.exit(plan.exitCode);
       return;
     }
-    void disposeCliContext(context, {
-      awaitPendingTaskRuns: plan.awaitPendingTaskRuns,
-    })
+    void Promise.resolve()
+      .then(async () => {
+        if (activeUiHost) {
+          await activeUiHost.close().catch(() => undefined);
+          activeUiHost = null;
+        }
+        await disposeCliContext(context, {
+          awaitPendingTaskRuns: plan.awaitPendingTaskRuns,
+        });
+      })
       .catch(() => undefined)
       .finally(() => {
         process.exit(plan.exitCode);
@@ -583,7 +422,7 @@ async function run() {
       await handleTaskHeadlessCommand(context, command);
       observedSettledTaskState = true;
     } else if (command.kind === "task.ui") {
-      await handleTaskUiCommand(context, command);
+      activeUiHost = await handleTaskUiCommand(context, command);
       observedSettledTaskState = true;
       const disposeOptions = resolveCliDisposeOptions({
         commandKind: command.kind,
@@ -602,6 +441,10 @@ async function run() {
         observedSettledTaskState,
       });
       forceProcessExit = disposeOptions.forceProcessExit;
+      if (activeUiHost) {
+        await activeUiHost.close().catch(() => undefined);
+        activeUiHost = null;
+      }
       if (disposeOptions.shouldDisposeContext) {
         await disposeCliContext(context, disposeOptions);
       }

@@ -63,44 +63,27 @@ test("parseCliCommand 解析 task ui 新建任务", () => {
     kind: "task.ui",
     file: "config/team-topologies/development-team.topology.json",
     message: "请开始执行",
-    taskId: undefined,
     cwd: "/tmp/project",
   });
 });
 
-test("parseCliCommand 解析 task ui 恢复已有任务", () => {
-  const parsed = parseCliCommand([
+test("parseCliCommand 不再接受 task ui --task 恢复已有任务", () => {
+  assert.throws(() => parseCliCommand([
     "task",
     "ui",
     "--task",
     "task-1",
     "--cwd",
     "/tmp/project",
-  ]);
-
-  assert.deepEqual(parsed, {
-    kind: "task.ui",
-    taskId: "task-1",
-    file: undefined,
-    message: undefined,
-    cwd: "/tmp/project",
-  });
+  ]));
 });
 
-test("parseCliCommand 解析 task ui 位置参数 taskId", () => {
-  const parsed = parseCliCommand([
+test("parseCliCommand 不再接受 task ui 的位置参数 taskId", () => {
+  assert.throws(() => parseCliCommand([
     "task",
     "ui",
     "task-1",
-  ]);
-
-  assert.deepEqual(parsed, {
-    kind: "task.ui",
-    taskId: "task-1",
-    file: undefined,
-    message: undefined,
-    cwd: undefined,
-  });
+  ]));
 });
 
 test("parseCliCommand 允许 task ui 单独接收 --cwd", () => {
@@ -117,7 +100,6 @@ test("parseCliCommand 允许 task ui 单独接收 --cwd", () => {
 
   assert.deepEqual(parsed, {
     kind: "task.ui",
-    taskId: undefined,
     file: "config/team-topologies/development-team.topology.json",
     message: "请开始执行",
     cwd: "/tmp/project",
@@ -155,7 +137,7 @@ test("Commander help 只包含 task headless/task ui 命令", () => {
   assert.doesNotMatch(CLI_COMMAND_SOURCE, new RegExp(`\\.name\\("${LEGACY_CLI_NAME}"\\)`));
   assert.match(CLI_SOURCE, /task headless --file <topology-json> --message <message>/);
   assert.match(CLI_SOURCE, /task ui --file <topology-json> --message <message> \[--cwd <path>\]/);
-  assert.match(CLI_SOURCE, /task ui <taskId> \[--cwd <path>\]/);
+  assert.doesNotMatch(CLI_SOURCE, /task ui <taskId> \[--cwd <path>\]/);
   assert.doesNotMatch(CLI_SOURCE, /task attach <taskId> <agentName>/);
   assert.doesNotMatch(CLI_SOURCE, /task run --file <topology-json> --message <message>/);
   assert.doesNotMatch(CLI_SOURCE, /task show <taskId>/);

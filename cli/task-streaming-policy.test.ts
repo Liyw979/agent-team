@@ -30,17 +30,3 @@ test("task ui 新建任务时也会打印完整群聊，避免终端静默", () 
     },
   );
 });
-
-test("task ui 恢复已有任务时只打印命令启动后的新增消息", () => {
-  assert.deepEqual(
-    resolveCliTaskStreamingPlan({
-      commandKind: "task.ui",
-      isResume: true,
-    }),
-    {
-      enabled: true,
-      includeHistory: false,
-      printAttach: false,
-    },
-  );
-});
