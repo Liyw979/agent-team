@@ -1,5 +1,5 @@
 export const IPC_CHANNELS = {
-  bootstrap: "agent-team/bootstrap",
+  getUiSnapshot: "agent-team/get-ui-snapshot",
   submitTask: "agent-team/submit-task",
   openAgentTerminal: "agent-team/open-agent-terminal",
   getTaskRuntime: "agent-team/get-task-runtime",

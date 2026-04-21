@@ -2,12 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AgentRuntimeSnapshot,
   RuntimeUpdatedEventPayload,
-  UiBootstrapPayload,
+  UiSnapshotPayload,
 } from "@shared/types";
 import { ChatWindow } from "./components/ChatWindow";
 import { TopologyGraph } from "./components/TopologyGraph";
 import {
-  bootstrapTask,
+  fetchUiSnapshot,
   getTaskRuntime,
   openAgentTerminal,
   readLaunchParams,
@@ -34,10 +34,11 @@ import {
   buildAgentPromptDialogState,
   type AgentPromptDialogState,
 } from "./lib/agent-prompt-dialog";
+import { decideUiSnapshotRefreshAcceptance } from "./lib/ui-snapshot-refresh-gate";
 
 function App() {
   const launchParams = useMemo(() => readLaunchParams(), []);
-  const [bootstrap, setBootstrap] = useState<UiBootstrapPayload | null>(null);
+  const [uiSnapshot, setUiSnapshot] = useState<UiSnapshotPayload | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [runtimeSnapshots, setRuntimeSnapshots] = useState<Record<string, AgentRuntimeSnapshot>>({});
   const [openingAgentTerminalId, setOpeningAgentTerminalId] = useState<string | null>(null);
@@ -46,37 +47,63 @@ function App() {
   const [agentCardGapPx, setAgentCardGapPx] = useState(6);
   const [selectedAgentPromptDialog, setSelectedAgentPromptDialog] = useState<AgentPromptDialogState | null>(null);
   const agentPanelViewportRef = useRef<HTMLDivElement | null>(null);
+  const latestUiSnapshotRef = useRef<UiSnapshotPayload | null>(null);
+  const nextUiSnapshotRequestIdRef = useRef(0);
+  const latestAcceptedUiSnapshotRequestIdRef = useRef(0);
 
-  const workspace = bootstrap?.workspace ?? null;
-  const task = bootstrap?.task ?? null;
+  const workspace = uiSnapshot?.workspace ?? null;
+  const task = uiSnapshot?.task ?? null;
 
-  async function refreshBootstrap() {
+  function applyUiSnapshotRefreshResult(nextUiSnapshot: UiSnapshotPayload, requestId: number) {
+    const acceptance = decideUiSnapshotRefreshAcceptance({
+      latestAcceptedRequestId: latestAcceptedUiSnapshotRequestIdRef.current,
+      requestId,
+      payload: nextUiSnapshot,
+    });
+    if (!acceptance.accepted || !acceptance.payload) {
+      return;
+    }
+
+    latestAcceptedUiSnapshotRequestIdRef.current = acceptance.latestAcceptedRequestId;
+    latestUiSnapshotRef.current = acceptance.payload;
+    setUiSnapshot(acceptance.payload);
+    setSelectedAgentId((currentSelectedAgentId) =>
+      resolveDefaultSelectedAgentIdForFrontend({
+        selectedAgentId: currentSelectedAgentId,
+        workspaceAgents: acceptance.payload?.workspace?.agents ?? [],
+        taskAgents: acceptance.payload?.task?.agents ?? [],
+        topology: acceptance.payload?.task?.topology ?? acceptance.payload?.workspace?.topology ?? null,
+      }),
+    );
+  }
+
+  async function refreshUiSnapshot() {
+    const requestId = nextUiSnapshotRequestIdRef.current + 1;
+    nextUiSnapshotRequestIdRef.current = requestId;
+
     if (!launchParams.taskId) {
-      setBootstrap({
+      applyUiSnapshotRefreshResult({
         workspace: null,
         task: null,
         launchCwd: null,
         launchTaskId: launchParams.taskId || null,
-      });
+      }, requestId);
       return;
     }
 
-    const next = await bootstrapTask({
+    const next = await fetchUiSnapshot({
       taskId: launchParams.taskId,
     });
-    setBootstrap(next);
-    const nextSelectedAgentId = resolveDefaultSelectedAgentIdForFrontend({
-      selectedAgentId,
-      workspaceAgents: next.workspace?.agents ?? [],
-      taskAgents: next.task?.agents ?? [],
-      topology: next.task?.topology ?? next.workspace?.topology ?? null,
-    });
-    setSelectedAgentId(nextSelectedAgentId);
+    applyUiSnapshotRefreshResult(next, requestId);
   }
 
   useEffect(() => {
-    void refreshBootstrap();
+    void refreshUiSnapshot();
   }, []);
+
+  useEffect(() => {
+    latestUiSnapshotRef.current = uiSnapshot;
+  }, [uiSnapshot]);
 
   useEffect(() => {
     if (!workspace || !task) {
@@ -117,21 +144,22 @@ function App() {
   }, [workspace?.cwd, task?.task.id]);
 
   useEffect(() => {
-    if (!bootstrap?.workspace || !bootstrap.task) {
+    if (!task?.task.id) {
       return;
     }
 
     const unsubscribe = subscribeAgentTeamEvents({
-      taskId: bootstrap.task.task.id,
+      taskId: task.task.id,
     }, (event) => {
-      if (!bootstrap.task || !bootstrap.workspace) {
+      const currentUiSnapshot = latestUiSnapshotRef.current;
+      if (!currentUiSnapshot?.task || !currentUiSnapshot.workspace) {
         return;
       }
 
       if (event.type === "runtime-updated") {
         const payload = event.payload as RuntimeUpdatedEventPayload;
         const sessionIds = new Set(
-          bootstrap.task.agents
+          currentUiSnapshot.task.agents
             .map((agent) => agent.opencodeSessionId)
             .filter((sessionId): sessionId is string => Boolean(sessionId)),
         );
@@ -140,10 +168,10 @@ function App() {
         }
       }
 
-      void refreshBootstrap();
+      void refreshUiSnapshot();
     });
     return unsubscribe;
-  }, [bootstrap?.workspace?.cwd, bootstrap?.task?.task.id, selectedAgentId]);
+  }, [task?.task.id]);
 
   const availableAgents = useMemo(
     () => buildAvailableAgentNamesForFrontend(

@@ -212,12 +212,6 @@ export class Orchestrator {
     };
   }
 
-  async bootstrap(cwd = process.cwd()): Promise<WorkspaceSnapshot> {
-    const normalizedCwd = path.resolve(cwd);
-    await this.reconcilePersistedWorkspaceTasks(normalizedCwd);
-    return this.hydrateWorkspace(normalizedCwd);
-  }
-
   async getWorkspaceSnapshot(cwd: string): Promise<WorkspaceSnapshot> {
     const normalizedCwd = path.resolve(cwd);
     await this.reconcilePersistedWorkspaceTasks(normalizedCwd);

@@ -253,7 +253,7 @@ export interface WorkspaceSnapshot {
   tasks: TaskSnapshot[];
 }
 
-export interface UiBootstrapPayload {
+export interface UiSnapshotPayload {
   workspace: WorkspaceSnapshot | null;
   task: TaskSnapshot | null;
   launchTaskId: string | null;

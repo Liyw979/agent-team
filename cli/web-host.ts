@@ -7,7 +7,7 @@ import type {
   GetTaskRuntimePayload,
   OpenAgentTerminalPayload,
   SubmitTaskPayload,
-  UiBootstrapPayload,
+  UiSnapshotPayload,
 } from "@shared/types";
 import type { Orchestrator } from "../runtime/orchestrator";
 
@@ -47,10 +47,10 @@ async function readJsonBody(request: http.IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
-async function buildUiBootstrapPayload(
+async function buildUiSnapshotPayload(
   orchestrator: Orchestrator,
   taskId: string,
-): Promise<UiBootstrapPayload> {
+): Promise<UiSnapshotPayload> {
   const task = await orchestrator.getTaskSnapshot(taskId);
   const workspace = await orchestrator.getWorkspaceSnapshot(task.task.cwd);
   return {
@@ -135,9 +135,9 @@ export async function startWebHost(
         return;
       }
 
-      if (request.method === "GET" && url.pathname === "/api/bootstrap") {
+      if (request.method === "GET" && url.pathname === "/api/ui-snapshot") {
         const taskId = url.searchParams.get("taskId") ?? options.taskId;
-        json(response, 200, await buildUiBootstrapPayload(options.orchestrator, taskId));
+        json(response, 200, await buildUiSnapshotPayload(options.orchestrator, taskId));
         return;
       }
 

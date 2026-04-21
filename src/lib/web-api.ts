@@ -5,7 +5,7 @@ import type {
   OpenAgentTerminalPayload,
   SubmitTaskPayload,
   TaskSnapshot,
-  UiBootstrapPayload,
+  UiSnapshotPayload,
 } from "@shared/types";
 
 function buildQuery(params: Record<string, string>) {
@@ -28,8 +28,8 @@ export function readLaunchParams() {
   };
 }
 
-export function bootstrapTask(params: { taskId: string }) {
-  return fetchJson<UiBootstrapPayload>(`/api/bootstrap?${buildQuery(params)}`);
+export function fetchUiSnapshot(params: { taskId: string }) {
+  return fetchJson<UiSnapshotPayload>(`/api/ui-snapshot?${buildQuery(params)}`);
 }
 
 export function getTaskRuntime(payload: Pick<GetTaskRuntimePayload, "taskId">) {
