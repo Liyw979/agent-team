@@ -35,6 +35,7 @@ import {
   type AgentPromptDialogState,
 } from "./lib/agent-prompt-dialog";
 import { decideUiSnapshotRefreshAcceptance } from "./lib/ui-snapshot-refresh-gate";
+import { getUiSnapshotPollingIntervalMs } from "./lib/ui-snapshot-polling";
 
 function App() {
   const launchParams = useMemo(() => readLaunchParams(), []);
@@ -53,10 +54,12 @@ function App() {
 
   const workspace = uiSnapshot?.workspace ?? null;
   const task = uiSnapshot?.task ?? null;
+  const uiSnapshotPollingIntervalMs = getUiSnapshotPollingIntervalMs(launchParams.taskId);
 
   function applyUiSnapshotRefreshResult(nextUiSnapshot: UiSnapshotPayload, requestId: number) {
     const acceptance = decideUiSnapshotRefreshAcceptance({
       latestAcceptedRequestId: latestAcceptedUiSnapshotRequestIdRef.current,
+      latestAcceptedPayload: latestUiSnapshotRef.current,
       requestId,
       payload: nextUiSnapshot,
     });
@@ -100,6 +103,20 @@ function App() {
   useEffect(() => {
     void refreshUiSnapshot();
   }, []);
+
+  useEffect(() => {
+    if (!uiSnapshotPollingIntervalMs) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      void refreshUiSnapshot();
+    }, uiSnapshotPollingIntervalMs);
+
+    return () => {
+      clearInterval(timer);
+    };
+  }, [uiSnapshotPollingIntervalMs]);
 
   useEffect(() => {
     latestUiSnapshotRef.current = uiSnapshot;

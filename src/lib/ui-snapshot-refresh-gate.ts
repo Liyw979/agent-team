@@ -2,6 +2,7 @@ import type { UiSnapshotPayload } from "@shared/types";
 
 export interface UiSnapshotRefreshAcceptanceInput {
   latestAcceptedRequestId: number;
+  latestAcceptedPayload: UiSnapshotPayload | null;
   requestId: number;
   payload: UiSnapshotPayload;
 }
@@ -12,10 +13,91 @@ export interface UiSnapshotRefreshAcceptance {
   payload: UiSnapshotPayload | null;
 }
 
+function getAgentProgressRank(status: string) {
+  switch (status) {
+    case "failed":
+    case "completed":
+      return 3;
+    case "needs_revision":
+      return 2;
+    case "running":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+function isTerminalTaskStatus(status: string) {
+  return status === "finished" || status === "failed";
+}
+
+function isSemanticallyOlderUiSnapshot(
+  baseline: UiSnapshotPayload | null,
+  candidate: UiSnapshotPayload,
+) {
+  const baselineTask = baseline?.task;
+  const candidateTask = candidate.task;
+
+  if (!baselineTask) {
+    return false;
+  }
+
+  if (!candidateTask) {
+    return true;
+  }
+
+  if (baselineTask.task.id !== candidateTask.task.id) {
+    return false;
+  }
+
+  if (candidateTask.messages.length < baselineTask.messages.length) {
+    return true;
+  }
+
+  if (isTerminalTaskStatus(baselineTask.task.status) && !isTerminalTaskStatus(candidateTask.task.status)) {
+    return true;
+  }
+
+  if (baselineTask.task.completedAt && !candidateTask.task.completedAt) {
+    return true;
+  }
+
+  const baselineAgents = new Map(baselineTask.agents.map((agent) => [agent.name, agent]));
+  const candidateAgents = new Map(candidateTask.agents.map((agent) => [agent.name, agent]));
+
+  for (const [agentName, baselineAgent] of baselineAgents) {
+    const candidateAgent = candidateAgents.get(agentName);
+    if (!candidateAgent) {
+      return true;
+    }
+
+    if (candidateAgent.runCount < baselineAgent.runCount) {
+      return true;
+    }
+
+    if (
+      candidateAgent.runCount === baselineAgent.runCount &&
+      getAgentProgressRank(candidateAgent.status) < getAgentProgressRank(baselineAgent.status)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export function decideUiSnapshotRefreshAcceptance(
   input: UiSnapshotRefreshAcceptanceInput,
 ): UiSnapshotRefreshAcceptance {
   if (input.requestId <= input.latestAcceptedRequestId) {
+    return {
+      accepted: false,
+      latestAcceptedRequestId: input.latestAcceptedRequestId,
+      payload: null,
+    };
+  }
+
+  if (isSemanticallyOlderUiSnapshot(input.latestAcceptedPayload, input.payload)) {
     return {
       accepted: false,
       latestAcceptedRequestId: input.latestAcceptedRequestId,

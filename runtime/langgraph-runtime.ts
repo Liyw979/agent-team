@@ -15,6 +15,7 @@ import type {
   LangGraphInputEvent,
   LangGraphTaskLoopHost,
 } from "./langgraph-host";
+import { writeFileAtomic } from "./atomic-file";
 
 interface RuntimeEnvelope {
   graphState: GraphTaskState | null;
@@ -90,7 +91,13 @@ class FileMemorySaver extends MemorySaver {
     const filePath = this.getThreadPath(threadId);
     const fileContent = await fs.readFile(filePath, "utf8").catch(() => "");
     if (fileContent) {
-      const parsed = JSON.parse(fileContent) as SerializedThreadState;
+      let parsed: SerializedThreadState;
+      try {
+        parsed = JSON.parse(fileContent) as SerializedThreadState;
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(`${filePath} JSON 解析失败：${reason}`);
+      }
       this.storage[threadId] = Object.fromEntries(
         Object.entries(parsed.storage ?? {}).map(([namespace, checkpoints]) => [
           namespace,
@@ -160,7 +167,7 @@ class FileMemorySaver extends MemorySaver {
         ),
       ]),
     );
-    await fs.writeFile(
+    await writeFileAtomic(
       filePath,
       JSON.stringify(
         {

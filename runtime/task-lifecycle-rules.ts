@@ -130,3 +130,99 @@ export function shouldFinishTaskFromPersistedState(input: {
 
   return true;
 }
+
+function resolveAgentStatusFromFinalMessage(message: MessageRecord): TaskAgentRecord["status"] {
+  if (message.meta?.reviewDecision === "needs_revision") {
+    return "needs_revision";
+  }
+  if (message.meta?.status === "failed") {
+    return "failed";
+  }
+  return "completed";
+}
+
+function hasLaterActivationForAgent(
+  messages: MessageRecord[],
+  agentName: string,
+  afterTimestamp: string,
+): boolean {
+  for (const message of messages) {
+    if (message.timestamp <= afterTimestamp) {
+      continue;
+    }
+
+    if (message.sender === "user" && message.meta?.targetAgentId === agentName) {
+      return true;
+    }
+
+    if (message.meta?.kind === "revision-request" && message.meta.targetAgentId === agentName) {
+      return true;
+    }
+
+    if (
+      message.meta?.kind === "agent-dispatch" &&
+      parseTargetAgentIds(message.meta.targetAgentIds).includes(agentName)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function reconcileTaskSnapshotFromMessages(input: {
+  task: TaskRecord;
+  agents: TaskAgentRecord[];
+  messages: MessageRecord[];
+}) {
+  const latestCompletionMessage = [...input.messages]
+    .reverse()
+    .find((message) => message.meta?.kind === "task-completed");
+
+  const task =
+    latestCompletionMessage &&
+    (latestCompletionMessage.meta?.status === "finished" || latestCompletionMessage.meta?.status === "failed")
+      ? {
+          ...input.task,
+          status: latestCompletionMessage.meta.status,
+          completedAt: latestCompletionMessage.timestamp,
+        }
+      : input.task;
+
+  const latestAgentFinalByName = new Map<string, MessageRecord>();
+  for (const message of input.messages) {
+    if (message.meta?.kind !== "agent-final") {
+      continue;
+    }
+    latestAgentFinalByName.set(message.sender, message);
+  }
+
+  const taskFinished = task.status === "finished";
+  const agents = input.agents.map((agent) => {
+    if (taskFinished) {
+      return {
+        ...agent,
+        status: "completed" as const,
+      };
+    }
+
+    const latestFinalMessage = latestAgentFinalByName.get(agent.name);
+    if (!latestFinalMessage) {
+      return agent;
+    }
+
+    if (hasLaterActivationForAgent(input.messages, agent.name, latestFinalMessage.timestamp)) {
+      return agent;
+    }
+
+    return {
+      ...agent,
+      status: resolveAgentStatusFromFinalMessage(latestFinalMessage),
+    };
+  });
+
+  return {
+    task,
+    agents,
+  };
+}

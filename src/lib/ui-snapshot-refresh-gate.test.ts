@@ -6,7 +6,11 @@ import { decideUiSnapshotRefreshAcceptance } from "./ui-snapshot-refresh-gate";
 function createUiSnapshotPayload(input: {
   baStatus: "idle" | "running" | "completed";
   unitTestStatus: "idle" | "running" | "completed";
+  buildStatus?: "idle" | "running" | "completed";
+  messageCount?: number;
 }) {
+  const buildStatus = input.buildStatus ?? "idle";
+  const messageCount = input.messageCount ?? 0;
   return {
     workspace: null,
     launchTaskId: "task-1",
@@ -42,10 +46,25 @@ function createUiSnapshotPayload(input: {
           status: input.unitTestStatus,
           runCount: input.unitTestStatus === "idle" ? 0 : 1,
         },
+        {
+          id: "task-1:Build",
+          taskId: "task-1",
+          name: "Build",
+          opencodeSessionId: null,
+          opencodeAttachBaseUrl: null,
+          status: buildStatus,
+          runCount: buildStatus === "idle" ? 0 : 1,
+        },
       ],
-      messages: [],
+      messages: Array.from({ length: messageCount }, (_, index) => ({
+        id: `message-${index + 1}`,
+        taskId: "task-1",
+        sender: index === 0 ? "system" : "BA",
+        content: `message-${index + 1}`,
+        timestamp: `2026-04-21T03:22:${String(index).padStart(2, "0")}.000Z`,
+      })),
       topology: {
-        nodes: ["BA", "UnitTest"],
+        nodes: ["BA", "Build", "UnitTest"],
         edges: [],
       },
     },
@@ -65,6 +84,7 @@ test("较新的 ui snapshot 响应一旦已被接受，较旧响应必须被拒�
   const acceptedNewer = decideUiSnapshotRefreshAcceptance({
     latestAcceptedRequestId: 0,
     requestId: 2,
+    latestAcceptedPayload: null,
     payload: newerPayload,
   });
   assert.equal(acceptedNewer.accepted, true);
@@ -74,6 +94,7 @@ test("较新的 ui snapshot 响应一旦已被接受，较旧响应必须被拒�
   const rejectedOlder = decideUiSnapshotRefreshAcceptance({
     latestAcceptedRequestId: acceptedNewer.latestAcceptedRequestId,
     requestId: 1,
+    latestAcceptedPayload: acceptedNewer.payload,
     payload: olderPayload,
   });
   assert.equal(rejectedOlder.accepted, false);
@@ -94,6 +115,7 @@ test("ui snapshot 门禁允许首次响应和更大请求号通过，但拒绝�
   const firstAccepted = decideUiSnapshotRefreshAcceptance({
     latestAcceptedRequestId: 0,
     requestId: 1,
+    latestAcceptedPayload: null,
     payload: firstPayload,
   });
   assert.equal(firstAccepted.accepted, true);
@@ -102,6 +124,7 @@ test("ui snapshot 门禁允许首次响应和更大请求号通过，但拒绝�
   const duplicatedRequest = decideUiSnapshotRefreshAcceptance({
     latestAcceptedRequestId: firstAccepted.latestAcceptedRequestId,
     requestId: 1,
+    latestAcceptedPayload: firstAccepted.payload,
     payload: newerPayload,
   });
   assert.equal(duplicatedRequest.accepted, false);
@@ -111,9 +134,40 @@ test("ui snapshot 门禁允许首次响应和更大请求号通过，但拒绝�
   const newerAccepted = decideUiSnapshotRefreshAcceptance({
     latestAcceptedRequestId: firstAccepted.latestAcceptedRequestId,
     requestId: 3,
+    latestAcceptedPayload: firstAccepted.payload,
     payload: newerPayload,
   });
   assert.equal(newerAccepted.accepted, true);
   assert.equal(newerAccepted.latestAcceptedRequestId, 3);
   assert.equal(newerAccepted.payload?.task?.agents.find((agent) => agent.name === "BA")?.status, "completed");
+});
+
+test("较大的请求号若带回更旧的任务快照，必须被拒绝，避免把 BA 已完成和 Build 已启动回滚成旧画面", () => {
+  const acceptedFresh = decideUiSnapshotRefreshAcceptance({
+    latestAcceptedRequestId: 0,
+    requestId: 4,
+    latestAcceptedPayload: null,
+    payload: createUiSnapshotPayload({
+      baStatus: "completed",
+      buildStatus: "running",
+      unitTestStatus: "idle",
+      messageCount: 3,
+    }),
+  });
+  assert.equal(acceptedFresh.accepted, true);
+
+  const rejectedSemanticallyOlder = decideUiSnapshotRefreshAcceptance({
+    latestAcceptedRequestId: acceptedFresh.latestAcceptedRequestId,
+    requestId: 5,
+    latestAcceptedPayload: acceptedFresh.payload,
+    payload: createUiSnapshotPayload({
+      baStatus: "running",
+      buildStatus: "idle",
+      unitTestStatus: "idle",
+      messageCount: 2,
+    }),
+  });
+  assert.equal(rejectedSemanticallyOlder.accepted, false);
+  assert.equal(rejectedSemanticallyOlder.latestAcceptedRequestId, acceptedFresh.latestAcceptedRequestId);
+  assert.equal(rejectedSemanticallyOlder.payload, null);
 });

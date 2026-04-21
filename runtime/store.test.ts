@@ -18,6 +18,14 @@ test("只读访问缺失工作区状态时不应物化 .agent-team 目录", () =
   }), false);
 });
 
+test("写模式读到已存在但为空的 state.json 时，不应重置成默认空状态", () => {
+  assert.equal(shouldMaterializeWorkspaceState({
+    accessMode: "write",
+    stateFileExists: true,
+    rawState: "",
+  }), false);
+});
+
 test("StoreService 读取旧 review 拓扑边时不再静默兼容", () => {
   const userDataPath = createTempDir();
   const cwd = createTempDir();
@@ -41,6 +49,21 @@ test("StoreService 读取旧 review 拓扑边时不再静默兼容", () => {
 
   const topology = store.getTopology(cwd);
   assert.deepEqual(topology.edges, []);
+});
+
+test("StoreService 读到已存在但为空的 state.json 时会直接报错，而不是静默重置整个状态", () => {
+  const userDataPath = createTempDir();
+  const cwd = createTempDir();
+  const store = new StoreService(userDataPath);
+  const statePath = path.join(cwd, ".agent-team", "state.json");
+
+  fs.mkdirSync(path.dirname(statePath), { recursive: true });
+  fs.writeFileSync(statePath, "", "utf8");
+
+  assert.throws(
+    () => store.getState(cwd),
+    /state\.json 已存在但内容为空/,
+  );
 });
 
 test("StoreService 会读取 needs_revision 边的单独回流上限，并为缺省值补默认 4", () => {

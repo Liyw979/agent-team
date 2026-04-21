@@ -110,3 +110,8 @@ test("App 的 ui snapshot 刷新链路会先经过最新请求门禁，不能把
   assert.match(APP_SOURCE, /nextUiSnapshotRequestIdRef/);
   assert.match(APP_SOURCE, /if \(!acceptance\.accepted \|\| !acceptance\.payload\)/);
 });
+
+test("App 必须为 ui snapshot 提供定时轮询兜底，避免 internal web-host 与执行任务的 CLI 进程分离后群聊停在初始消息", () => {
+  assert.match(APP_SOURCE, /getUiSnapshotPollingIntervalMs/);
+  assert.match(APP_SOURCE, /setInterval\(\(\) => \{\s*void refreshUiSnapshot\(\);\s*\}, uiSnapshotPollingIntervalMs\)/);
+});

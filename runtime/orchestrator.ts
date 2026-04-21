@@ -63,6 +63,7 @@ import {
   stripTargetMention as stripTargetMentionPure,
 } from "./message-forwarding";
 import {
+  reconcileTaskSnapshotFromMessages as reconcileTaskSnapshotFromMessagesPure,
   resolveStandaloneTaskStatusAfterAgentRun,
   shouldFinishTaskFromPersistedState as shouldFinishTaskFromPersistedStatePure,
 } from "./task-lifecycle-rules";
@@ -1299,10 +1300,16 @@ export class Orchestrator {
     const agents = this.listWorkspaceAgents(task.cwd);
     this.syncTaskAgents(task, agents);
     const persistedAgents = this.store.listTaskAgents(task.cwd, taskId);
-    return {
+    const messages = this.store.listMessages(task.cwd, taskId);
+    const reconciled = reconcileTaskSnapshotFromMessagesPure({
       task: this.store.getTask(task.cwd, taskId),
       agents: this.overlayTaskAgents(task, persistedAgents),
-      messages: this.store.listMessages(task.cwd, taskId),
+      messages,
+    });
+    return {
+      task: reconciled.task,
+      agents: reconciled.agents,
+      messages,
       topology: this.store.getTopology(task.cwd),
     };
   }

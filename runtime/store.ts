@@ -13,6 +13,7 @@ import {
   upsertTaskLocatorEntry,
   type TaskLocatorEntry,
 } from "./task-index";
+import { writeFileAtomicSync } from "./atomic-file";
 
 interface WorkspaceStateFile {
   version: number;
@@ -141,7 +142,7 @@ export function shouldMaterializeWorkspaceState(input: {
     return true;
   }
 
-  return input.rawState === null || input.rawState.trim().length === 0;
+  return false;
 }
 
 export class StoreService {
@@ -339,15 +340,16 @@ export class StoreService {
 
     const raw = fs.readFileSync(indexPath, "utf8").trim();
     if (!raw) {
-      const initialState: TaskLocatorIndexFile = {
-        version: 1,
-        tasks: [],
-      };
-      this.writeTaskLocatorIndex(initialState);
-      return initialState;
+      throw new Error(`${indexPath} 已存在但内容为空，已拒绝用空索引覆盖现有任务定位数据。`);
     }
 
-    const parsed = JSON.parse(raw) as Partial<TaskLocatorIndexFile>;
+    let parsed: Partial<TaskLocatorIndexFile>;
+    try {
+      parsed = JSON.parse(raw) as Partial<TaskLocatorIndexFile>;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(`${indexPath} JSON 解析失败：${reason}`);
+    }
     return {
       version: 1,
       tasks: Array.isArray(parsed.tasks)
@@ -387,10 +389,16 @@ export class StoreService {
       })) {
         this.writeWorkspaceState(normalizedCwd, initialState);
       }
-      return initialState;
+      throw new Error(`${statePath} 已存在但内容为空，已拒绝把当前工作区状态重置成默认空状态。`);
     }
 
-    const parsed = JSON.parse(raw) as Partial<WorkspaceStateFile>;
+    let parsed: Partial<WorkspaceStateFile>;
+    try {
+      parsed = JSON.parse(raw) as Partial<WorkspaceStateFile>;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(`${statePath} JSON 解析失败：${reason}`);
+    }
     const tasks: TaskRecord[] = Array.isArray(parsed.tasks)
       ? parsed.tasks
           .filter((task): task is Partial<TaskRecord> => Boolean(task) && typeof task === "object")
@@ -602,19 +610,17 @@ export class StoreService {
 
   private writeWorkspaceState(cwd: string, state: WorkspaceStateFile) {
     const statePath = this.getWorkspaceStatePath(cwd);
-    fs.mkdirSync(path.dirname(statePath), { recursive: true });
     const sanitized: WorkspaceStateFile = {
       ...state,
       tasks: state.tasks.map(serializeTaskRecord) as TaskRecord[],
       taskAgents: state.taskAgents.map(serializeTaskAgentRecord) as TaskAgentRecord[],
     };
-    fs.writeFileSync(statePath, `${JSON.stringify(sanitized, null, 2)}\n`, "utf8");
+    writeFileAtomicSync(statePath, `${JSON.stringify(sanitized, null, 2)}\n`, "utf8");
   }
 
   private writeTaskLocatorIndex(state: TaskLocatorIndexFile) {
     const indexPath = this.getTaskLocatorIndexPath();
-    fs.mkdirSync(path.dirname(indexPath), { recursive: true });
-    fs.writeFileSync(indexPath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+    writeFileAtomicSync(indexPath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
   }
 
   private updateWorkspaceState(cwd: string, updater: (state: WorkspaceStateFile) => WorkspaceStateFile) {
