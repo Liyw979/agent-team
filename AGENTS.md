@@ -10,6 +10,7 @@
 - 当前系统围绕当前 `cwd` 下的团队拓扑、Task 会话、群聊记录与 Agent 运行态工作，数据模型使用工作区与 Task。
 - GUI 主布局为：上方当前 Task 拓扑图，下方左侧当前 Task 群聊，右侧当前 Task Agent 列表；前端只负责展示与聊天发消息，不负责任何配置写入。
 - CLI 与 GUI 复用同一套 `Orchestrator`、OpenCode 与文件存储逻辑。
+- 同一 Task 内若某条 `needs_revision` 回流链路达到自己的最大反驳次数，系统会先隔离这条超限 reviewer 链路并继续推进同源的其他待处理 reviewer；只有当前 Task 已不存在其他可继续推进的待处理链路时，才会以该超限原因结束任务。gating-router[continueAfterReviewerLoopLimit, enforceNeedsRevisionLoopLimit]
 
 ### 1.2 技术栈
 

@@ -275,7 +275,12 @@ function handleNeedsRevision(
       continuation.sourceAgentId,
     );
     if (loopLimitDecision) {
-      return loopLimitDecision;
+      return continueAfterReviewerLoopLimit(
+        state,
+        result.agentName,
+        continuation.sourceAgentId,
+        loopLimitDecision.errorMessage,
+      );
     }
     const storedReview = state.pendingRevisionRequestsByAgent[continuation.repairReviewerAgentId];
     if (!storedReview) {
@@ -315,7 +320,12 @@ function handleNeedsRevision(
       fallbackTarget,
     );
     if (loopLimitDecision) {
-      return loopLimitDecision;
+      return continueAfterReviewerLoopLimit(
+        state,
+        result.agentName,
+        fallbackTarget,
+        loopLimitDecision.errorMessage,
+      );
     }
     const storedReview = state.pendingRevisionRequestsByAgent[result.agentName];
     return triggerRevisionRequestDownstream(
@@ -359,7 +369,12 @@ function continueAfterAssociationBatchResponse(
       continuation.sourceAgentId,
     );
     if (loopLimitDecision) {
-      return loopLimitDecision;
+      return continueAfterReviewerLoopLimit(
+        state,
+        continuation.repairReviewerAgentId,
+        continuation.sourceAgentId,
+        loopLimitDecision.errorMessage,
+      );
     }
     const storedReview = state.pendingRevisionRequestsByAgent[continuation.repairReviewerAgentId];
     if (!storedReview) {
@@ -637,6 +652,68 @@ function clearNeedsRevisionLoopCountsForReviewer(state: GraphTaskState, reviewer
       delete state.reviewFailLoopCountByEdge[edgeKey];
     }
   }
+}
+
+function continueAfterReviewerLoopLimit(
+  state: GraphTaskState,
+  reviewerAgentId: string,
+  repairTargetAgentId: string,
+  failureReason: string,
+): GraphRoutingDecision {
+  state.agentStatusesByName[reviewerAgentId] = "failed";
+  delete state.pendingRevisionRequestsByAgent[reviewerAgentId];
+
+  const nextReviewerAgentId = findNextPendingRepairReviewer(
+    state,
+    repairTargetAgentId,
+    reviewerAgentId,
+  );
+  if (!nextReviewerAgentId) {
+    state.taskStatus = "failed";
+    return {
+      type: "failed",
+      errorMessage: failureReason,
+    };
+  }
+
+  const storedReview = state.pendingRevisionRequestsByAgent[nextReviewerAgentId];
+  if (!storedReview) {
+    state.taskStatus = "failed";
+    return {
+      type: "failed",
+      errorMessage: failureReason,
+    };
+  }
+
+  state.pendingAssociationRepairTargetsBySource[repairTargetAgentId] = [nextReviewerAgentId];
+  delete state.pendingRevisionRequestsByAgent[nextReviewerAgentId];
+  return triggerRevisionRequestDownstream(
+    state,
+    nextReviewerAgentId,
+    storedReview.opinion?.trim()
+    || storedReview.agentContextContent
+    || "请直接回应当前内容，给出你的判断、补充、澄清、反驳或修改方案。",
+  );
+}
+
+function findNextPendingRepairReviewer(
+  state: GraphTaskState,
+  repairTargetAgentId: string,
+  excludeReviewerAgentId: string,
+): string | null {
+  const effectiveTopology = buildEffectiveTopology(state);
+  for (const edge of effectiveTopology.edges) {
+    if (
+      edge.triggerOn === "needs_revision"
+      && edge.target === repairTargetAgentId
+      && edge.source !== excludeReviewerAgentId
+      && state.pendingRevisionRequestsByAgent[edge.source]
+    ) {
+      return edge.source;
+    }
+  }
+
+  return null;
 }
 
 function shouldFinishGraphTask(state: GraphTaskState): boolean {
