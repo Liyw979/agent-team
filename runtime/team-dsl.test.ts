@@ -17,7 +17,7 @@ const TASK_REVIEW_PROMPT = "你是 TaskReview。";
 function createDevelopmentDslAgents() {
   return [
     { name: "BA", prompt: BA_PROMPT },
-    "Build",
+    { name: "Build" },
     { name: "CodeReview", prompt: CODE_REVIEW_PROMPT },
     { name: "UnitTest", prompt: UNIT_TEST_PROMPT },
     { name: "TaskReview", prompt: TASK_REVIEW_PROMPT },
@@ -27,7 +27,9 @@ function createDevelopmentDslAgents() {
 test("compileTeamDsl 支持把一个 DSL 文件编译成 agents + topology", () => {
   const dsl = {
     agents: [
-      "Build",
+      {
+        name: "Build",
+      },
       {
         name: "BA",
         prompt: BA_PROMPT,
@@ -90,11 +92,56 @@ test("compileTeamDsl 支持把一个 DSL 文件编译成 agents + topology", () 
   ]);
 });
 
-test("compileTeamDsl 会拒绝引用未声明 agent 的 topology 节点", () => {
+test("compileTeamDsl 不应把多个显式 writable 压缩成单个 Agent", () => {
+  const compiled = compileTeamDsl({
+    agents: [
+      {
+        name: "Build",
+        writable: true,
+      },
+      {
+        name: "BA",
+        prompt: BA_PROMPT,
+        writable: true,
+      },
+    ],
+    topology: {
+      downstream: {
+        BA: { Build: "association" },
+      },
+    },
+  });
+
+  assert.deepEqual(
+    compiled.agents.map((agent) => ({
+      name: agent.name,
+      isWritable: agent.isWritable,
+    })),
+    [
+      { name: "Build", isWritable: true },
+      { name: "BA", isWritable: true },
+    ],
+  );
+});
+
+test("compileTeamDsl 不再接受字符串格式的 agent 定义", () => {
   assert.throws(
     () =>
       compileTeamDsl({
         agents: ["Build"],
+        topology: {
+          downstream: {},
+        },
+      }),
+    /对象格式|agent 定义/u,
+  );
+});
+
+test("compileTeamDsl 会拒绝引用未声明 agent 的 topology 节点", () => {
+  assert.throws(
+    () =>
+      compileTeamDsl({
+        agents: [{ name: "Build" }],
         topology: {
           downstream: {
             Build: { TaskReview: "association" },

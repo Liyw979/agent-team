@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildInjectedConfigFromAgents,
+  extractDslAgentsFromTopology,
   resolveProjectAgents,
   validateProjectAgents,
 } from "./project-agent-source";
@@ -28,12 +30,44 @@ test("resolveProjectAgents 在不存在 DSL agents 时不再回退到用户自�
   assert.deepEqual(resolved, []);
 });
 
-test("validateProjectAgents 只允许一个可写 Agent", () => {
-  assert.throws(
-    () => validateProjectAgents([
-      { name: "Build", prompt: "", isWritable: true },
-      { name: "BA", prompt: "dsl", isWritable: true },
-    ]),
-    /至多只能有一个可写 Agent/,
-  );
+test("validateProjectAgents 允许多个可写 Agent", () => {
+  assert.doesNotThrow(() => validateProjectAgents([
+    { name: "Build", prompt: "", isWritable: true },
+    { name: "BA", prompt: "dsl", isWritable: true },
+  ]));
+});
+
+test("extractDslAgentsFromTopology 会把未显式配置 writable 的 Build 视为默认可写", () => {
+  const resolved = extractDslAgentsFromTopology({
+    nodes: ["Build", "BA"],
+    edges: [{ source: "BA", target: "Build", triggerOn: "association" }],
+    nodeRecords: [
+      { id: "Build", kind: "agent", templateName: "Build" },
+      { id: "BA", kind: "agent", templateName: "BA", prompt: "你是 BA。" },
+    ],
+  });
+
+  assert.deepEqual(resolved, [
+    { name: "Build", prompt: "", isWritable: true },
+    { name: "BA", prompt: "你是 BA。", isWritable: false },
+  ]);
+});
+
+test("单指定一个自定义 Agent 可写时，注入的 readonly 配置里不会包含这个 Agent", () => {
+  const injected = buildInjectedConfigFromAgents([
+    { name: "Build", prompt: "", isWritable: true },
+    { name: "BA", prompt: "你是 BA。", isWritable: true },
+    { name: "QA", prompt: "你是 QA。", isWritable: false },
+  ]);
+
+  assert.notEqual(injected, null);
+
+  const parsed = JSON.parse(injected ?? "{}") as {
+    agent?: Record<string, { permission?: Record<string, string> }>;
+  };
+  const readonlyAgentNames = Object.entries(parsed.agent ?? {})
+    .filter(([, config]) => config.permission?.write === "deny")
+    .map(([name]) => name);
+
+  assert.deepEqual(readonlyAgentNames, ["QA"]);
 });

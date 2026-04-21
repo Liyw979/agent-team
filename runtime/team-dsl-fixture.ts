@@ -1,7 +1,12 @@
 export default {
   agents: [
-    "Build",
-    "BA",
+    {
+      name: "Build",
+    },
+    {
+      name: "BA",
+      prompt: "你是 BA。",
+    },
     {
       name: "SecurityResearcher",
       prompt: "你负责漏洞挖掘。",

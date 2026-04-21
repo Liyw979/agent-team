@@ -27,9 +27,7 @@ function readBuiltinTopology(fileName: string) {
 
 test("开发团队拓扑包含 CodeReview 审查回路", () => {
   const developmentTeamTopology = readBuiltinTopology("development-team.topology.json");
-  const agentNames = developmentTeamTopology.agents.map((agent: string | { name: string }) =>
-    typeof agent === "string" ? agent : agent.name,
-  );
+  const agentNames = developmentTeamTopology.agents.map((agent) => agent.name);
 
   assert.deepEqual(agentNames.includes("CodeReview"), true);
   assert.equal(
@@ -50,11 +48,13 @@ test("开发团队拓扑文件内直接提供 BA / CodeReview / UnitTest / TaskR
   const developmentTeamTopology = readBuiltinTopology("development-team.topology.json");
   const agents = developmentTeamTopology.agents;
 
+  const build = agents.find((agent: unknown) => typeof agent === "object" && agent !== null && (agent as { name?: string }).name === "Build") as { writable?: boolean } | undefined;
   const ba = agents.find((agent: unknown) => typeof agent === "object" && agent !== null && (agent as { name?: string }).name === "BA") as { prompt?: string } | undefined;
   const codeReview = agents.find((agent: unknown) => typeof agent === "object" && agent !== null && (agent as { name?: string }).name === "CodeReview") as { prompt?: string } | undefined;
   const unitTest = agents.find((agent: unknown) => typeof agent === "object" && agent !== null && (agent as { name?: string }).name === "UnitTest") as { prompt?: string } | undefined;
   const taskReview = agents.find((agent: unknown) => typeof agent === "object" && agent !== null && (agent as { name?: string }).name === "TaskReview") as { prompt?: string } | undefined;
 
+  assert.equal(build?.writable, true);
   assert.equal(typeof ba?.prompt, "string");
   assert.equal((ba?.prompt ?? "").trim().length > 0, true);
   assert.equal(typeof codeReview?.prompt, "string");

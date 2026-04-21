@@ -56,7 +56,7 @@ export interface TeamDslAgentRecord {
 }
 
 export interface TeamDslDefinition {
-  agents: Array<string | TeamDslAgentRecord>;
+  agents: TeamDslAgentRecord[];
   topology: CreateTopologyDslInput;
 }
 
@@ -354,18 +354,9 @@ function isBuiltinTemplateName(name: string): boolean {
   return usesOpenCodeBuiltinPrompt(name);
 }
 
-function compileAgentDefinition(agent: string | TeamDslAgentRecord): CompiledTeamDslAgent {
-  if (typeof agent === "string") {
-    if (!isBuiltinTemplateName(agent)) {
-      throw new Error(`DSL Agent ${agent} 不是内置模板，必须显式提供 prompt。`);
-    }
-
-    return {
-      name: agent,
-      prompt: null,
-      templateName: agent,
-      isWritable: false,
-    };
+function compileAgentDefinition(agent: TeamDslAgentRecord): CompiledTeamDslAgent {
+  if (!agent || typeof agent !== "object" || Array.isArray(agent)) {
+    throw new Error("DSL agent 定义必须使用对象格式，例如 { name: \"Build\" }。");
   }
 
   const name = agent.name.trim();
@@ -392,25 +383,9 @@ function compileAgentDefinition(agent: string | TeamDslAgentRecord): CompiledTea
 }
 
 function normalizeCompiledWritableAgents(agents: CompiledTeamDslAgent[]): CompiledTeamDslAgent[] {
-  const buildIndex = agents.findIndex((agent) => usesOpenCodeBuiltinPrompt(agent.name));
-  if (buildIndex >= 0) {
-    return agents.map((agent, index) => ({
-      ...agent,
-      isWritable: index === buildIndex,
-    }));
-  }
-
-  const writableIndex = [...agents]
-    .map((agent, index) => ({ index, writable: agent.isWritable === true }))
-    .filter((item) => item.writable)
-    .at(-1)?.index;
-  if (writableIndex === undefined) {
-    return agents.map((agent) => ({ ...agent, isWritable: false }));
-  }
-
-  return agents.map((agent, index) => ({
+  return agents.map((agent) => ({
     ...agent,
-    isWritable: index === writableIndex,
+    isWritable: usesOpenCodeBuiltinPrompt(agent.name) || agent.isWritable === true,
   }));
 }
 

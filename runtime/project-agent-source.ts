@@ -15,11 +15,8 @@ export function resolveProjectAgents(input: {
   return [];
 }
 
-export function validateProjectAgents(agents: AgentRecord[]): void {
-  const writableCount = agents.filter((agent) => agent.isWritable === true).length;
-  if (writableCount > 1) {
-    throw new Error("当前 Project 中至多只能有一个可写 Agent。");
-  }
+export function validateProjectAgents(_agents: AgentRecord[]): void {
+  // 拓扑中的 writable 现在完全由 JSON 显式声明，允许多个 Agent 同时可写。
 }
 
 export function extractDslAgentsFromTopology(

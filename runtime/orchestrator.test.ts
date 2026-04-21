@@ -560,7 +560,9 @@ test("applyTeamDsl 会一次性写入当前 Project 的 agents 与 topology", as
   const project = await orchestrator.getWorkspaceSnapshot(projectPath);
   const compiled = compileTeamDsl({
     agents: [
-      "Build",
+      {
+        name: "Build",
+      },
       {
         name: "BA",
         prompt: TEST_AGENT_PROMPTS.BA,
@@ -620,7 +622,9 @@ test("applyTeamDsl 会直接以 DSL prompt 为唯一真源", async () => {
         name: "BA",
         prompt: "DSL BA prompt",
       },
-      "Build",
+      {
+        name: "Build",
+      },
     ],
     topology: {
       downstream: {
@@ -916,7 +920,7 @@ test("未写入 Build 时当前 Project 可以没有可写 Agent", async () => {
   );
 });
 
-test("Build 写入后会固定为唯一可写 Agent", async () => {
+test("Build 与其他显式可写 Agent 可以同时保持可写", async () => {
   const userDataPath = createTempDir();
   const projectPath = createTempDir();
   const orchestrator = createTestOrchestrator({
@@ -932,17 +936,17 @@ test("Build 写入后会固定为唯一可写 Agent", async () => {
     project.agents.map((agent) => [agent.name, agent.isWritable === true]),
     [
       ["Build", true],
-      ["BA", false],
+      ["BA", true],
     ],
   );
 
   assert.equal(
     buildInjectedConfigFromAgents(project.agents),
-    "{\"agent\":{\"BA\":{\"mode\":\"primary\",\"prompt\":\"你是 BA。\",\"permission\":{\"write\":\"deny\",\"edit\":\"deny\",\"bash\":\"deny\",\"task\":\"deny\",\"patch\":\"deny\"}}}}",
+    "{\"agent\":{\"BA\":{\"mode\":\"primary\",\"prompt\":\"你是 BA。\",\"permission\":{\"write\":\"ask\",\"edit\":\"ask\",\"bash\":\"ask\",\"task\":\"ask\",\"patch\":\"ask\"}}}}",
   );
 });
 
-test("把自定义 Agent 设为可写时会自动取消其他自定义 Agent 的可写标记", async () => {
+test("多个自定义 Agent 可以同时保持可写", async () => {
   const userDataPath = createTempDir();
   const projectPath = createTempDir();
   const orchestrator = createTestOrchestrator({
@@ -957,7 +961,7 @@ test("把自定义 Agent 设为可写时会自动取消其他自定义 Agent 的
   assert.deepEqual(
     project.agents.map((agent) => [agent.name, agent.isWritable === true]),
     [
-      ["BA", false],
+      ["BA", true],
       ["QA", true],
     ],
   );

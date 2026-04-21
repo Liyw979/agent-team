@@ -28,7 +28,8 @@
 - 前端不提供 Agent prompt、拓扑、模板或团队成员配置入口；这类修改只能通过 JSON 拓扑文件完成。
 - 运行时不再保留 `DEFAULT_BUILTIN_AGENT_TEMPLATES`、用户目录 prompt 覆盖或其他前端回填链路。
 - `Build` 继续复用 OpenCode 自带 prompt；其他 Agent 的 prompt 必须在团队拓扑 JSON 中显式提供。
-- 同一工作区中最多只能有 1 个可写 Agent；只要当前拓扑包含 `Build`，`Build` 就会固定为唯一可写 Agent。
+- 团队拓扑 JSON 的 `agents` 数组统一使用对象格式；不再支持直接写成 `"Build"` 这类字符串简写。`Build` 即使未显式配置 `writable`，运行时也会默认视为可写。
+- 团队拓扑 JSON 中每个 Agent 都可以通过 `writable` 字段显式声明是否具备写能力；系统允许多个可写 Agent 同时存在。`Build` 继续复用 OpenCode 内置 prompt，不再被强制为唯一可写 Agent。
 - 已有 Task 后，后续仍允许通过新的 JSON 拓扑重新覆盖当前工作区配置；运行时始终以最新应用的 JSON 编译结果为准。
 
 ### 2.2 工作区 / Topology / Task 真源
