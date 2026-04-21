@@ -67,3 +67,13 @@ test("拓扑节点头部会在状态 icon 左侧补充 attach 按钮", () => {
   assert.match(TOPOLOGY_GRAPH_SOURCE, /<span>\{isAttachOpening \? "打开中" : "attach"\}<\/span>/);
   assert.match(TOPOLOGY_GRAPH_SOURCE, /headerActions\.map\(\(action\) => \{/);
 });
+
+test("拓扑视口不能再被固定的最小高度撑出面板", () => {
+  assert.match(TOPOLOGY_GRAPH_SOURCE, /className="h-full min-h-0 w-full overflow-auto"/);
+  assert.doesNotMatch(TOPOLOGY_GRAPH_SOURCE, /className="h-full min-h-\[350px\] w-full overflow-auto"/);
+});
+
+test("拓扑面板内容区需要使用更贴边的专属内边距，不能继续复用通用 px-5 py-2", () => {
+  assert.match(TOPOLOGY_GRAPH_SOURCE, /getTopologyPanelBodyClassName/);
+  assert.doesNotMatch(TOPOLOGY_GRAPH_SOURCE, /className=\{`relative flex-1 min-h-0 \$\{PANEL_SECTION_BODY_CLASS\}`\}/);
+});

@@ -16,6 +16,7 @@ import {
 } from "./lib/web-api";
 import { getAgentColorToken } from "./lib/agent-colors";
 import { calculateAgentCardListGap, calculateAgentCardPromptLineCount } from "./lib/agent-card-layout";
+import { getAppShellClassName } from "./lib/app-shell-layout";
 import { buildAgentPromptPreviewText } from "./lib/agent-prompt-preview";
 import {
   PANEL_HEADER_CLASS,
@@ -39,6 +40,7 @@ import { getUiSnapshotPollingIntervalMs } from "./lib/ui-snapshot-polling";
 
 function App() {
   const launchParams = useMemo(() => readLaunchParams(), []);
+  const appShellClassName = getAppShellClassName();
   const [uiSnapshot, setUiSnapshot] = useState<UiSnapshotPayload | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [runtimeSnapshots, setRuntimeSnapshots] = useState<Record<string, AgentRuntimeSnapshot>>({});
@@ -317,7 +319,7 @@ function App() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden text-foreground">
-      <main className="min-h-0 flex-1 overflow-hidden px-5 py-5">
+      <main className={`min-h-0 flex-1 overflow-hidden ${appShellClassName}`}>
         <div className="grid h-full overflow-hidden grid-rows-[minmax(320px,42%)_minmax(0,1fr)] gap-[10px]">
           <TopologyGraph
             workspace={workspace}

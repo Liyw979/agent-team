@@ -115,3 +115,9 @@ test("App 必须为 ui snapshot 提供定时轮询兜底，避免 internal web-h
   assert.match(APP_SOURCE, /getUiSnapshotPollingIntervalMs/);
   assert.match(APP_SOURCE, /setInterval\(\(\) => \{\s*void refreshUiSnapshot\(\);\s*\}, uiSnapshotPollingIntervalMs\)/);
 });
+
+test("应用主区域不能继续保留 20px 的固定外边距", () => {
+  assert.match(APP_SOURCE, /getAppShellClassName/);
+  assert.match(APP_SOURCE, /className=\{`min-h-0 flex-1 overflow-hidden \$\{appShellClassName\}`\}/);
+  assert.doesNotMatch(APP_SOURCE, /<main className="min-h-0 flex-1 overflow-hidden px-5 py-5">/);
+});

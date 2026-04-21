@@ -11,7 +11,6 @@ import {
   PANEL_HEADER_CLASS,
   PANEL_HEADER_LEADING_CLASS,
   PANEL_HEADER_TITLE_CLASS,
-  PANEL_SECTION_BODY_CLASS,
   PANEL_SURFACE_CLASS,
 } from "@/lib/panel-header";
 import {
@@ -20,6 +19,7 @@ import {
   type TopologyAgentStatusBadgePresentation,
 } from "@/components/topology-graph-helpers";
 import { buildTopologyCanvasLayout } from "@/lib/topology-canvas";
+import { getTopologyPanelBodyClassName } from "@/lib/topology-panel-layout";
 import type {
   AgentRuntimeSnapshot,
   TaskSnapshot,
@@ -175,6 +175,7 @@ export function TopologyGraph({
   onOpenAgentTerminal,
   runtimeSnapshots = {},
 }: TopologyGraphProps) {
+  const topologyPanelBodyClassName = getTopologyPanelBodyClassName();
   const canvasViewportRef = useRef<HTMLDivElement | null>(null);
   const historyViewportRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const historyShouldStickToBottomRef = useRef<Record<string, boolean>>({});
@@ -354,7 +355,7 @@ export function TopologyGraph({
             <p className={PANEL_HEADER_TITLE_CLASS}>拓扑</p>
           </div>
         </header>
-        <div className={PANEL_SECTION_BODY_CLASS}>
+        <div className={topologyPanelBodyClassName}>
           <div className="flex h-full min-h-0 items-center justify-center rounded-[8px] border border-border/60 bg-card/70 text-sm text-muted-foreground">
             当前还没有可展示的 Task 拓扑。
           </div>
@@ -371,10 +372,10 @@ export function TopologyGraph({
         </div>
       </header>
 
-      <div className={`relative flex-1 min-h-0 ${PANEL_SECTION_BODY_CLASS}`}>
+      <div className={`relative flex-1 min-h-0 ${topologyPanelBodyClassName}`}>
         <div
           ref={canvasViewportRef}
-          className="h-full min-h-[350px] w-full overflow-x-auto overflow-y-hidden"
+          className="h-full min-h-0 w-full overflow-auto"
         >
           <div
             className="relative min-h-full min-w-full"
@@ -432,8 +433,13 @@ export function TopologyGraph({
                     }}
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <p className="text-base font-semibold text-foreground">{node.id}</p>
-                      <div className="flex items-center gap-2">
+                      <p
+                        title={node.id}
+                        className="min-w-0 flex-1 truncate text-base font-semibold text-foreground"
+                      >
+                        {node.id}
+                      </p>
+                      <div className="shrink-0 flex items-center gap-2">
                         {headerActions.map((action) => {
                           if (action === "attach") {
                             return (
