@@ -97,6 +97,8 @@ function App() {
         task: null,
         launchCwd: null,
         launchTaskId: launchParams.taskId || null,
+        taskLogFilePath: null,
+        taskUrl: null,
       }, requestId);
       return;
     }
@@ -349,6 +351,8 @@ function App() {
               workspace={workspace}
               task={task}
               availableAgents={availableAgents}
+              taskLogFilePath={uiSnapshot?.taskLogFilePath ?? null}
+              taskUrl={uiSnapshot?.taskUrl ?? null}
               isMaximized={panelMode === "chat-only"}
               onToggleMaximize={() => {
                 setPanelMode((current) => (current === "chat-only" ? "default" : "chat-only"));
@@ -396,6 +400,8 @@ function App() {
                   workspace={workspace}
                   task={task}
                   availableAgents={availableAgents}
+                  taskLogFilePath={uiSnapshot?.taskLogFilePath ?? null}
+                  taskUrl={uiSnapshot?.taskUrl ?? null}
                   isMaximized={panelMode === "chat-only"}
                   onToggleMaximize={() => {
                     setPanelMode((current) => (current === "chat-only" ? "default" : "chat-only"));

@@ -1,11 +1,13 @@
 interface TaskSessionSummaryInput {
   logFilePath: string;
-  taskId: string;
+  taskUrl?: string | null;
 }
 
 export function renderTaskSessionSummary(input: TaskSessionSummaryInput): string {
   return [
     `日志: ${input.logFilePath}`,
-    `taskId: ${input.taskId}`,
-  ].join("\n");
+    input.taskUrl ? `url: ${input.taskUrl}` : null,
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n");
 }

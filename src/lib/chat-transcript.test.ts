@@ -43,6 +43,39 @@ test("formatChatTranscript 会把聊天消息整理成可复制的对话记录",
   );
 });
 
+test("formatChatTranscript 会在复制记录头部带上日志路径和网页地址", () => {
+  const transcript = formatChatTranscript(
+    [
+      {
+        id: "m1",
+        sender: "Build",
+        timestamp: "2026-04-16T16:33:11.000Z",
+        content: "已经在项目根目录创建了临时加法工具 `temp_add.py`。",
+        kinds: ["agent-final"],
+        metaChain: [],
+      },
+    ],
+    {
+      locale: "zh-CN",
+      timeZone: "UTC",
+      logFilePath: "/Users/demo/Library/Application Support/agent-team/logs/tasks/task-123.log",
+      taskUrl: "http://localhost:4310/?taskId=task-123",
+    },
+  );
+
+  assert.equal(
+    transcript,
+    [
+      "日志: /Users/demo/Library/Application Support/agent-team/logs/tasks/task-123.log",
+      "url: http://localhost:4310/?taskId=task-123",
+      "",
+      "Build",
+      "2026/4/16 16:33:11",
+      "已经在项目根目录创建了临时加法工具 `temp_add.py`。",
+    ].join("\n"),
+  );
+});
+
 test("formatChatTranscript 在没有消息时返回空字符串", () => {
   assert.equal(formatChatTranscript([]), "");
 });

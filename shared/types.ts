@@ -258,6 +258,8 @@ export interface UiSnapshotPayload {
   task: TaskSnapshot | null;
   launchTaskId: string | null;
   launchCwd: string | null;
+  taskLogFilePath: string | null;
+  taskUrl: string | null;
 }
 
 export interface SubmitTaskPayload {

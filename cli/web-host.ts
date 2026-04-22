@@ -10,7 +10,9 @@ import type {
   UiSnapshotPayload,
 } from "@shared/types";
 import type { Orchestrator } from "../runtime/orchestrator";
+import { buildTaskLogFilePath } from "../runtime/app-log";
 import { UI_LOOPBACK_HOST } from "./ui-host-launch";
+import { buildUiUrl } from "./ui-host-launch";
 
 interface StartWebHostOptions {
   orchestrator: Orchestrator;
@@ -18,6 +20,7 @@ interface StartWebHostOptions {
   taskId: string;
   port: number;
   webRoot: string | null;
+  userDataPath: string;
 }
 
 function json(response: http.ServerResponse, statusCode: number, body: unknown) {
@@ -51,6 +54,7 @@ async function readJsonBody(request: http.IncomingMessage): Promise<unknown> {
 async function buildUiSnapshotPayload(
   orchestrator: Orchestrator,
   taskId: string,
+  options: Pick<StartWebHostOptions, "port" | "userDataPath">,
 ): Promise<UiSnapshotPayload> {
   const task = await orchestrator.getTaskSnapshot(taskId);
   const workspace = await orchestrator.getWorkspaceSnapshot(task.task.cwd);
@@ -59,6 +63,11 @@ async function buildUiSnapshotPayload(
     task,
     launchTaskId: taskId,
     launchCwd: workspace.cwd,
+    taskLogFilePath: buildTaskLogFilePath(options.userDataPath, taskId),
+    taskUrl: buildUiUrl({
+      port: options.port,
+      taskId,
+    }),
   };
 }
 
@@ -138,7 +147,7 @@ export async function startWebHost(
 
       if (request.method === "GET" && url.pathname === "/api/ui-snapshot") {
         const taskId = url.searchParams.get("taskId") ?? options.taskId;
-        json(response, 200, await buildUiSnapshotPayload(options.orchestrator, taskId));
+        json(response, 200, await buildUiSnapshotPayload(options.orchestrator, taskId, options));
         return;
       }
 

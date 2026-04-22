@@ -67,10 +67,10 @@ function buildTaskRunDiagnostics(userDataPath: string, taskId: string): TaskRunD
   };
 }
 
-function printTaskRunDiagnostics(diagnostics: TaskRunDiagnostics) {
+function printTaskRunDiagnostics(diagnostics: TaskRunDiagnostics, taskUrl?: string | null) {
   process.stdout.write(`${renderTaskSessionSummary({
     logFilePath: diagnostics.logFilePath,
-    taskId: diagnostics.taskId,
+    taskUrl,
   })}\n\n`);
 }
 
@@ -271,14 +271,15 @@ async function ensureUiHost(
   cwd: string,
   taskId: string,
   webRoot: string,
+  port: number,
 ) : Promise<{ host: ActiveUiHost; port: number; url: string }> {
-  const port = await resolveUiPort();
   const host = await startWebHost({
     orchestrator: context.orchestrator,
     cwd,
     taskId,
     port,
     webRoot,
+    userDataPath: context.userDataPath,
   });
   return {
     host,
@@ -352,9 +353,19 @@ async function handleTaskUiCommand(
     newTaskId: diagnostics.taskId,
     content: command.message!.trim(),
   });
-  printTaskRunDiagnostics(diagnostics);
-  const { host, url } = await ensureUiHost(context, snapshot.task.cwd, snapshot.task.id, webRoot);
-  process.stdout.write(`[UI] ${url}\n`);
+  const uiPort = await resolveUiPort();
+  const previewUrl = buildUiUrl({
+    port: uiPort,
+    taskId: snapshot.task.id,
+  });
+  printTaskRunDiagnostics(diagnostics, previewUrl);
+  const { host, url } = await ensureUiHost(
+    context,
+    snapshot.task.cwd,
+    snapshot.task.id,
+    webRoot,
+    uiPort,
+  );
   await open(url);
   if (streamingPlan.enabled) {
     await renderTaskMessages(context, snapshot.task.id, [], {

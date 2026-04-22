@@ -25,6 +25,8 @@ interface ChatWindowProps {
   workspace: WorkspaceSnapshot | undefined;
   task: TaskSnapshot | undefined;
   availableAgents: string[];
+  taskLogFilePath?: string | null;
+  taskUrl?: string | null;
   isMaximized?: boolean;
   onToggleMaximize?: () => void;
   onSubmit: (payload: { content: string; mentionAgent?: string }) => Promise<void>;
@@ -209,6 +211,8 @@ export function ChatWindow({
   workspace,
   task,
   availableAgents,
+  taskLogFilePath = null,
+  taskUrl = null,
   isMaximized = false,
   onToggleMaximize,
   onSubmit,
@@ -403,7 +407,10 @@ export function ChatWindow({
     setSubmitError(null);
 
     try {
-      await navigator.clipboard.writeText(formatChatTranscript(messages));
+      await navigator.clipboard.writeText(formatChatTranscript(messages, {
+        logFilePath: taskLogFilePath,
+        taskUrl,
+      }));
       setCopySuccess(true);
 
       if (copyResetTimerRef.current !== null) {

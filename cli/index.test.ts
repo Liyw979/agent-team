@@ -60,10 +60,10 @@ test("CLI help no longer contains the removed terminal host wording", () => {
   assert.doesNotMatch(CLI_SOURCE, new RegExp(REMOVED_TERMINAL_HOST, "i"));
 });
 
-test("task headless prints the log file path and task id", () => {
+test("task headless prints the log file path through renderTaskSessionSummary", () => {
   assert.match(CLI_SOURCE, /renderTaskSessionSummary/);
   assert.match(CLI_SOURCE, /logFilePath: diagnostics\.logFilePath/);
-  assert.match(CLI_SOURCE, /taskId,/);
+  assert.match(CLI_SOURCE, /taskUrl,/);
   assert.match(CLI_SOURCE, /buildTaskLogFilePath/);
   assert.match(CLI_SOURCE, /buildTaskLogFilePath\(userDataPath, taskId\)/);
   assert.doesNotMatch(CLI_SOURCE, /agent-team\.log/);
@@ -91,11 +91,17 @@ test("task ui prints diagnostics before starting the web host", () => {
   assert.equal(
     appearsInOrder(
       taskUiSection,
-      "printTaskRunDiagnostics(diagnostics);",
-      "const { host, url } = await ensureUiHost(context, snapshot.task.cwd, snapshot.task.id, webRoot);",
+      "printTaskRunDiagnostics(diagnostics, previewUrl);",
+      "const { host, url } = await ensureUiHost(",
     ),
     true,
   );
+});
+
+test("task ui diagnostics reuse the final browser url and do not print a separate UI line", () => {
+  assert.match(CLI_SOURCE, /const previewUrl = buildUiUrl\(/);
+  assert.match(CLI_SOURCE, /printTaskRunDiagnostics\(diagnostics, previewUrl\);/);
+  assert.doesNotMatch(CLI_SOURCE, /process\.stdout\.write\(`\[UI\] \$\{url\}\\n`\)/);
 });
 
 test("task commands preallocate a task id before creating the CLI context", () => {

@@ -5,6 +5,8 @@ const SYSTEM_SENDER_LABEL = "Orchestrator";
 interface FormatChatTranscriptOptions {
   locale?: string;
   timeZone?: string;
+  logFilePath?: string | null;
+  taskUrl?: string | null;
 }
 
 export function getChatSenderLabel(sender: string) {
@@ -34,7 +36,7 @@ export function formatChatTranscript(
   messages: ChatMessageItem[],
   options: FormatChatTranscriptOptions = {},
 ) {
-  return messages
+  const transcriptBody = messages
     .map((message) =>
       [
         getChatSenderLabel(message.sender),
@@ -45,4 +47,19 @@ export function formatChatTranscript(
         .join("\n"),
     )
     .join("\n\n");
+
+  if (!transcriptBody) {
+    return "";
+  }
+
+  const headerLines = [
+    options.logFilePath ? `日志: ${options.logFilePath}` : null,
+    options.taskUrl ? `url: ${options.taskUrl}` : null,
+  ].filter((line): line is string => Boolean(line));
+
+  if (headerLines.length === 0) {
+    return transcriptBody;
+  }
+
+  return `${headerLines.join("\n")}\n\n${transcriptBody}`;
 }
