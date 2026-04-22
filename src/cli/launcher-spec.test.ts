@@ -35,7 +35,7 @@ test("buildCliLauncherSpec 鐩存帴浣跨敤褰撳墠 Node 杩涚▼鍚姩 C
     "/repo/agent-team/node_modules/tsx/dist/preflight.cjs",
     "--import",
     "file:///repo/agent-team/node_modules/tsx/dist/loader.mjs",
-    "/repo/agent-team/cli/index.ts",
+    "/repo/agent-team/src/cli/index.ts",
     "task",
     "run",
     "--message",

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import type { MessageRecord } from "@shared/types";
 
-import { mergeTaskChatMessages } from "../src/lib/chat-messages";
+import { mergeTaskChatMessages } from "../lib/chat-messages";
 import { formatRevisionRequestContent } from "../shared/chat-message-format";
 import {
   REVIEW_NEEDS_REVISION_END_LABEL,

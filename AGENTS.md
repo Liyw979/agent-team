@@ -175,28 +175,27 @@ CLI 能力分组：
 
 ```txt
 agent-team/
-├── cli/
-│   ├── index.ts
-│   ├── launcher.cjs
-│   └── web-host.ts
-├── runtime/
-│   ├── gating-state.ts
-│   ├── gating-router.ts
-│   ├── langgraph-host.ts
-│   ├── langgraph-runtime.ts
-│   ├── orchestrator.ts
-│   ├── topology-compiler.ts
-│   ├── store.ts
-│   ├── opencode-client.ts
-│   └── user-data-path.ts
-├── shared/
-│   ├── ipc.ts
-│   ├── terminal-commands.ts
-│   └── types.ts
 ├── src/
+│   ├── cli/
+│   │   ├── index.ts
+│   │   ├── launcher.cjs
+│   │   └── web-host.ts
 │   ├── components/
 │   ├── lib/
-│   ├── store/
+│   ├── runtime/
+│   │   ├── gating-state.ts
+│   │   ├── gating-router.ts
+│   │   ├── langgraph-host.ts
+│   │   ├── langgraph-runtime.ts
+│   │   ├── orchestrator.ts
+│   │   ├── topology-compiler.ts
+│   │   ├── store.ts
+│   │   ├── opencode-client.ts
+│   │   └── user-data-path.ts
+│   ├── shared/
+│   │   ├── ipc.ts
+│   │   ├── terminal-commands.ts
+│   │   └── types.ts
 │   ├── App.tsx
 │   ├── main.tsx
 │   └── styles.css
@@ -228,8 +227,9 @@ bun run dist:mac-x64
 
 交付前检查：
 
+- 每次交付前必须在仓库根目录运行 `bun tsc --noEmit`，并以类型检查通过作为交付前置条件。
 - 每次交付前必须在仓库根目录运行 `bun test`，并以测试通过作为交付前置条件。
-- 涉及调度状态变化、回流顺序、裁决转发、spawn 对话推进等用户可见协作语义时，新增覆盖优先写进 `runtime/scheduler-script-harness.test.ts` 这类 script 测试，用对话脚本验证真实流转；只有当该行为依赖内部暂存状态或 synthetic dispatch、无法自然表达为一段用户可见对话脚本时，才保留在 `runtime/gating-router.test.ts` / `runtime/orchestrator.test.ts` 做纯状态测试。
+- 涉及调度状态变化、回流顺序、裁决转发、spawn 对话推进等用户可见协作语义时，新增覆盖优先写进 `src/runtime/scheduler-script-harness.test.ts` 这类 script 测试，用对话脚本验证真实流转；只有当该行为依赖内部暂存状态或 synthetic dispatch、无法自然表达为一段用户可见对话脚本时，才保留在 `src/runtime/gating-router.test.ts` / `src/runtime/orchestrator.test.ts` 做纯状态测试。
 
 打包注意事项：
 

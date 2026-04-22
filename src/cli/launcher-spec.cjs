@@ -15,7 +15,7 @@ function buildCliLauncherSpec(input) {
   const platform = input.platform || process.platform;
   const pathModule = selectPathModule(platform);
   const repoRoot = input.repoRoot;
-  const entry = pathModule.resolve(repoRoot, "cli/index.ts");
+  const entry = pathModule.resolve(repoRoot, "src/cli/index.ts");
   const preflight = pathModule.resolve(repoRoot, "node_modules/tsx/dist/preflight.cjs");
   const loader = pathModule.resolve(repoRoot, "node_modules/tsx/dist/loader.mjs");
 

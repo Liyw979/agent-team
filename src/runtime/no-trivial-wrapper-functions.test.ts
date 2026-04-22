@@ -5,10 +5,10 @@ import test from "node:test";
 const TEAM_DSL_SOURCE = fs.readFileSync(new URL("./team-dsl.ts", import.meta.url), "utf8");
 const CLI_COMMAND_SOURCE = fs.readFileSync(new URL("../cli/cli-command.ts", import.meta.url), "utf8");
 const CLI_INDEX_SOURCE = fs.readFileSync(new URL("../cli/index.ts", import.meta.url), "utf8");
-const APP_SOURCE = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-const TOPOLOGY_GRAPH_SOURCE = fs.readFileSync(new URL("../src/components/TopologyGraph.tsx", import.meta.url), "utf8");
+const APP_SOURCE = fs.readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
+const TOPOLOGY_GRAPH_SOURCE = fs.readFileSync(new URL("../components/TopologyGraph.tsx", import.meta.url), "utf8");
 const TOPOLOGY_GRAPH_HELPERS_SOURCE = fs.readFileSync(
-  new URL("../src/components/topology-graph-helpers.ts", import.meta.url),
+  new URL("../components/topology-graph-helpers.ts", import.meta.url),
   "utf8",
 );
 const SHARED_TYPES_SOURCE = fs.readFileSync(new URL("../shared/types.ts", import.meta.url), "utf8");

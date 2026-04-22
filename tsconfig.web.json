@@ -25,13 +25,13 @@
         "src/*"
       ],
       "@shared/*": [
-        "shared/*"
+        "src/shared/*"
       ]
     }
   },
   "include": [
     "src/**/*.ts",
     "src/**/*.tsx",
-    "shared/**/*.ts"
+    "src/shared/**/*.ts"
   ]
 }

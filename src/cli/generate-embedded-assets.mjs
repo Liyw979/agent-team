@@ -2,9 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const webRoot = path.join(repoRoot, "dist", "web");
-const outputPath = path.join(repoRoot, "cli", "generated-embedded-assets.ts");
+const outputPath = path.join(repoRoot, "src", "cli", "generated-embedded-assets.ts");
 
 function renderEmbeddedAssetsModule(webAssets) {
   const lines = [

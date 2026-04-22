@@ -1,5 +1,5 @@
 import boxen from "boxen";
-import { mergeTaskChatMessages, type ChatMessageItem } from "../src/lib/chat-messages";
+import { mergeTaskChatMessages, type ChatMessageItem } from "../lib/chat-messages";
 import type { MessageRecord } from "@shared/types";
 
 const MESSAGE_LEFT_PADDING = "    ";

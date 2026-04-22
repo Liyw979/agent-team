@@ -22,7 +22,7 @@ function collectReactFlowFootprints(input: {
 }
 
 test("仓库不再残留 React Flow 足迹", () => {
-  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
   const packageJson = fs.readFileSync(path.join(repoRoot, "package.json"), "utf8");
   const mainEntry = fs.readFileSync(path.join(repoRoot, "src", "main.tsx"), "utf8");
 

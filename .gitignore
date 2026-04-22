@@ -6,7 +6,7 @@ out/
 .agent-team/
 .agentpipeline/
 .DS_Store
-cli/generated-embedded-assets.ts
+src/cli/generated-embedded-assets.ts
 
 # Keep project agent definitions in version control.
 !.opencode/

@@ -59,13 +59,10 @@ function collectLegacyElectronFootprints(snapshot: RepositorySnapshot) {
 }
 
 test("仓库不再残留 Electron 集成足迹", () => {
-  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
   const snapshot: RepositorySnapshot = {
     packageJson: fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"),
     agentsDoc: fs.readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8"),
-    launcherScript: fs.readFileSync(path.join(repoRoot, "bin", "agent-team"), "utf8"),
-    hasRootPackageLock: fs.existsSync(path.join(repoRoot, "package-lock.json")),
-    hasRootBunLock: fs.existsSync(path.join(repoRoot, "bun.lock")),
     launcherScript: fs.readFileSync(path.join(repoRoot, "bin", "agent-team"), "utf8"),
     hasRootPackageLock: fs.existsSync(path.join(repoRoot, "package-lock.json")),
     hasRootBunLock: fs.existsSync(path.join(repoRoot, "bun.lock")),

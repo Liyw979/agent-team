@@ -77,7 +77,7 @@ test("fallback resolution returns dist/web when index.html exists", () => {
 test("compiled runtime does not expose embedded web root without index.html", () => {
   assert.equal(
     resolveCompiledEmbeddedWebRoot({
-      runtimeRoot: "/tmp/runtime/0.1.0",
+      runtimeRoot: "/tmp/src/runtime/0.1.0",
       embeddedAssetRelativePaths: [
         "assets/index-abc123.js",
         "assets/index-def456.css",

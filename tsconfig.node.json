@@ -15,15 +15,15 @@
     "baseUrl": ".",
     "paths": {
       "@shared/*": [
-        "shared/*"
+        "src/shared/*"
       ]
     }
   },
   "include": [
-    "cli/**/*.ts",
-    "cli/**/*.d.ts",
-    "runtime/**/*.ts",
-    "runtime/**/*.d.ts",
-    "shared/**/*.ts"
+    "src/cli/**/*.ts",
+    "src/cli/**/*.d.ts",
+    "src/runtime/**/*.ts",
+    "src/runtime/**/*.d.ts",
+    "src/shared/**/*.ts"
   ]
 }
