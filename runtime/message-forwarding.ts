@@ -1,4 +1,8 @@
-import type { MessageRecord } from "@shared/types";
+import {
+  DEFAULT_TOPOLOGY_EDGE_MESSAGE_MODE,
+  type MessageRecord,
+  type TopologyEdgeMessageMode,
+} from "@shared/types";
 
 type MinimalMessage = Pick<MessageRecord, "sender" | "content" | "meta">;
 
@@ -62,19 +66,71 @@ export function getInitialUserMessageContent(messages: MinimalMessage[]): string
 export function buildDownstreamForwardedContextFromMessages(
   messages: MinimalMessage[],
   sourceContent: string,
-  includeInitialTask = true,
+  options: {
+    includeInitialTask?: boolean;
+    messageMode?: TopologyEdgeMessageMode;
+  } = {},
 ): { userMessage?: string; agentMessage: string } {
+  const includeInitialTask = options.includeInitialTask ?? true;
+  const messageMode = options.messageMode ?? DEFAULT_TOPOLOGY_EDGE_MESSAGE_MODE;
   const initialUserContent = getInitialUserMessageContent(messages);
   const latestSourceContent = sourceContent.trim();
+  const agentMessage = resolveForwardedAgentMessage(messages, latestSourceContent, messageMode);
   return {
     userMessage:
       includeInitialTask
       && initialUserContent
-      && !contentContainsNormalized(latestSourceContent, initialUserContent)
+      && !contentContainsNormalized(agentMessage, initialUserContent)
         ? initialUserContent
         : undefined,
-    agentMessage: latestSourceContent || "（该上游 Agent 未返回可继续流转的正文。）",
+    agentMessage,
   };
+}
+
+function resolveForwardedAgentMessage(
+  messages: MinimalMessage[],
+  latestSourceContent: string,
+  messageMode: TopologyEdgeMessageMode,
+): string {
+  if (messageMode === "none") {
+    return "continue";
+  }
+
+  if (messageMode === "all") {
+    const transcript = buildForwardableTranscript(messages);
+    return transcript || latestSourceContent || "（当前没有可转发的历史消息记录。）";
+  }
+
+  return latestSourceContent || "（该上游 Agent 未返回可继续流转的正文。）";
+}
+
+function buildForwardableTranscript(messages: MinimalMessage[]): string {
+  return messages
+    .filter((message) => isForwardableMessage(message))
+    .map((message) => formatForwardableMessage(message))
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function isForwardableMessage(message: MinimalMessage): boolean {
+  if (!message.content.trim()) {
+    return false;
+  }
+  return message.meta?.kind !== "agent-dispatch";
+}
+
+function formatForwardableMessage(message: MinimalMessage): string {
+  const sender = message.sender.trim() || "Unknown";
+  const targetAgentName = message.meta?.targetAgentId?.trim();
+  const content = sender === "user" && targetAgentName
+    ? stripTargetMention(message.content, targetAgentName)
+    : message.content.trim();
+
+  if (!content) {
+    return "";
+  }
+
+  return `[${sender}] ${content}`;
 }
 
 function stripLeadingTargetMention(content: string, targetAgentName: string): string {

@@ -126,8 +126,10 @@ export interface TaskAgentRecord {
 }
 
 export type TopologyEdgeTrigger = "association" | "approved" | "needs_revision";
+export type TopologyEdgeMessageMode = "none" | "last" | "all";
 
 export const DEFAULT_NEEDS_REVISION_MAX_ROUNDS = 4;
+export const DEFAULT_TOPOLOGY_EDGE_MESSAGE_MODE: TopologyEdgeMessageMode = "last";
 export const LANGGRAPH_START_NODE_ID = "__start__";
 export const LANGGRAPH_END_NODE_ID = "__end__";
 
@@ -135,6 +137,7 @@ export interface TopologyEdge {
   source: string;
   target: string;
   triggerOn: TopologyEdgeTrigger;
+  messageMode?: TopologyEdgeMessageMode;
   maxRevisionRounds?: number;
 }
 
@@ -176,6 +179,7 @@ export interface RuntimeTopologyEdge {
   source: string;
   target: string;
   triggerOn: TopologyEdgeTrigger;
+  messageMode?: TopologyEdgeMessageMode;
   maxRevisionRounds?: number;
 }
 
@@ -359,6 +363,13 @@ export function getTopologyEdgeId(edge: Pick<TopologyEdge, "source" | "target" |
   return `${edge.source}__${edge.target}__${edge.triggerOn}`;
 }
 
+export function normalizeTopologyEdgeMessageMode(value: unknown): TopologyEdgeMessageMode {
+  if (value === "none" || value === "all") {
+    return value;
+  }
+  return DEFAULT_TOPOLOGY_EDGE_MESSAGE_MODE;
+}
+
 export function isReviewAgentInTopology(
   topology: Pick<TopologyRecord, "edges">,
   agentName: string,
@@ -456,6 +467,7 @@ export function createDefaultTopology(
       source,
       target,
       triggerOn,
+      messageMode: DEFAULT_TOPOLOGY_EDGE_MESSAGE_MODE,
       ...(triggerOn === "needs_revision"
         ? {
             maxRevisionRounds: DEFAULT_NEEDS_REVISION_MAX_ROUNDS,

@@ -26,6 +26,7 @@ test("默认拓扑只生成首节点到次节点的 association 边", () => {
     source: "Build",
     target: "BA",
     triggerOn: "association",
+    messageMode: "last",
   });
   assert.deepEqual(topology.langgraph, {
     start: {

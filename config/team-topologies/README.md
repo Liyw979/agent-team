@@ -121,11 +121,12 @@
 
 ## 3. `links` 怎么写
 
-`links` 统一写成三元组数组：
+`links` 统一写成三元组或四元组数组：
 
 ```json
 [
-  ["上游节点", "下游节点", "association"]
+  ["上游节点", "下游节点", "association"],
+  ["上游节点", "下游节点", "association", "all"]
 ]
 ```
 
@@ -138,12 +139,21 @@
 - `needs_revision`
   表示审查不通过后的回流。当前节点明确要求继续修改或继续回应时，流程会沿这条边把意见退回给对应下游节点。
 
+第 4 个可选字段用于控制这条边派发下游时要不要带上历史消息：
+
+- `last`
+  默认值。只传递上游最后一条正文，就是当前系统原本的行为。
+- `none`
+  不传递上游最后一条正文。
+- `all`
+  传递当前 Task 的完整消息记录。运行时会过滤掉纯展示用的派发消息，只保留真正的历史正文。
+
 示例：
 
 ```json
 [
   ["BA", "Build", "association"],
-  ["Build", "CodeReview", "association"],
+  ["Build", "CodeReview", "association", "last"],
   ["CodeReview", "Build", "needs_revision"]
 ]
 ```

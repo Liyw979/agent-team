@@ -2,7 +2,9 @@ import {
   type AgentRecord,
   createTopologyLangGraphRecord,
   normalizeNeedsRevisionMaxRounds,
+  normalizeTopologyEdgeMessageMode,
   type TopologyEdge,
+  type TopologyEdgeMessageMode,
   type TopologyEdgeTrigger,
   type TopologyLangGraphRecord,
   type TopologyNodeRecord,
@@ -39,7 +41,7 @@ type GraphDslNode = GraphDslAgentNode | GraphDslSpawnNode;
 export interface GraphDslGraph {
   entry: string;
   nodes: GraphDslNode[];
-  links: Array<readonly [string, string, TopologyEdgeTrigger]>;
+  links: Array<readonly [string, string, TopologyEdgeTrigger, TopologyEdgeMessageMode?]>;
 }
 
 export type TeamDslDefinition = GraphDslGraph;
@@ -60,6 +62,7 @@ const GraphDslLinkSchema = z.tuple([
   z.string(),
   z.string(),
   z.enum(["association", "approved", "needs_revision"]),
+  z.enum(["none", "last", "all"]).optional(),
 ]);
 
 const GraphDslAgentNodeSchema: z.ZodType<GraphDslAgentNode> = z.object({
@@ -118,8 +121,8 @@ function normalizeComparableTopology(topology: TopologyRecord): TopologyRecord {
           : {}),
       }))
       .sort((left, right) => {
-        const leftKey = `${left.source}__${left.target}__${left.triggerOn}__${left.maxRevisionRounds ?? ""}`;
-        const rightKey = `${right.source}__${right.target}__${right.triggerOn}__${right.maxRevisionRounds ?? ""}`;
+        const leftKey = `${left.source}__${left.target}__${left.triggerOn}__${left.messageMode ?? ""}__${left.maxRevisionRounds ?? ""}`;
+        const rightKey = `${right.source}__${right.target}__${right.triggerOn}__${right.messageMode ?? ""}__${right.maxRevisionRounds ?? ""}`;
         return leftKey.localeCompare(rightKey);
       }),
     langgraph: topology.langgraph
@@ -287,7 +290,13 @@ function formatGraphDslParseError(error: z.ZodError): string {
 
   const issue = error.issues[0];
   const path = formatZodIssuePath(issue.path);
-  if (issue.code === z.ZodIssueCode.invalid_union_discriminator && issue.path.at(-1) === "type") {
+  if (
+    issue.path.at(-1) === "type"
+    && (
+      issue.code === z.ZodIssueCode.invalid_union_discriminator
+      || issue.message === "Invalid input"
+    )
+  ) {
     return `${path} 是节点判别字段，只允许 agent 或 spawn。`;
   }
   if (issue.code === z.ZodIssueCode.invalid_enum_value) {
@@ -383,10 +392,11 @@ function collectGraphDslNodeDefinitions(
         role: childNode.name,
         templateName: childNode.name,
       })),
-      edges: node.graph.links.map(([sourceRole, targetRole, triggerOn]) => ({
+      edges: node.graph.links.map(([sourceRole, targetRole, triggerOn, messageMode]) => ({
         sourceRole,
         targetRole,
         triggerOn,
+        messageMode: normalizeTopologyEdgeMessageMode(messageMode),
       })),
       exitWhen: "all_completed",
       reportToTemplateName: reportTarget?.target,
@@ -424,17 +434,19 @@ function compileGraphDsl(input: GraphDslGraph): CompiledTeamDsl {
 
   const topology: TopologyRecord = {
     nodes: input.nodes.map((node) => node.name),
-    edges: input.links.map(([source, target, triggerOn]) => ({
+    edges: input.links.map(([source, target, triggerOn, messageMode]) => ({
       source,
       target,
       triggerOn,
+      messageMode: normalizeTopologyEdgeMessageMode(messageMode),
     })),
     langgraph: createTopologyLangGraphRecord({
       nodes: input.nodes.map((node) => node.name),
-      edges: input.links.map(([source, target, triggerOn]) => ({
+      edges: input.links.map(([source, target, triggerOn, messageMode]) => ({
         source,
         target,
         triggerOn,
+        messageMode: normalizeTopologyEdgeMessageMode(messageMode),
       })),
       startTargets: [input.entry],
       endSources: null,

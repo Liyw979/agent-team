@@ -80,26 +80,31 @@ test("instantiateSpawnBundle 会为一个 finding 生成正反 summary 三个运
   );
   assert.deepEqual(bundle.edges, [
     {
+      messageMode: undefined,
       source: "正方模板-1",
       target: "反方模板-1",
       triggerOn: "review_fail",
     },
     {
+      messageMode: undefined,
       source: "反方模板-1",
       target: "正方模板-1",
       triggerOn: "review_fail",
     },
     {
+      messageMode: undefined,
       source: "正方模板-1",
       target: "Summary模板-1",
       triggerOn: "review_pass",
     },
     {
+      messageMode: undefined,
       source: "反方模板-1",
       target: "Summary模板-1",
       triggerOn: "review_pass",
     },
     {
+      messageMode: "last",
       source: "Summary模板-1",
       target: "初筛",
       triggerOn: "association",

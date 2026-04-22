@@ -90,6 +90,7 @@ export function instantiateSpawnBundle(input: {
       source: sourceNodeInstance.id,
       target: targetNodeInstance.id,
       triggerOn: edge.triggerOn,
+      messageMode: edge.messageMode,
       ...(edge.triggerOn === "needs_revision" && typeof edge.maxRevisionRounds === "number"
         ? { maxRevisionRounds: edge.maxRevisionRounds }
         : {}),
@@ -114,6 +115,7 @@ export function instantiateSpawnBundle(input: {
       source: reportSourceNode.id,
       target: reportNode.id,
       triggerOn: rule.reportToTriggerOn ?? "approved",
+      messageMode: "last",
     });
   }
 

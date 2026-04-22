@@ -11,7 +11,9 @@ import {
   type AgentRecord,
   BUILD_AGENT_NAME,
   createDefaultTopology,
+  DEFAULT_TOPOLOGY_EDGE_MESSAGE_MODE,
   normalizeNeedsRevisionMaxRounds,
+  normalizeTopologyEdgeMessageMode,
   type DeleteTaskPayload,
   type GetTaskRuntimePayload,
   type InitializeTaskPayload,
@@ -1343,6 +1345,7 @@ export class Orchestrator {
         source: edge.source,
         target: edge.target,
         triggerOn: edge.triggerOn,
+        messageMode: normalizeTopologyEdgeMessageMode(edge.messageMode),
         ...(edge.triggerOn === "needs_revision"
           ? {
               maxRevisionRounds: normalizeNeedsRevisionMaxRounds(edge.maxRevisionRounds),
@@ -1495,20 +1498,29 @@ export class Orchestrator {
     const includeInitialTask = shouldForwardInitialTask
       ? this.consumeInitialTaskForwardingAllowanceFromGraphState(state)
       : false;
-    const forwardedContext = batch.sourceAgentId
-      ? buildDownstreamForwardedContextFromMessages(
-        this.store.listMessages(task.cwd, taskId),
-        batch.sourceContent ?? "",
-        includeInitialTask,
-      )
-      : null;
+    const taskMessages = this.store.listMessages(task.cwd, taskId);
     const initialUserContent = includeInitialTask
-      ? getInitialUserMessageContentPure(this.store.listMessages(task.cwd, taskId))
+      ? getInitialUserMessageContentPure(taskMessages)
       : "";
 
     return batch.jobs.map((job, index) => {
       this.ensureRuntimeTaskAgent(task, job.agentName);
       const executableAgentName = this.resolveExecutableAgentName(cwd, state, job.agentName);
+      const forwardedContext = batch.sourceAgentId
+        ? buildDownstreamForwardedContextFromMessages(
+          taskMessages,
+          batch.sourceContent ?? "",
+          {
+            includeInitialTask,
+            messageMode: this.getEdgeMessageMode(
+              topology,
+              batch.sourceAgentId,
+              job.agentName,
+              job.kind,
+            ),
+          },
+        )
+        : null;
       let prompt: AgentExecutionPrompt;
       if (job.kind === "raw") {
         prompt = {
@@ -1874,6 +1886,22 @@ export class Orchestrator {
     return topology.edges.filter(
       (edge) => edge.source === sourceAgentId && edge.triggerOn === triggerOn,
     );
+  }
+
+  private getEdgeMessageMode(
+    topology: TopologyRecord,
+    sourceAgentId: string,
+    targetAgentId: string,
+    triggerOn: "association" | "approved" | "revision_request",
+  ) {
+    const normalizedTriggerOn = triggerOn === "revision_request" ? "needs_revision" : triggerOn;
+    const edge = topology.edges.find(
+      (item) =>
+        item.source === sourceAgentId
+        && item.target === targetAgentId
+        && item.triggerOn === normalizedTriggerOn,
+    );
+    return edge?.messageMode ?? DEFAULT_TOPOLOGY_EDGE_MESSAGE_MODE;
   }
 
   private moveTaskToWaiting(cwd: string, taskId: string, sourceAgentId: string) {

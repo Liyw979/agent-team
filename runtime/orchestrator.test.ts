@@ -1005,12 +1005,13 @@ test("applyTeamDsl 会一次性写入当前 Project 的 agents 与 topology", as
     "你负责漏洞挖掘。",
   );
   assert.deepEqual(updated.topology.edges, [
-    { source: "BA", target: "Build", triggerOn: "association" },
-    { source: "Build", target: "SecurityResearcher", triggerOn: "association" },
+    { source: "BA", target: "Build", triggerOn: "association", messageMode: "last" },
+    { source: "Build", target: "SecurityResearcher", triggerOn: "association", messageMode: "last" },
     {
       source: "SecurityResearcher",
       target: "Build",
       triggerOn: "needs_revision",
+      messageMode: "last",
       maxRevisionRounds: 4,
     },
   ]);
@@ -1397,6 +1398,66 @@ test("下游结构化 prompt 会使用 Initial Task 与真实来源 Agent 段标
   assert.doesNotMatch(prompt, /\[@来源 Agent Message\]/);
   assert.match(prompt, /\[Project Git Diff Summary\]/);
   assert.doesNotMatch(prompt, /\[Requeirement\]/);
+});
+
+test("association 边配置为 none 时，下游 structured prompt 保留结构化标题，但正文改为 continue", async () => {
+  const orchestrator = createTestOrchestrator({
+    userDataPath: createTempDir(),
+    enableEventStream: false,
+  });
+
+  const typed = orchestrator as unknown as Orchestrator & {
+    getEdgeMessageMode: (
+      topology: {
+        edges: Array<{
+          source: string;
+          target: string;
+          triggerOn: "association" | "approved" | "needs_revision";
+          messageMode?: "none" | "last" | "all";
+        }>;
+      },
+      sourceAgentId: string,
+      targetAgentId: string,
+      triggerOn: "association" | "approved" | "revision_request",
+    ) => "none" | "last" | "all";
+    buildAgentExecutionPrompt: (prompt: {
+      mode: "structured";
+      from: string;
+      userMessage?: string;
+      agentMessage?: string;
+      gitDiffSummary?: string;
+    }) => string;
+  };
+
+  const messageMode = typed.getEdgeMessageMode(
+    {
+      edges: [
+        {
+          source: "初筛",
+          target: "疑点辩论",
+          triggerOn: "association",
+          messageMode: "none",
+        },
+      ],
+    },
+    "初筛",
+    "疑点辩论",
+    "association",
+  );
+
+  assert.equal(messageMode, "none");
+
+  const prompt = typed.buildAgentExecutionPrompt({
+    mode: "structured",
+    from: "初筛",
+    userMessage: "请分析这个可疑点。",
+    agentMessage: "continue",
+  });
+
+  assert.match(prompt, /\[Initial Task\]/);
+  assert.match(prompt, /\[From 初筛 Agent\]/);
+  assert.match(prompt, /continue/);
+  assert.doesNotMatch(prompt, /这里是上一条完整正文/);
 });
 
 test("只有第一次 Agent 间传递会携带 [Initial Task]", async () => {
