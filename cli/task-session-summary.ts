@@ -4,10 +4,12 @@ interface TaskSessionSummaryInput {
 }
 
 export function renderTaskSessionSummary(input: TaskSessionSummaryInput): string {
-  return [
-    `日志: ${input.logFilePath}`,
-    input.taskUrl ? `url: ${input.taskUrl}` : null,
-  ]
-    .filter((line): line is string => Boolean(line))
-    .join("\n");
+  const lines = [
+    "",
+    `日志：${input.logFilePath}`,
+  ];
+  if (input.taskUrl) {
+    lines.push(`网页：${input.taskUrl}`);
+  }
+  return lines.join("\n");
 }

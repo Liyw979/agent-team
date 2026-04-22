@@ -88,8 +88,10 @@ export interface SpawnedAgentTemplate {
 export interface SpawnRule {
   id: string;
   name: string;
-  sourceTemplateName: string;
-  itemKey: string;
+  spawnNodeName: string;
+  sourceTemplateName?: string;
+  itemsFrom?: string;
+  itemKey?: string;
   entryRole: SpawnedAgentRole;
   spawnedAgents: SpawnedAgentTemplate[];
   edges: Array<{
@@ -97,8 +99,9 @@ export interface SpawnRule {
     targetRole: SpawnedAgentRole;
     triggerOn: TopologyEdgeTrigger;
   }>;
-  exitWhen: "one_side_agrees";
-  reportToTemplateName: string;
+  exitWhen: "one_side_agrees" | "all_completed";
+  reportToTemplateName?: string;
+  reportToTriggerOn?: TopologyEdgeTrigger;
 }
 
 export interface TopologyNodeRecord {
@@ -159,11 +162,13 @@ export interface TopologyRecord {
 
 export interface RuntimeTopologyNode {
   id: string;
+  kind: TopologyNodeKind;
   templateName: string;
   displayName: string;
   sourceNodeId: string;
   groupId: string | null;
   role: SpawnedAgentRole | null;
+  spawnRuleId?: string;
 }
 
 export interface RuntimeTopologyEdge {
@@ -179,11 +184,23 @@ export interface SpawnItemPayload {
 
 export interface SpawnBundleInstantiation {
   groupId: string;
-  sourceTemplateName: string;
-  reportToTemplateName: string;
+  activationId: string;
+  spawnNodeName: string;
+  sourceTemplateName?: string;
+  reportToTemplateName?: string;
   item: SpawnItemPayload;
   nodes: RuntimeTopologyNode[];
   edges: RuntimeTopologyEdge[];
+}
+
+export interface SpawnActivationRecord {
+  id: string;
+  spawnNodeName: string;
+  spawnRuleId: string;
+  sourceContent: string;
+  bundleGroupIds: string[];
+  completedBundleGroupIds: string[];
+  dispatched: boolean;
 }
 
 export function normalizeNeedsRevisionMaxRounds(value: unknown): number {
@@ -302,6 +319,7 @@ export interface DeleteTaskPayload {
 }
 
 export interface RuntimeUpdatedEventPayload {
+  taskId: string;
   sessionId: string | null;
   timestamp: string;
 }
@@ -489,6 +507,11 @@ export function getSpawnRules(topology: TopologyRecord): SpawnRule[] {
     spawnedAgents: rule.spawnedAgents.map((agent) => ({ ...agent })),
     edges: rule.edges.map((edge) => ({ ...edge })),
   }));
+}
+
+export function resolveSpawnItemsField(rule: Pick<SpawnRule, "itemsFrom" | "itemKey">): string {
+  const field = rule.itemsFrom?.trim() || rule.itemKey?.trim() || "items";
+  return field.length > 0 ? field : "items";
 }
 
 export function createTopologyLangGraphRecord(input: {

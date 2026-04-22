@@ -29,7 +29,6 @@ import {
   type TopologyRecord,
   type UpdateTopologyPayload,
   type WorkspaceSnapshot,
-  isReviewAgentInTopology,
 } from "@shared/types";
 import {
   formatAgentDispatchContent,
@@ -75,6 +74,8 @@ import { buildTaskCompletionMessageContent } from "./task-completion-message";
 import { getRuntimeNode, getRuntimeTemplateName } from "./runtime-topology-graph";
 import type { CompiledTeamDsl } from "./team-dsl";
 import { shouldScheduleEventStreamReconnect } from "./event-stream-lifecycle";
+import { resolveExecutionReviewAgent } from "./review-agent-context";
+import { resolveTaskAgentNamesToPrewarm } from "./task-session-prewarm";
 import {
   buildInjectedConfigFromAgents,
   extractDslAgentsFromTopology,
@@ -745,7 +746,12 @@ export class Orchestrator {
     topology: TopologyRecord,
     targetAgentName: string,
   ): boolean {
-    return targetAgentName !== BUILD_AGENT_NAME && !this.isReviewAgent({ name: targetAgentName }, topology);
+    return targetAgentName !== BUILD_AGENT_NAME && !resolveExecutionReviewAgent({
+      state: null,
+      topology,
+      runtimeAgentName: targetAgentName,
+      executableAgentName: targetAgentName,
+    });
   }
 
   private updateTaskStatusIfActive(
@@ -1077,8 +1083,14 @@ export class Orchestrator {
   }
 
   private async ensureTaskAgentSessions(cwd: string, task: TaskRecord): Promise<Map<string, string>> {
+    const topology = this.store.getTopology(task.cwd);
+    const prewarmAgentNames = new Set(
+      resolveTaskAgentNamesToPrewarm(topology, this.store.listTaskAgents(task.cwd, task.id)),
+    );
     const sessions = await Promise.all(
-      this.store.listTaskAgents(task.cwd, task.id).map(async (agent) => [
+      this.store.listTaskAgents(task.cwd, task.id)
+        .filter((agent) => prewarmAgentNames.has(agent.name))
+        .map(async (agent) => [
         agent.name,
         await this.ensureAgentSession(cwd, task, agent),
       ] as const),
@@ -1155,19 +1167,11 @@ export class Orchestrator {
     });
   }
 
-  private isReviewAgent(
-    agent: Pick<AgentRecord, "name">,
-    topology: Pick<TopologyRecord, "edges">,
-  ): boolean {
-    return isReviewAgentInTopology(topology, agent.name);
-  }
-
   private createSystemPrompt(
     agent: AgentRecord,
-    topology: Pick<TopologyRecord, "edges">,
     prompt: AgentExecutionPrompt,
+    reviewAgent: boolean,
   ): string {
-    const reviewAgent = this.isReviewAgent(agent, topology);
     if (!reviewAgent) {
       return "";
     }
@@ -1295,6 +1299,19 @@ export class Orchestrator {
   ): TopologyRecord {
     const validNames = new Set(agents.map((item) => item.name));
     const agentByName = new Map(agents.map((agent) => [agent.name, agent]));
+    const rawNodeRecords = topology.nodeRecords
+      ? topology.nodeRecords
+      : topology.nodes.map((name) => ({
+          id: name,
+          kind: "agent" as const,
+          templateName: name,
+        }));
+    const spawnNodeIds = new Set(
+      rawNodeRecords
+        .filter((node) => node.kind === "spawn" && node.id)
+        .map((node) => node.id),
+    );
+    const validTopologyNames = new Set([...validNames, ...spawnNodeIds]);
     const seenEdges = new Set<string>();
     const seenPairs = new Set<string>();
     const edges = topology.edges
@@ -1304,7 +1321,7 @@ export class Orchestrator {
           edge.triggerOn === "approved" ||
           edge.triggerOn === "needs_revision",
       )
-      .filter((edge) => validNames.has(edge.source) && validNames.has(edge.target))
+      .filter((edge) => validTopologyNames.has(edge.source) && validTopologyNames.has(edge.target))
       .filter((edge) => {
         const key = `${edge.source}__${edge.target}__${edge.triggerOn}`;
         if (seenEdges.has(key)) {
@@ -1331,17 +1348,14 @@ export class Orchestrator {
             }
           : {}),
       }));
-    const nodes = resolveTopologyAgentOrder(
+    const orderedAgentNodes = resolveTopologyAgentOrder(
       agents.map((agent) => ({ name: agent.name })),
       topology.nodes.filter((item) => validNames.has(item)),
     );
-    const rawNodeRecords = topology.nodeRecords
-      ? topology.nodeRecords
-      : nodes.map((name) => ({
-          id: name,
-          kind: "agent" as const,
-          templateName: name,
-        }));
+    const nodes = [
+      ...orderedAgentNodes,
+      ...topology.nodes.filter((item) => spawnNodeIds.has(item)),
+    ].filter((value, index, list) => list.indexOf(value) === index);
     const nodeRecords = rawNodeRecords.filter(
       (node) =>
         node.id
@@ -1361,18 +1375,26 @@ export class Orchestrator {
         : node.writable === true,
     }));
     const spawnRules = topology.spawnRules?.filter(
-      (rule) =>
-        rule.id
-        && rule.name
-        && rule.sourceTemplateName
-        && rule.itemKey
-        && rule.entryRole
-        && rule.reportToTemplateName
-        && validNames.has(rule.sourceTemplateName)
-        && validNames.has(rule.reportToTemplateName)
-        && rule.spawnedAgents.every((agent) => agent.role && validNames.has(agent.templateName)),
+      (rule) => {
+        const spawnNodeName = rule.spawnNodeName
+          || rawNodeRecords.find((node) => node.spawnRuleId === rule.id)?.id
+          || "";
+        return (
+          rule.id
+          && rule.name
+          && spawnNodeName
+          && rule.entryRole
+          && validTopologyNames.has(spawnNodeName)
+          && (!rule.sourceTemplateName || validNames.has(rule.sourceTemplateName))
+          && (!rule.reportToTemplateName || validNames.has(rule.reportToTemplateName))
+          && rule.spawnedAgents.every((agent) => agent.role && validNames.has(agent.templateName))
+        );
+      },
     ).map((rule) => ({
       ...rule,
+      spawnNodeName: rule.spawnNodeName
+        || rawNodeRecords.find((node) => node.spawnRuleId === rule.id)?.id
+        || rule.name,
       spawnedAgents: rule.spawnedAgents.map((agent) => ({ ...agent })),
       edges: rule.edges.map((edge) => ({ ...edge })),
     }));
@@ -1398,7 +1420,7 @@ export class Orchestrator {
         this.moveTaskToWaiting(
           cwd,
           taskId,
-          this.resolveWaitingSourceAgentId(taskId, state),
+          this.resolveWaitingSourceAgentId(cwd, taskId, state),
         ),
       completeTask: async ({ taskId, status, failureReason }) =>
         this.completeTask(cwd, taskId, status, failureReason),
@@ -1414,8 +1436,8 @@ export class Orchestrator {
     await this.getLangGraphRuntime(task.cwd).deleteTask(task.id);
   }
 
-  private resolveWaitingSourceAgentId(taskId: string, state: GraphTaskState): string {
-    const latestAgentMessage = [...this.store.listMessages(state.workspaceCwd, taskId)]
+  private resolveWaitingSourceAgentId(cwd: string, taskId: string, state: GraphTaskState): string {
+    const latestAgentMessage = [...this.store.listMessages(cwd, taskId)]
       .reverse()
       .find((message) => message.meta?.kind === "agent-final");
     return latestAgentMessage?.sender ?? state.topology.nodes[0] ?? "Orchestrator";
@@ -1617,12 +1639,18 @@ export class Orchestrator {
 
       const topology = this.store.getTopology(cwd);
       const dispatchedContent = this.buildAgentExecutionPrompt(prompt);
+      const reviewAgent = resolveExecutionReviewAgent({
+        state,
+        topology,
+        runtimeAgentName,
+        executableAgentName,
+      });
       const response = await this.opencodeRunner.run({
         runtimeTarget: this.getTaskRuntimeTarget(currentTask),
         sessionId: agentSessionId,
         content: dispatchedContent,
         agent: executableAgentName,
-        system: this.createSystemPrompt(latestAgent, topology, prompt),
+        system: this.createSystemPrompt(latestAgent, prompt, reviewAgent),
       });
 
       if (response.status === "error") {
@@ -1630,8 +1658,6 @@ export class Orchestrator {
           response.rawMessage.error || response.finalMessage || `${runtimeAgentName} 返回错误状态`,
         );
       }
-
-      const reviewAgent = this.isReviewAgent(latestAgent, topology);
       const parsedReview = this.parseReview(response.finalMessage, reviewAgent);
       const agentContextContent = this.resolveAgentContextContent(
         parsedReview,
@@ -1716,7 +1742,12 @@ export class Orchestrator {
       };
     } catch (error) {
       const topology = this.store.getTopology(cwd);
-      const reviewAgent = this.isReviewAgent({ name: runtimeAgentName }, topology);
+      const reviewAgent = resolveExecutionReviewAgent({
+        state,
+        topology,
+        runtimeAgentName,
+        executableAgentName,
+      });
       this.store.updateTaskAgentStatus(task.cwd, task.id, runtimeAgentName, "failed");
       const failedMessage: MessageRecord = {
         id: randomUUID(),
@@ -1912,7 +1943,7 @@ export class Orchestrator {
     return null;
   }
 
-  private scheduleRuntimeRefresh(cwd: string, sessionId: string | null) {
+  private scheduleRuntimeRefresh(cwd: string, taskId: string, sessionId: string | null) {
     const normalizedCwd = path.resolve(cwd);
     if (!this.hasWorkspaceRecord(normalizedCwd)) {
       return;
@@ -1929,6 +1960,7 @@ export class Orchestrator {
         type: "runtime-updated",
         cwd: normalizedCwd,
         payload: {
+          taskId,
           sessionId,
           timestamp: new Date().toISOString(),
         },
@@ -1988,7 +2020,7 @@ export class Orchestrator {
 
     this.connectedRuntimeTaskIds.add(task.id);
     void this.opencodeClient.connectEvents(overlay.runtimeTarget, (event) => {
-      this.scheduleRuntimeRefresh(overlay.cwd, this.extractSessionIdFromOpenCodeEvent(event));
+      this.scheduleRuntimeRefresh(overlay.cwd, overlay.taskId, this.extractSessionIdFromOpenCodeEvent(event));
     })
       .catch(() => undefined)
       .finally(() => {

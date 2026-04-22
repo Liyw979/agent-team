@@ -39,6 +39,7 @@ function createVulnTopology(): TopologyRecord {
         ],
         exitWhen: "one_side_agrees",
         reportToTemplateName: "初筛",
+        reportToTriggerOn: "association",
       },
     ],
   };
@@ -72,36 +73,36 @@ test("instantiateSpawnBundle 会为一个 finding 生成正反 summary 三个运
       displayName: node.displayName,
     })),
     [
-      { id: "pro#finding-debate:finding-001", templateName: "正方模板", role: "pro", displayName: "正方模板-1" },
-      { id: "con#finding-debate:finding-001", templateName: "反方模板", role: "con", displayName: "反方模板-1" },
-      { id: "summary#finding-debate:finding-001", templateName: "Summary模板", role: "summary", displayName: "Summary模板-1" },
+      { id: "正方模板-1", templateName: "正方模板", role: "pro", displayName: "正方模板-1" },
+      { id: "反方模板-1", templateName: "反方模板", role: "con", displayName: "反方模板-1" },
+      { id: "Summary模板-1", templateName: "Summary模板", role: "summary", displayName: "Summary模板-1" },
     ],
   );
   assert.deepEqual(bundle.edges, [
     {
-      source: "pro#finding-debate:finding-001",
-      target: "con#finding-debate:finding-001",
+      source: "正方模板-1",
+      target: "反方模板-1",
       triggerOn: "review_fail",
     },
     {
-      source: "con#finding-debate:finding-001",
-      target: "pro#finding-debate:finding-001",
+      source: "反方模板-1",
+      target: "正方模板-1",
       triggerOn: "review_fail",
     },
     {
-      source: "pro#finding-debate:finding-001",
-      target: "summary#finding-debate:finding-001",
+      source: "正方模板-1",
+      target: "Summary模板-1",
       triggerOn: "review_pass",
     },
     {
-      source: "con#finding-debate:finding-001",
-      target: "summary#finding-debate:finding-001",
+      source: "反方模板-1",
+      target: "Summary模板-1",
       triggerOn: "review_pass",
     },
     {
-      source: "summary#finding-debate:finding-001",
+      source: "Summary模板-1",
       target: "初筛",
-      triggerOn: "review_pass",
+      triggerOn: "association",
     },
   ]);
 });
@@ -137,7 +138,7 @@ test("instantiateSpawnBundles 会为多个 finding 批量生成互不冲突的�
   });
 
   assert.equal(bundles.length, 2);
-  assert.equal(bundles[0]?.nodes[0]?.id, "pro#finding-debate:finding-001");
-  assert.equal(bundles[1]?.nodes[0]?.id, "pro#finding-debate:finding-002");
+  assert.equal(bundles[0]?.nodes[0]?.id, "正方模板-1");
+  assert.equal(bundles[1]?.nodes[0]?.id, "正方模板-2");
   assert.notEqual(bundles[0]?.groupId, bundles[1]?.groupId);
 });

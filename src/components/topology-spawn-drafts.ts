@@ -41,13 +41,55 @@ function getFallbackNodeRecords(topology: TopologyRecord): TopologyNodeRecord[] 
 }
 
 export function getTopologyDisplayNodeIds(
-  topology: Pick<TopologyRecord, "nodes" | "nodeRecords">,
-  defaultNodeIds: string[],
+  topology: Pick<TopologyRecord, "nodes" | "nodeRecords" | "spawnRules">,
+  candidateNodeIds: string[],
 ): string[] {
   if (topology.nodeRecords && topology.nodeRecords.length > 0) {
-    return topology.nodeRecords.map((node) => node.id);
+    const visibleNodeIds = new Set(
+      topology.nodeRecords
+        .filter((node) => node.kind !== "spawn")
+        .map((node) => node.id),
+    );
+
+    const orderedVisibleNodeIds = topology.nodes.length > 0
+      ? topology.nodes.filter((nodeId) => visibleNodeIds.has(nodeId))
+      : topology.nodeRecords
+        .map((node) => node.id)
+        .filter((nodeId) => visibleNodeIds.has(nodeId));
+
+    const spawnAgentTemplateNames = new Set(
+      topology.spawnRules?.flatMap((rule) => rule.spawnedAgents.map((agent) => agent.templateName)) ?? [],
+    );
+    if (spawnAgentTemplateNames.size === 0) {
+      return orderedVisibleNodeIds;
+    }
+
+    const staticNodeIds = new Set(orderedVisibleNodeIds);
+    const runtimeNodeIdsByTemplate = new Map<string, string[]>();
+    const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const resolveRuntimeNodeIndex = (templateName: string, runtimeNodeId: string) => {
+      const match = new RegExp(`^${escapeRegExp(templateName)}-(\\d+)$`).exec(runtimeNodeId);
+      return match ? Number.parseInt(match[1] ?? "0", 10) : Number.MAX_SAFE_INTEGER;
+    };
+
+    for (const templateName of spawnAgentTemplateNames) {
+      const runtimeNodeIds = candidateNodeIds
+        .filter((nodeId) => !staticNodeIds.has(nodeId))
+        .filter((nodeId) => new RegExp(`^${escapeRegExp(templateName)}-(\\d+)$`).test(nodeId))
+        .sort((left, right) =>
+          resolveRuntimeNodeIndex(templateName, left) - resolveRuntimeNodeIndex(templateName, right));
+      if (runtimeNodeIds.length > 0) {
+        runtimeNodeIdsByTemplate.set(templateName, runtimeNodeIds);
+      }
+    }
+
+    if (topology.nodes.length > 0) {
+      return orderedVisibleNodeIds.flatMap((nodeId) => runtimeNodeIdsByTemplate.get(nodeId) ?? [nodeId]);
+    }
+
+    return orderedVisibleNodeIds.flatMap((nodeId) => runtimeNodeIdsByTemplate.get(nodeId) ?? [nodeId]);
   }
-  return topology.nodes.length > 0 ? topology.nodes : defaultNodeIds;
+  return topology.nodes.length > 0 ? topology.nodes : candidateNodeIds;
 }
 
 export function upsertDebateSpawnDraft(

@@ -4,11 +4,7 @@ import type { GraphTaskState } from "./gating-state";
 
 export function buildEffectiveTopology(state: GraphTaskState): TopologyRecord {
   const runtimeNodeIds = state.runtimeNodes.map((node) => node.id);
-  const declaredNodeIds = [
-    ...state.topology.nodes,
-    ...(state.topology.nodeRecords?.map((node) => node.id) ?? []),
-  ].filter((name, index, array) => array.indexOf(name) === index);
-  const staticNodeIds = declaredNodeIds.filter((name) => !runtimeNodeIds.includes(name));
+  const staticNodeIds = state.topology.nodes.filter((name) => !runtimeNodeIds.includes(name));
   return {
     ...state.topology,
     nodes: [...staticNodeIds, ...runtimeNodeIds],
@@ -20,8 +16,9 @@ export function buildEffectiveTopology(state: GraphTaskState): TopologyRecord {
       ...(state.topology.nodeRecords?.map((node) => ({ ...node })) ?? []),
       ...state.runtimeNodes.map((node) => ({
         id: node.id,
-        kind: "agent" as const,
+        kind: node.kind,
         templateName: node.templateName,
+        spawnRuleId: node.spawnRuleId,
       })),
     ],
   };
@@ -36,11 +33,11 @@ export function ensureRuntimeAgentStatuses(state: GraphTaskState): void {
 }
 
 export function isSpawnNode(state: GraphTaskState, nodeId: string): boolean {
-  return state.topology.nodeRecords?.some((node) => node.id === nodeId && node.kind === "spawn") ?? false;
+  return buildEffectiveTopology(state).nodeRecords?.some((node) => node.id === nodeId && node.kind === "spawn") ?? false;
 }
 
 export function getSpawnRuleIdForNode(state: GraphTaskState, nodeId: string): string | null {
-  return state.topology.nodeRecords?.find((node) => node.id === nodeId && node.kind === "spawn")?.spawnRuleId ?? null;
+  return buildEffectiveTopology(state).nodeRecords?.find((node) => node.id === nodeId && node.kind === "spawn")?.spawnRuleId ?? null;
 }
 
 export function getSpawnRuleEntryRuntimeNodeIds(state: GraphTaskState, groupId: string, spawnRuleId: string): string[] {
@@ -55,6 +52,10 @@ export function getSpawnRuleEntryRuntimeNodeIds(state: GraphTaskState, groupId: 
 
 export function getRuntimeTemplateName(state: GraphTaskState, runtimeAgentId: string): string | null {
   return state.runtimeNodes.find((node) => node.id === runtimeAgentId)?.templateName ?? null;
+}
+
+export function getRuntimeNode(state: GraphTaskState, runtimeAgentId: string) {
+  return state.runtimeNodes.find((node) => node.id === runtimeAgentId) ?? null;
 }
 
 export function getNextSpawnSequence(state: GraphTaskState, spawnRuleId: string): number {

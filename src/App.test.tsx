@@ -106,6 +106,13 @@ test("App 改走浏览器 fetch 与 EventSource，而不是旧的桌面桥接 AP
   assert.doesNotMatch(APP_SOURCE, new RegExp(LEGACY_BRIDGE_NAME.replace(".", "\\.")));
 });
 
+test("App 会按 taskId 过滤 runtime-updated，而不是按旧 session 集合忽略 spawn 新实例", () => {
+  assert.match(APP_SOURCE, /shouldRefreshForRuntimeEvent/);
+  assert.match(APP_SOURCE, /currentTaskId: currentUiSnapshot\.task\.task\.id/);
+  assert.doesNotMatch(APP_SOURCE, /sessionIds = new Set/);
+  assert.doesNotMatch(APP_SOURCE, /!sessionIds\.has\(payload\.sessionId\)/);
+});
+
 test("App 的 ui snapshot 刷新链路会先经过最新请求门禁，不能把任意返回结果直接写回 state", () => {
   assert.match(APP_SOURCE, /decideUiSnapshotRefreshAcceptance/);
   assert.match(APP_SOURCE, /latestAcceptedUiSnapshotRequestIdRef/);

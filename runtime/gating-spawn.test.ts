@@ -62,6 +62,6 @@ test("spawnRuntimeAgentsForItems 会把 finding 批量实例化进 GraphTaskStat
   assert.equal(state.spawnBundles.length, 2);
   assert.equal(state.runtimeNodes.length, 6);
   assert.equal(state.runtimeEdges.length, 10);
-  assert.equal(state.agentStatusesByName["pro#finding-debate:finding-001"], "idle");
-  assert.equal(state.agentStatusesByName["summary#finding-debate:finding-002"], "idle");
+  assert.equal(state.agentStatusesByName["正方模板-1"], "idle");
+  assert.equal(state.agentStatusesByName["Summary模板-2"], "idle");
 });

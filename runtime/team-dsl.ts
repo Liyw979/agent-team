@@ -10,43 +10,7 @@ import {
   type SpawnRule,
   usesOpenCodeBuiltinPrompt,
 } from "@shared/types";
-
-type DownstreamMode = TopologyEdgeTrigger | "spawn";
-type DownstreamMap = Record<string, Record<string, DownstreamMode>>;
-
-type SpawnAgentInput =
-  | string
-  | {
-      role: string;
-      templateName: string;
-    };
-
-type SpawnLinkInput =
-  | readonly [string, string, TopologyEdgeTrigger]
-  | {
-      sourceRole: string;
-      targetRole: string;
-      triggerOn: TopologyEdgeTrigger;
-    };
-
-interface SpawnTemplateInput {
-  name?: string;
-  itemKey?: string;
-  entryRole?: string;
-  agents?: SpawnAgentInput[];
-  links?: SpawnLinkInput[];
-  reportTo?: string;
-}
-
-interface CreateTopologyDslInput {
-  nodes?: string[];
-  downstream: DownstreamMap;
-  spawn?: Record<string, SpawnTemplateInput>;
-  langgraph?: {
-    start?: string | string[];
-    end?: string | string[] | null;
-  };
-}
+import { z } from "zod";
 
 export interface TeamDslAgentRecord {
   name: string;
@@ -55,10 +19,30 @@ export interface TeamDslAgentRecord {
   writable?: boolean;
 }
 
-export interface TeamDslDefinition {
-  agents: TeamDslAgentRecord[];
-  topology: CreateTopologyDslInput;
+interface GraphDslAgentNode {
+  type: "agent";
+  name: string;
+  prompt?: string;
+  fromTemplate?: string;
+  writable?: boolean;
 }
+
+interface GraphDslSpawnNode {
+  type: "spawn";
+  name: string;
+  itemsFrom?: string;
+  graph: GraphDslGraph;
+}
+
+type GraphDslNode = GraphDslAgentNode | GraphDslSpawnNode;
+
+export interface GraphDslGraph {
+  entry: string;
+  nodes: GraphDslNode[];
+  links: Array<readonly [string, string, TopologyEdgeTrigger]>;
+}
+
+export type TeamDslDefinition = GraphDslGraph;
 
 export interface CompiledTeamDslAgent {
   name: string;
@@ -71,6 +55,39 @@ export interface CompiledTeamDsl {
   agents: CompiledTeamDslAgent[];
   topology: TopologyRecord;
 }
+
+const GraphDslLinkSchema = z.tuple([
+  z.string(),
+  z.string(),
+  z.enum(["association", "approved", "needs_revision"]),
+]);
+
+const GraphDslAgentNodeSchema: z.ZodType<GraphDslAgentNode> = z.object({
+  type: z.literal("agent"),
+  name: z.string(),
+  prompt: z.string().optional(),
+  fromTemplate: z.string().optional(),
+  writable: z.boolean().optional(),
+});
+
+const GraphDslGraphSchema: z.ZodType<GraphDslGraph> = z.lazy(() =>
+  z.object({
+    entry: z.string(),
+    nodes: z.array(GraphDslNodeSchema),
+    links: z.array(GraphDslLinkSchema),
+  }),
+);
+
+const GraphDslSpawnNodeSchema: z.ZodType<GraphDslSpawnNode> = z.object({
+  type: z.literal("spawn"),
+  name: z.string(),
+  itemsFrom: z.string().optional(),
+  graph: GraphDslGraphSchema,
+});
+
+const GraphDslNodeSchema: z.ZodType<GraphDslNode> = z.lazy(() =>
+  z.discriminatedUnion("type", [GraphDslAgentNodeSchema, GraphDslSpawnNodeSchema]),
+);
 
 function normalizeComparableAgents(agents: Array<{
   name: string;
@@ -101,9 +118,9 @@ function normalizeComparableTopology(topology: TopologyRecord): TopologyRecord {
           : {}),
       }))
       .sort((left, right) => {
-      const leftKey = `${left.source}__${left.target}__${left.triggerOn}__${left.maxRevisionRounds ?? ""}`;
-      const rightKey = `${right.source}__${right.target}__${right.triggerOn}__${right.maxRevisionRounds ?? ""}`;
-      return leftKey.localeCompare(rightKey);
+        const leftKey = `${left.source}__${left.target}__${left.triggerOn}__${left.maxRevisionRounds ?? ""}`;
+        const rightKey = `${right.source}__${right.target}__${right.triggerOn}__${right.maxRevisionRounds ?? ""}`;
+        return leftKey.localeCompare(rightKey);
       }),
     langgraph: topology.langgraph
       ? normalizeComparableLangGraph(topology.langgraph)
@@ -158,198 +175,6 @@ export function matchesAppliedTeamDslTopology(
   return JSON.stringify(comparableCurrentTopology) === JSON.stringify(comparableCompiledTopology);
 }
 
-function pushUnique(values: string[], value: string): void {
-  if (!values.includes(value)) {
-    values.push(value);
-  }
-}
-
-function collectNodes(input: CreateTopologyDslInput): string[] {
-  const nodes = [...(input.nodes ?? [])];
-  const spawn = input.spawn ?? {};
-
-  for (const [source, targets] of Object.entries(input.downstream)) {
-    pushUnique(nodes, source);
-    for (const target of Object.keys(targets)) {
-      pushUnique(nodes, target);
-    }
-  }
-
-  for (const [target, config] of Object.entries(spawn)) {
-    pushUnique(nodes, target);
-    if (config.reportTo) {
-      pushUnique(nodes, config.reportTo);
-    }
-    for (const agent of config.agents ?? []) {
-      pushUnique(nodes, typeof agent === "string" ? agent : agent.templateName);
-    }
-  }
-
-  return nodes;
-}
-
-function buildEdges(input: CreateTopologyDslInput): TopologyEdge[] {
-  const edges: TopologyEdge[] = [];
-
-  for (const [source, targets] of Object.entries(input.downstream)) {
-    for (const [target, mode] of Object.entries(targets)) {
-      edges.push({
-        source,
-        target,
-        triggerOn: mode === "spawn" ? "association" : mode,
-      });
-    }
-  }
-
-  return edges;
-}
-
-function normalizeBoundaryTargets(value: string | string[] | null | undefined): string[] | null {
-  if (value === null) {
-    return null;
-  }
-  if (Array.isArray(value)) {
-    return value;
-  }
-  return typeof value === "string" ? [value] : undefined;
-}
-
-function buildNodeRecords(
-  nodes: string[],
-  input: CreateTopologyDslInput,
-  compiledAgents?: CompiledTeamDslAgent[],
-): TopologyNodeRecord[] {
-  const spawnTargets = new Set<string>();
-  const compiledAgentByName = new Map((compiledAgents ?? []).map((agent) => [agent.name, agent]));
-
-  for (const targets of Object.values(input.downstream)) {
-    for (const [target, mode] of Object.entries(targets)) {
-      if (mode === "spawn") {
-        spawnTargets.add(target);
-      }
-    }
-  }
-
-  return nodes.map((node) => {
-    if (!spawnTargets.has(node)) {
-      const compiledAgent = compiledAgentByName.get(node);
-      return {
-        id: node,
-        kind: "agent" as const,
-        templateName: node,
-        ...(compiledAgent
-          ? {
-              ...(compiledAgent.prompt !== null
-                ? {
-                    prompt: compiledAgent.prompt,
-                  }
-                : {}),
-              ...(compiledAgent.isWritable
-                ? {
-                    writable: true,
-                  }
-                : {}),
-            }
-          : {}),
-      };
-    }
-
-    return {
-      id: node,
-      kind: "spawn" as const,
-      templateName: node,
-      spawnEnabled: true,
-      spawnRuleId: `spawn-rule:${node}`,
-    };
-  });
-}
-
-function findSpawnSource(downstream: DownstreamMap, targetNodeId: string): string {
-  const matches: string[] = [];
-
-  for (const [source, targets] of Object.entries(downstream)) {
-    if (targets[targetNodeId] === "spawn") {
-      matches.push(source);
-    }
-  }
-
-  if (matches.length !== 1) {
-    throw new Error(`DSL 要求 spawn 节点 ${targetNodeId} 只能有且仅有一个上游来源。`);
-  }
-
-  return matches[0]!;
-}
-
-function normalizeSpawnedAgents(
-  targetNodeId: string,
-  config: SpawnTemplateInput | undefined,
-): SpawnRule["spawnedAgents"] {
-  const entryRole = config?.entryRole ?? "entry";
-  const rawAgents = config?.agents ?? [targetNodeId];
-
-  return rawAgents.map((agent, index) => {
-    if (typeof agent !== "string") {
-      return {
-        role: agent.role,
-        templateName: agent.templateName,
-      };
-    }
-
-    return {
-      role: index === 0 ? entryRole : agent,
-      templateName: agent,
-    };
-  });
-}
-
-function normalizeSpawnLinks(config: SpawnTemplateInput | undefined): SpawnRule["edges"] {
-  return (config?.links ?? []).map((link) => {
-    if (Array.isArray(link)) {
-      const [sourceRole, targetRole, triggerOn] = link;
-      return {
-        sourceRole,
-        targetRole,
-        triggerOn,
-      };
-    }
-
-    return {
-      sourceRole: link.sourceRole,
-      targetRole: link.targetRole,
-      triggerOn: link.triggerOn,
-    };
-  });
-}
-
-function buildSpawnRules(input: CreateTopologyDslInput): SpawnRule[] {
-  const spawnTargets: string[] = [];
-
-  for (const targets of Object.values(input.downstream)) {
-    for (const [target, mode] of Object.entries(targets)) {
-      if (mode === "spawn") {
-        spawnTargets.push(target);
-      }
-    }
-  }
-
-  return spawnTargets.map((target) => {
-    const config = input.spawn?.[target];
-    const sourceTemplateName = findSpawnSource(input.downstream, target);
-
-    return {
-      id: `spawn-rule:${target}`,
-      name: config?.name ?? target,
-      sourceTemplateName,
-      itemKey: config?.itemKey ?? "spawn_items",
-      entryRole: config?.entryRole ?? "entry",
-      spawnedAgents: normalizeSpawnedAgents(target, config),
-      edges: normalizeSpawnLinks(config),
-      exitWhen: "one_side_agrees",
-      reportToTemplateName: config?.reportTo ?? sourceTemplateName,
-    };
-  });
-}
-
 function isBuiltinTemplateName(name: string): boolean {
   return usesOpenCodeBuiltinPrompt(name);
 }
@@ -393,17 +218,21 @@ function assertTopologyAgentsDeclared(
   compiledAgents: CompiledTeamDslAgent[],
   topology: TopologyRecord,
 ): void {
-  const known = new Set(compiledAgents.map((agent) => agent.name));
+  const known = new Set([
+    ...compiledAgents.map((agent) => agent.name),
+    ...(topology.nodeRecords?.filter((node) => node.kind === "spawn").map((node) => node.id) ?? []),
+  ]);
   const allNodes = new Set<string>([
     ...topology.nodes,
     ...(topology.langgraph?.start.targets ?? []),
     ...(topology.langgraph?.end?.sources ?? []),
     ...(topology.nodeRecords?.map((node) => node.id) ?? []),
     ...(topology.spawnRules?.flatMap((rule) => [
+      rule.spawnNodeName,
       rule.sourceTemplateName,
       rule.reportToTemplateName,
       ...rule.spawnedAgents.map((agent) => agent.templateName),
-    ]) ?? []),
+    ].filter((value): value is string => typeof value === "string" && value.length > 0)) ?? []),
   ]);
 
   for (const nodeName of allNodes) {
@@ -413,43 +242,216 @@ function assertTopologyAgentsDeclared(
   }
 }
 
-export function createTopology(input: CreateTopologyDslInput): TopologyRecord {
-  const nodes = collectNodes(input);
-  const edges = buildEdges(input);
+function formatZodIssuePath(path: (string | number)[]): string {
+  if (path.length === 0) {
+    return "团队拓扑 DSL";
+  }
+  return path.reduce<string>((acc, segment) => {
+    if (typeof segment === "number") {
+      return `${acc}[${segment}]`;
+    }
+    return acc ? `${acc}.${segment}` : segment;
+  }, "");
+}
+
+function translateZodExpectedType(expected: string): string {
+  switch (expected) {
+    case "string":
+      return "字符串";
+    case "array":
+      return "数组";
+    case "object":
+      return "对象";
+    case "boolean":
+      return "布尔值";
+    default:
+      return expected;
+  }
+}
+
+function isRootGraphShapeIssue(issue: z.ZodIssue): boolean {
+  if (issue.path.length === 0) {
+    return true;
+  }
+  if (issue.path.length !== 1) {
+    return false;
+  }
+  const [head] = issue.path;
+  return head === "entry" || head === "nodes" || head === "links";
+}
+
+function formatGraphDslParseError(error: z.ZodError): string {
+  if (error.issues.some((issue) => isRootGraphShapeIssue(issue))) {
+    return "团队拓扑 JSON 只支持递归式 entry + nodes + links DSL。";
+  }
+
+  const issue = error.issues[0];
+  const path = formatZodIssuePath(issue.path);
+  if (issue.code === z.ZodIssueCode.invalid_union_discriminator && issue.path.at(-1) === "type") {
+    return `${path} 是节点判别字段，只允许 agent 或 spawn。`;
+  }
+  if (issue.code === z.ZodIssueCode.invalid_enum_value) {
+    return `${path} 只允许 ${issue.options.join(" / ")}。`;
+  }
+  if (issue.code === z.ZodIssueCode.invalid_type) {
+    return `${path} 类型错误，期望 ${translateZodExpectedType(issue.expected)}。`;
+  }
+  return `${path} 校验失败：${issue.message}`;
+}
+
+function parseGraphDsl(input: unknown): GraphDslGraph {
+  const parsed = GraphDslGraphSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new Error(formatGraphDslParseError(parsed.error));
+  }
+  return parsed.data;
+}
+
+function resolveSpawnReportTo(
+  graph: GraphDslGraph,
+  spawnNodeName: string,
+): { target: string; triggerOn: TopologyEdgeTrigger } | undefined {
+  const outgoingLinks = graph.links.filter(([source]) => source === spawnNodeName);
+  return outgoingLinks.length === 1
+    ? {
+        target: outgoingLinks[0]![1],
+        triggerOn: outgoingLinks[0]![2],
+      }
+    : undefined;
+}
+
+function collectGraphDslNodeDefinitions(
+  graph: GraphDslGraph,
+  context: {
+    agentDefinitions: Map<string, TeamDslAgentRecord>;
+    nodeRecords: Map<string, TopologyNodeRecord>;
+    spawnRules: Map<string, SpawnRule>;
+  },
+): void {
+  const localNames = new Set<string>();
+  for (const node of graph.nodes) {
+    if (localNames.has(node.name)) {
+      throw new Error(`同一层 graph 中存在重复节点名：${node.name}`);
+    }
+    localNames.add(node.name);
+  }
+  if (!localNames.has(graph.entry)) {
+    throw new Error(`graph.entry 指向了不存在的节点：${graph.entry}`);
+  }
+  for (const [source, target] of graph.links) {
+    if (!localNames.has(source) || !localNames.has(target)) {
+      throw new Error(`graph.links 引用了不存在的节点：${source} -> ${target}`);
+    }
+  }
+
+  for (const node of graph.nodes) {
+    if (context.nodeRecords.has(node.name)) {
+      throw new Error(`DSL 节点名必须全局唯一：${node.name}`);
+    }
+
+    if (node.type === "agent") {
+      context.agentDefinitions.set(node.name, {
+        name: node.name,
+        prompt: node.prompt,
+        fromTemplate: node.fromTemplate,
+        writable: node.writable,
+      });
+      context.nodeRecords.set(node.name, {
+        id: node.name,
+        kind: "agent",
+        templateName: node.name,
+      });
+      continue;
+    }
+
+    const spawnRuleId = `spawn-rule:${node.name}`;
+    const reportTarget = resolveSpawnReportTo(graph, node.name);
+    context.nodeRecords.set(node.name, {
+      id: node.name,
+      kind: "spawn",
+      templateName: node.name,
+      spawnEnabled: true,
+      spawnRuleId,
+    });
+    context.spawnRules.set(spawnRuleId, {
+      id: spawnRuleId,
+      name: node.name,
+      spawnNodeName: node.name,
+      itemsFrom: node.itemsFrom?.trim() || "items",
+      entryRole: node.graph.entry,
+      spawnedAgents: node.graph.nodes.map((childNode) => ({
+        role: childNode.name,
+        templateName: childNode.name,
+      })),
+      edges: node.graph.links.map(([sourceRole, targetRole, triggerOn]) => ({
+        sourceRole,
+        targetRole,
+        triggerOn,
+      })),
+      exitWhen: "all_completed",
+      reportToTemplateName: reportTarget?.target,
+      reportToTriggerOn: reportTarget?.triggerOn,
+    });
+    collectGraphDslNodeDefinitions(node.graph, context);
+  }
+}
+
+function compileGraphDsl(input: GraphDslGraph): CompiledTeamDsl {
+  const agentDefinitions = new Map<string, TeamDslAgentRecord>();
+  const nodeRecords = new Map<string, TopologyNodeRecord>();
+  const spawnRules = new Map<string, SpawnRule>();
+  collectGraphDslNodeDefinitions(input, {
+    agentDefinitions,
+    nodeRecords,
+    spawnRules,
+  });
+
+  const compiledAgents = normalizeCompiledWritableAgents(
+    [...agentDefinitions.values()].map((agent) => compileAgentDefinition(agent)),
+  );
+  const compiledAgentsByName = new Map(compiledAgents.map((agent) => [agent.name, agent]));
+  const compiledNodeRecords = [...nodeRecords.values()].map((node) => {
+    if (node.kind !== "agent") {
+      return { ...node };
+    }
+    const compiledAgent = compiledAgentsByName.get(node.id);
+    return {
+      ...node,
+      ...(compiledAgent?.prompt !== null ? { prompt: compiledAgent?.prompt ?? undefined } : {}),
+      ...(compiledAgent?.isWritable ? { writable: true } : {}),
+    };
+  });
+
+  const topology: TopologyRecord = {
+    nodes: input.nodes.map((node) => node.name),
+    edges: input.links.map(([source, target, triggerOn]) => ({
+      source,
+      target,
+      triggerOn,
+    })),
+    langgraph: createTopologyLangGraphRecord({
+      nodes: input.nodes.map((node) => node.name),
+      edges: input.links.map(([source, target, triggerOn]) => ({
+        source,
+        target,
+        triggerOn,
+      })),
+      startTargets: [input.entry],
+      endSources: null,
+    }),
+    nodeRecords: compiledNodeRecords,
+    spawnRules: [...spawnRules.values()],
+  };
+  assertTopologyAgentsDeclared(compiledAgents, topology);
 
   return {
-    nodes,
-    edges,
-    langgraph: createTopologyLangGraphRecord({
-      nodes,
-      edges,
-      startTargets: normalizeBoundaryTargets(input.langgraph?.start) ?? undefined,
-      endSources: normalizeBoundaryTargets(input.langgraph?.end),
-    }),
-    nodeRecords: buildNodeRecords(nodes, input),
-    spawnRules: buildSpawnRules(input),
+    agents: compiledAgents,
+    topology,
   };
 }
 
-export function compileTeamDsl(input: TeamDslDefinition): CompiledTeamDsl {
-  const agents = normalizeCompiledWritableAgents(input.agents.map((agent) => compileAgentDefinition(agent)));
-  const createInput = {
-    ...input.topology,
-    nodes: [
-      ...(input.topology.nodes ?? []),
-      ...agents.map((agent) => agent.name),
-    ].filter((value, index, list) => list.indexOf(value) === index),
-  };
-  const topology = {
-    ...createTopology(createInput),
-    nodeRecords: buildNodeRecords(collectNodes(createInput), createInput, agents),
-  };
-  assertTopologyAgentsDeclared(agents, topology);
-
-  return {
-    agents,
-    topology,
-  };
+export function compileTeamDsl(input: unknown): CompiledTeamDsl {
+  return compileGraphDsl(parseGraphDsl(input));
 }
 
 export function matchesAppliedTeamDsl(

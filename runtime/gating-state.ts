@@ -2,6 +2,7 @@ import type {
   AgentStatus,
   RuntimeTopologyEdge,
   RuntimeTopologyNode,
+  SpawnActivationRecord,
   SpawnBundleInstantiation,
   TaskStatus,
   TopologyRecord,
@@ -59,9 +60,11 @@ export interface GraphTaskState {
   runtimeNodes: RuntimeTopologyNode[];
   runtimeEdges: RuntimeTopologyEdge[];
   spawnBundles: SpawnBundleInstantiation[];
+  spawnActivations: SpawnActivationRecord[];
   taskStatus: TaskStatus;
   waitingReason: string | null;
   agentStatusesByName: Record<string, AgentStatus>;
+  agentContextByName: Record<string, string>;
   completedEdges: string[];
   edgeTriggerVersion: Record<string, number>;
   lastSignatureByAgent: Record<string, string>;
@@ -88,9 +91,11 @@ export function createEmptyGraphTaskState(input: {
     runtimeNodes: [],
     runtimeEdges: [],
     spawnBundles: [],
+    spawnActivations: [],
     taskStatus: "pending",
     waitingReason: null,
     agentStatusesByName: Object.fromEntries(input.topology.nodes.map((name) => [name, "idle"])),
+    agentContextByName: {},
     completedEdges: [],
     edgeTriggerVersion: {},
     lastSignatureByAgent: {},
@@ -142,7 +147,13 @@ export function cloneGraphTaskState(state: GraphTaskState): GraphTaskState {
       nodes: bundle.nodes.map((node) => ({ ...node })),
       edges: bundle.edges.map((edge) => ({ ...edge })),
     })),
+    spawnActivations: state.spawnActivations.map((activation) => ({
+      ...activation,
+      bundleGroupIds: [...activation.bundleGroupIds],
+      completedBundleGroupIds: [...activation.completedBundleGroupIds],
+    })),
     agentStatusesByName: { ...state.agentStatusesByName },
+    agentContextByName: { ...state.agentContextByName },
     completedEdges: [...state.completedEdges],
     edgeTriggerVersion: { ...state.edgeTriggerVersion },
     lastSignatureByAgent: { ...state.lastSignatureByAgent },

@@ -1,6 +1,8 @@
 import {
   DEFAULT_NEEDS_REVISION_MAX_ROUNDS,
   getNeedsRevisionEdgeLoopLimit,
+  getSpawnRules,
+  resolveSpawnItemsField,
   type AgentStatus,
 } from "@shared/types";
 
@@ -30,6 +32,7 @@ import {
 } from "./runtime-topology-graph";
 import { compileTopology } from "./topology-compiler";
 import { spawnRuntimeAgentsForItems } from "./gating-spawn";
+import { extractSpawnItemsFromContent } from "./spawn-items";
 
 export interface GraphDispatchJob {
   agentName: string;
@@ -90,46 +93,33 @@ export function createUserDispatchDecision(
   },
 ): GraphRoutingDecision {
   if (isSpawnNode(state, input.targetAgentName)) {
-    const spawnRuleId = getSpawnRuleIdForNode(state, input.targetAgentName);
-    if (!spawnRuleId) {
+    try {
+      const entryTargets = materializeSpawnNodeTargets(state, input.targetAgentName, input.content, true);
+      if (entryTargets.length === 0) {
+        return {
+          type: "failed",
+          errorMessage: `${input.targetAgentName} 未生成可执行的入口实例`,
+        };
+      }
       return {
-        type: "failed",
-        errorMessage: `${input.targetAgentName} 缺少 spawnRuleId`,
-      };
-    }
-    const sequence = getNextSpawnSequence(state, spawnRuleId);
-    const item = {
-      id: buildSpawnItemId(spawnRuleId, sequence),
-      title: buildSpawnItemTitle(input.content, sequence),
-    };
-    spawnRuntimeAgentsForItems({
-      state,
-      spawnRuleId,
-      items: [item],
-    });
-    const bundles = state.spawnBundles.filter((bundle) => bundle.item.id === item.id);
-    const entryTargets = bundles.flatMap((bundle) =>
-      getSpawnRuleEntryRuntimeNodeIds(state, bundle.groupId, spawnRuleId),
-    );
-    if (entryTargets.length === 0) {
-      return {
-        type: "failed",
-        errorMessage: `${input.targetAgentName} 未生成可执行的入口实例`,
-      };
-    }
-    return {
-      type: "execute_batch",
-      batch: {
-        sourceAgentId: input.targetAgentName,
-        sourceContent: input.content,
-        triggerTargets: [...entryTargets],
-        jobs: entryTargets.map((agentName) => ({
-          agentName,
+        type: "execute_batch",
+        batch: {
           sourceAgentId: input.targetAgentName,
-          kind: "association" as const,
-        })),
-      },
-    };
+          sourceContent: input.content,
+          triggerTargets: [...entryTargets],
+          jobs: entryTargets.map((agentName) => ({
+            agentName,
+            sourceAgentId: input.targetAgentName,
+            kind: "association" as const,
+          })),
+        },
+      };
+    } catch (error) {
+      return {
+        type: "failed",
+        errorMessage: error instanceof Error ? error.message : `${input.targetAgentName} 展开失败`,
+      };
+    }
   }
 
   return {
@@ -159,6 +149,7 @@ export function applyAgentResultToGraphState(
   const nextState = cloneGraphTaskState(state);
   ensureRuntimeAgentStatuses(nextState);
   nextState.agentStatusesByName[result.agentName] = result.agentStatus;
+  nextState.agentContextByName[result.agentName] = result.agentContextContent;
   nextState.taskStatus = "running";
   nextState.waitingReason = null;
 
@@ -206,6 +197,7 @@ export function applyAgentResultToGraphState(
     ? triggerApprovedDownstream(nextState, result.agentName, result.agentContextContent)
     : triggerAssociationDownstream(nextState, result.agentName, result.agentContextContent);
   if (primaryDecision.type === "execute_batch") {
+    markCompletedSpawnActivationAsDispatchedIfReady(nextState, result.agentName);
     return { state: nextState, decision: primaryDecision };
   }
 
@@ -214,7 +206,17 @@ export function applyAgentResultToGraphState(
     batchContinuation,
   );
   if (continuationDecision.type === "execute_batch") {
+    markCompletedSpawnActivationAsDispatchedIfReady(nextState, result.agentName);
     return { state: nextState, decision: continuationDecision };
+  }
+
+  const spawnCompletionDecision = continueCompletedSpawnActivations(nextState, result.agentName);
+  if (spawnCompletionDecision.type === "execute_batch") {
+    return { state: nextState, decision: spawnCompletionDecision };
+  }
+  if (spawnCompletionDecision.type === "failed") {
+    nextState.taskStatus = "failed";
+    return { state: nextState, decision: spawnCompletionDecision };
   }
 
   if (shouldFinishGraphTask(nextState)) {
@@ -482,7 +484,15 @@ function triggerAssociationDownstream(
   if (pendingRepairTargets) {
     delete state.pendingAssociationRepairTargetsBySource[sourceAgentId];
   }
-  const nextPlan = materializeSpawnTargetsInPlan(state, plan, sourceContent);
+  let nextPlan: GatingDispatchPlan | null;
+  try {
+    nextPlan = materializeSpawnTargetsInPlan(state, plan, sourceContent);
+  } catch (error) {
+    return {
+      type: "failed",
+      errorMessage: error instanceof Error ? error.message : `${sourceAgentId} 下游 spawn 展开失败`,
+    };
+  }
   if (nextPlan) {
     return planToDecision(nextPlan, "association");
   }
@@ -502,7 +512,15 @@ function triggerApprovedDownstream(
     buildGatingAgentStates(state),
   );
   applySchedulerRuntimeToGraphState(state, runtime);
-  const nextPlan = materializeSpawnTargetsInPlan(state, plan, sourceContent);
+  let nextPlan: GatingDispatchPlan | null;
+  try {
+    nextPlan = materializeSpawnTargetsInPlan(state, plan, sourceContent);
+  } catch (error) {
+    return {
+      type: "failed",
+      errorMessage: error instanceof Error ? error.message : `${sourceAgentId} 下游 spawn 展开失败`,
+    };
+  }
   if (nextPlan) {
     return planToDecision(nextPlan, "approved");
   }
@@ -575,21 +593,8 @@ function materializeSpawnTargetsInPlan(
     }
 
     changed = true;
-    const sequence = getNextSpawnSequence(state, spawnRuleId);
-    const item = {
-      id: buildSpawnItemId(spawnRuleId, sequence),
-      title: buildSpawnItemTitle(sourceContent, sequence),
-    };
-    spawnRuntimeAgentsForItems({
-      state,
-      spawnRuleId,
-      items: [item],
-    });
-    const bundle = state.spawnBundles.find((candidate) => candidate.item.id === item.id);
-    if (!bundle) {
-      continue;
-    }
-    const entryTargets = getSpawnRuleEntryRuntimeNodeIds(state, bundle.groupId, spawnRuleId);
+    const entryTargets = materializeSpawnNodeTargets(state, targetName, sourceContent, false);
+    replaceAssociationBatchTarget(state, plan.sourceAgentId, targetName, entryTargets);
     for (const entryTarget of entryTargets) {
       if (plan.readyTargets.includes(targetName)) {
         nextReadyTargets.push(entryTarget);
@@ -609,6 +614,231 @@ function materializeSpawnTargetsInPlan(
     readyTargets: nextReadyTargets,
     queuedTargets: nextQueuedTargets,
   };
+}
+
+function replaceAssociationBatchTarget(
+  state: GraphTaskState,
+  sourceAgentId: string,
+  targetName: string,
+  replacementTargets: string[],
+): void {
+  const batch = state.activeAssociationBatchBySource[sourceAgentId];
+  if (!batch || replacementTargets.length === 0) {
+    return;
+  }
+
+  const replaceTargets = (targets: string[]) => uniqueTargetNames(
+    targets.flatMap((currentTarget) => (
+      currentTarget === targetName ? replacementTargets : [currentTarget]
+    )),
+  );
+
+  batch.targets = replaceTargets(batch.targets);
+  batch.pendingTargets = replaceTargets(batch.pendingTargets);
+  batch.respondedTargets = batch.respondedTargets.filter((currentTarget) => currentTarget !== targetName);
+  batch.failedTargets = batch.failedTargets.filter((currentTarget) => currentTarget !== targetName);
+}
+
+function uniqueTargetNames(targets: string[]): string[] {
+  return [...new Set(targets)];
+}
+
+function buildSpawnActivationId(spawnRuleId: string, sequence: number): string {
+  return `activation:${buildSpawnItemId(spawnRuleId, sequence)}`;
+}
+
+function buildSpawnActivationItemId(
+  spawnRuleId: string,
+  sequence: number,
+  index: number,
+  total: number,
+): string {
+  const base = buildSpawnItemId(spawnRuleId, sequence);
+  return total <= 1 ? base : `${base}-${index + 1}`;
+}
+
+function materializeSpawnNodeTargets(
+  state: GraphTaskState,
+  targetName: string,
+  sourceContent: string,
+  allowSingleItemFallback: boolean,
+): string[] {
+  const spawnRuleId = getSpawnRuleIdForNode(state, targetName);
+  if (!spawnRuleId) {
+    throw new Error(`${targetName} 缺少 spawnRuleId`);
+  }
+  const rule = getSpawnRules(state.topology).find((candidate) => candidate.id === spawnRuleId);
+  if (!rule) {
+    throw new Error(`spawn rule 不存在：${spawnRuleId}`);
+  }
+  const allowRawFallback = allowSingleItemFallback || Boolean(rule.reportToTemplateName);
+
+  const sequence = getNextSpawnSequence(state, spawnRuleId);
+  const parsed = tryExtractSpawnItemsFromContent(
+    sourceContent,
+    resolveSpawnItemsField(rule),
+    spawnRuleId,
+    sequence,
+    allowRawFallback,
+  );
+  const activationId = buildSpawnActivationId(spawnRuleId, sequence);
+  const items = parsed.items.map((item, index, itemsList) => ({
+    ...item,
+    id: buildSpawnActivationItemId(spawnRuleId, sequence, index, itemsList.length),
+  }));
+
+  const bundles = spawnRuntimeAgentsForItems({
+    state,
+    spawnRuleId,
+    activationId,
+    items,
+  });
+  state.spawnActivations.push({
+    id: activationId,
+    spawnNodeName: targetName,
+    spawnRuleId,
+    sourceContent,
+    bundleGroupIds: bundles.map((bundle) => bundle.groupId),
+    completedBundleGroupIds: [],
+    dispatched: false,
+  });
+
+  return bundles.flatMap((bundle) => getSpawnRuleEntryRuntimeNodeIds(state, bundle.groupId, spawnRuleId));
+}
+
+function tryExtractSpawnItemsFromContent(
+  sourceContent: string,
+  itemsFrom: string,
+  spawnRuleId: string,
+  sequence: number,
+  allowSingleItemFallback: boolean,
+) {
+  try {
+    return extractSpawnItemsFromContent(sourceContent, itemsFrom);
+  } catch (error) {
+    if (!allowSingleItemFallback) {
+      throw error;
+    }
+    return {
+      items: [
+        {
+          id: buildSpawnItemId(spawnRuleId, sequence),
+          title: buildSpawnItemTitle(sourceContent, sequence),
+        },
+      ],
+    };
+  }
+}
+
+function continueCompletedSpawnActivations(
+  state: GraphTaskState,
+  completedAgentName: string,
+): GraphRoutingDecision {
+  const bundle = state.spawnBundles.find((candidate) =>
+    candidate.nodes.some((node) => node.id === completedAgentName),
+  );
+  if (!bundle) {
+    return {
+      type: "waiting",
+      waitingReason: "no_completed_spawn_activation",
+    };
+  }
+
+  const bundleCompleted = bundle.nodes.every((node) => state.agentStatusesByName[node.id] === "completed");
+  if (!bundleCompleted) {
+    return {
+      type: "waiting",
+      waitingReason: "spawn_bundle_pending",
+    };
+  }
+
+  const activation = state.spawnActivations.find((candidate) => candidate.id === bundle.activationId);
+  if (!activation) {
+    return {
+      type: "waiting",
+      waitingReason: "spawn_activation_missing",
+    };
+  }
+
+  if (!activation.completedBundleGroupIds.includes(bundle.groupId)) {
+    activation.completedBundleGroupIds.push(bundle.groupId);
+  }
+
+  if (activation.dispatched || activation.completedBundleGroupIds.length < activation.bundleGroupIds.length) {
+    return {
+      type: "waiting",
+      waitingReason: "spawn_activation_pending",
+    };
+  }
+
+  activation.dispatched = true;
+  const aggregatedContent = buildSpawnActivationContent(state, activation.id, activation.sourceContent);
+  state.agentStatusesByName[activation.spawnNodeName] = "completed";
+  state.agentContextByName[activation.spawnNodeName] = aggregatedContent;
+  return triggerAssociationDownstream(state, activation.spawnNodeName, aggregatedContent);
+}
+
+function buildSpawnActivationContent(
+  state: GraphTaskState,
+  activationId: string,
+  fallbackContent: string,
+): string {
+  const bundles = state.spawnBundles.filter((bundle) => bundle.activationId === activationId);
+  const sections = bundles.map((bundle) => {
+    const terminalNodeIds = findBundleTerminalNodeIds(bundle);
+    const outputs = terminalNodeIds
+      .map((nodeId) => state.agentContextByName[nodeId]?.trim() ?? "")
+      .filter(Boolean);
+    const body = outputs.join("\n\n").trim();
+    return [`[Item] ${bundle.item.title}`, body].filter(Boolean).join("\n");
+  }).filter(Boolean);
+
+  return sections.join("\n\n").trim() || fallbackContent;
+}
+
+function markCompletedSpawnActivationAsDispatchedIfReady(
+  state: GraphTaskState,
+  completedAgentName: string,
+): void {
+  const bundle = state.spawnBundles.find((candidate) =>
+    candidate.nodes.some((node) => node.id === completedAgentName),
+  );
+  if (!bundle) {
+    return;
+  }
+
+  const bundleCompleted = bundle.nodes.every((node) => state.agentStatusesByName[node.id] === "completed");
+  if (!bundleCompleted) {
+    return;
+  }
+
+  const activation = state.spawnActivations.find((candidate) => candidate.id === bundle.activationId);
+  if (!activation) {
+    return;
+  }
+
+  if (!activation.completedBundleGroupIds.includes(bundle.groupId)) {
+    activation.completedBundleGroupIds.push(bundle.groupId);
+  }
+
+  if (activation.dispatched || activation.completedBundleGroupIds.length < activation.bundleGroupIds.length) {
+    return;
+  }
+
+  activation.dispatched = true;
+  state.agentStatusesByName[activation.spawnNodeName] = "completed";
+  state.agentContextByName[activation.spawnNodeName] = buildSpawnActivationContent(
+    state,
+    activation.id,
+    activation.sourceContent,
+  );
+}
+
+function findBundleTerminalNodeIds(bundle: GraphTaskState["spawnBundles"][number]): string[] {
+  const outgoing = new Set(bundle.edges.map((edge) => edge.source));
+  return bundle.nodes
+    .map((node) => node.id)
+    .filter((nodeId) => !outgoing.has(nodeId));
 }
 
 function buildGatingAgentStates(state: GraphTaskState): GatingAgentState[] {
@@ -638,7 +868,7 @@ function enforceNeedsRevisionLoopLimit(
   state.taskStatus = "failed";
   return {
     type: "failed",
-    errorMessage: `${sourceAgentId} -> ${targetAgentId} 连续回流已达到 ${maxRevisionRounds || DEFAULT_NEEDS_REVISION_MAX_ROUNDS} 轮上限，任务已终止以避免无限循环`,
+    errorMessage: `${sourceAgentId} -> ${targetAgentId} 已连续交流 ${maxRevisionRounds || DEFAULT_NEEDS_REVISION_MAX_ROUNDS} 次，任务已结束`,
   };
 }
 
@@ -721,6 +951,9 @@ function shouldFinishGraphTask(state: GraphTaskState): boolean {
     return false;
   }
   if (Object.keys(state.activeAssociationBatchBySource).length > 0) {
+    return false;
+  }
+  if (state.spawnActivations.some((activation) => !activation.dispatched)) {
     return false;
   }
   if (state.runningAgents.length > 0 || state.queuedAgents.length > 0) {
