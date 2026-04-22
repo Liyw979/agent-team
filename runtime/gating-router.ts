@@ -77,6 +77,11 @@ export interface GraphAgentResult {
   errorMessage?: string;
 }
 
+interface NeedsRevisionLoopLimitDecision {
+  errorMessage: string;
+  maxRevisionRounds: number;
+}
+
 export function createGraphTaskState(input: {
   taskId: string;
   projectId: string;
@@ -271,17 +276,22 @@ function handleNeedsRevision(
   }
 
   if (continuationAction === "trigger_repair_review" && continuation?.repairReviewerAgentId) {
-    const loopLimitDecision = enforceNeedsRevisionLoopLimit(
+    const repairTargetAgentId = resolveRepairTargetAgentId(
       state,
       result.agentName,
       continuation.sourceAgentId,
+    );
+    const loopLimitDecision = enforceNeedsRevisionLoopLimit(
+      state,
+      result.agentName,
+      repairTargetAgentId,
     );
     if (loopLimitDecision) {
       return continueAfterReviewerLoopLimit(
         state,
         result.agentName,
-        continuation.sourceAgentId,
-        loopLimitDecision.errorMessage,
+        repairTargetAgentId,
+        loopLimitDecision,
       );
     }
     const storedReview = state.pendingRevisionRequestsByAgent[continuation.repairReviewerAgentId];
@@ -291,7 +301,7 @@ function handleNeedsRevision(
         waitingReason: "missing_revision_request",
       };
     }
-    state.pendingAssociationRepairTargetsBySource[continuation.sourceAgentId] = [
+    state.pendingAssociationRepairTargetsBySource[repairTargetAgentId] = [
       continuation.repairReviewerAgentId,
     ];
     const revisionContent =
@@ -326,7 +336,7 @@ function handleNeedsRevision(
         state,
         result.agentName,
         fallbackTarget,
-        loopLimitDecision.errorMessage,
+        loopLimitDecision,
       );
     }
     const storedReview = state.pendingRevisionRequestsByAgent[result.agentName];
@@ -375,7 +385,7 @@ function continueAfterAssociationBatchResponse(
         state,
         continuation.repairReviewerAgentId,
         continuation.sourceAgentId,
-        loopLimitDecision.errorMessage,
+        loopLimitDecision,
       );
     }
     const storedReview = state.pendingRevisionRequestsByAgent[continuation.repairReviewerAgentId];
@@ -456,6 +466,19 @@ function triggerRevisionRequestDownstream(
       })),
     },
   };
+}
+
+function resolveRepairTargetAgentId(
+  state: GraphTaskState,
+  reviewerAgentId: string,
+  fallbackRepairTargetAgentId: string,
+): string {
+  const topologyIndex = compileTopology(buildEffectiveTopology(state));
+  const needsRevisionTargets = topologyIndex.needsRevisionTargetsBySource[reviewerAgentId] ?? [];
+  if (needsRevisionTargets.includes(fallbackRepairTargetAgentId)) {
+    return fallbackRepairTargetAgentId;
+  }
+  return needsRevisionTargets[0] ?? fallbackRepairTargetAgentId;
 }
 
 function triggerAssociationDownstream(
@@ -852,9 +875,9 @@ function enforceNeedsRevisionLoopLimit(
   state: GraphTaskState,
   sourceAgentId: string,
   targetAgentId: string,
-): GraphRoutingDecision | null {
+): NeedsRevisionLoopLimitDecision | null {
   const maxRevisionRounds = getNeedsRevisionEdgeLoopLimit(
-    state.topology,
+    buildEffectiveTopology(state),
     sourceAgentId,
     targetAgentId,
   );
@@ -865,10 +888,10 @@ function enforceNeedsRevisionLoopLimit(
     return null;
   }
 
-  state.taskStatus = "failed";
+  const normalizedMaxRevisionRounds = maxRevisionRounds || DEFAULT_NEEDS_REVISION_MAX_ROUNDS;
   return {
-    type: "failed",
-    errorMessage: `${sourceAgentId} -> ${targetAgentId} 已连续交流 ${maxRevisionRounds || DEFAULT_NEEDS_REVISION_MAX_ROUNDS} 次，任务已结束`,
+    errorMessage: `${sourceAgentId} -> ${targetAgentId} 已连续交流 ${normalizedMaxRevisionRounds} 次，任务已结束`,
+    maxRevisionRounds: normalizedMaxRevisionRounds,
   };
 }
 
@@ -888,8 +911,9 @@ function continueAfterReviewerLoopLimit(
   state: GraphTaskState,
   reviewerAgentId: string,
   repairTargetAgentId: string,
-  failureReason: string,
+  loopLimitDecision: NeedsRevisionLoopLimitDecision,
 ): GraphRoutingDecision {
+  const limitedReviewerRequest = state.pendingRevisionRequestsByAgent[reviewerAgentId];
   state.agentStatusesByName[reviewerAgentId] = "failed";
   delete state.pendingRevisionRequestsByAgent[reviewerAgentId];
 
@@ -898,32 +922,62 @@ function continueAfterReviewerLoopLimit(
     repairTargetAgentId,
     reviewerAgentId,
   );
-  if (!nextReviewerAgentId) {
-    state.taskStatus = "failed";
-    return {
-      type: "failed",
-      errorMessage: failureReason,
-    };
+  if (nextReviewerAgentId) {
+    const storedReview = state.pendingRevisionRequestsByAgent[nextReviewerAgentId];
+    if (!storedReview) {
+      state.taskStatus = "failed";
+      return {
+        type: "failed",
+        errorMessage: loopLimitDecision.errorMessage,
+      };
+    }
+
+    state.pendingAssociationRepairTargetsBySource[repairTargetAgentId] = [nextReviewerAgentId];
+    delete state.pendingRevisionRequestsByAgent[nextReviewerAgentId];
+    return triggerRevisionRequestDownstream(
+      state,
+      nextReviewerAgentId,
+      storedReview.opinion?.trim()
+      || storedReview.agentContextContent
+      || "请直接回应当前内容，给出你的判断、补充、澄清、反驳或修改方案。",
+    );
   }
 
-  const storedReview = state.pendingRevisionRequestsByAgent[nextReviewerAgentId];
-  if (!storedReview) {
-    state.taskStatus = "failed";
-    return {
-      type: "failed",
-      errorMessage: failureReason,
-    };
-  }
-
-  state.pendingAssociationRepairTargetsBySource[repairTargetAgentId] = [nextReviewerAgentId];
-  delete state.pendingRevisionRequestsByAgent[nextReviewerAgentId];
-  return triggerRevisionRequestDownstream(
+  const loopLimitEscalationDecision = triggerApprovedDownstream(
     state,
-    nextReviewerAgentId,
-    storedReview.opinion?.trim()
-    || storedReview.agentContextContent
-    || "请直接回应当前内容，给出你的判断、补充、澄清、反驳或修改方案。",
+    reviewerAgentId,
+    buildNeedsRevisionLoopLimitEscalationContent({
+      reviewerAgentId,
+      repairTargetAgentId,
+      reviewRequest: limitedReviewerRequest,
+      maxRevisionRounds: loopLimitDecision.maxRevisionRounds,
+    }),
   );
+  if (loopLimitEscalationDecision.type === "execute_batch") {
+    return loopLimitEscalationDecision;
+  }
+
+  state.taskStatus = "failed";
+  return {
+    type: "failed",
+    errorMessage: loopLimitDecision.errorMessage,
+  };
+}
+
+function buildNeedsRevisionLoopLimitEscalationContent(input: {
+  reviewerAgentId: string;
+  repairTargetAgentId: string;
+  reviewRequest: GraphRevisionRequest | undefined;
+  maxRevisionRounds: number;
+}): string {
+  const reviewerContent =
+    input.reviewRequest?.opinion?.trim()
+    || input.reviewRequest?.agentContextContent
+    || "当前 reviewer 未提供额外正文。";
+  return [
+    reviewerContent,
+    `${input.reviewerAgentId} -> ${input.repairTargetAgentId} 已连续交流 ${input.maxRevisionRounds} 次，已达到上限，请基于现有材料直接裁决`,
+  ].join("\n\n");
 }
 
 function findNextPendingRepairReviewer(

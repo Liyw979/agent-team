@@ -68,6 +68,21 @@ test("拓扑节点头部会在状态 icon 左侧补充 attach 按钮", () => {
   assert.match(TOPOLOGY_GRAPH_SOURCE, /headerActions\.map\(\(action\) => \{/);
 });
 
+test("拓扑节点状态徽标不能继续只看 taskAgent.status，避免 runtime 仍有实时活动时错误显示已完成", () => {
+  assert.doesNotMatch(
+    TOPOLOGY_GRAPH_SOURCE,
+    /getTopologyAgentStatusBadgePresentation\(\s*topology,\s*node\.id,\s*taskAgent\?\.status \?\? "idle",\s*\)/,
+  );
+  assert.match(
+    TOPOLOGY_GRAPH_SOURCE,
+    /const runtimeSnapshot = runtimeSnapshots\[node\.id\]/,
+  );
+  assert.match(
+    TOPOLOGY_GRAPH_SOURCE,
+    /getTopologyAgentStatusBadgePresentation\(\s*topology,\s*node\.id,\s*resolveTopologyNodeDisplayStatus\(/,
+  );
+});
+
 test("运行中状态 icon 必须显式围绕 SVG 自身中心旋转，避免 Windows 上按 viewBox 原点旋转", () => {
   assert.match(
     TOPOLOGY_GRAPH_SOURCE,

@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 
-import type { TopologyEdgeTrigger, TopologyRecord } from "@shared/types";
-
-const MAX_REVIEW_FAIL_LOOP_COUNT = 4;
+import {
+  DEFAULT_NEEDS_REVISION_MAX_ROUNDS,
+  type TopologyEdgeTrigger,
+  type TopologyRecord,
+} from "@shared/types";
 
 interface ParsedScriptLine {
   sender: string;
@@ -22,12 +24,14 @@ interface SourceState {
   defaultTargets: string[];
   currentRevision: number;
   reviewerPassRevision: Map<string, number>;
-  expectedNextTargets: string[] | null;
+  expectedNextAction: ExpectedNextAction | null;
 }
 
 interface BatchResponse {
   agent: string;
   outcome: "pass" | "fail";
+  loopLimitExceeded: boolean;
+  escalationDispatched: boolean;
 }
 
 interface ActiveBatch {
@@ -50,10 +54,37 @@ interface ParsedScenario {
   resolver: AgentRefResolver;
 }
 
+type ExpectedNextAction =
+  | {
+      kind: "repair";
+      targets: string[];
+      reviewerAgentId: string;
+      repairTargetAgentId: string;
+    }
+  | {
+      kind: "redispatch";
+      targets: string[];
+    };
+
 interface AssertSchedulerScriptOptions {
   topology: TopologyRecord;
   script: string[];
+  expectedDecisions?: SchedulerScriptDecision[];
 }
+
+type SchedulerScriptDecision =
+  | {
+      type: "execute_batch";
+      sourceAgentId: string | null;
+      targets: string[];
+    }
+  | {
+      type: "waiting";
+      waitingReason: string;
+    }
+  | {
+      type: "finished";
+    };
 
 interface DynamicSpawnAgentRef {
   key: string;
@@ -91,7 +122,14 @@ interface AgentRefResolver {
   isKnown(agentName: string): boolean;
   getAssociationTargets(agentName: string): string[];
   getTriggeredTargets(agentName: string, triggerOn: "review_fail" | "review_pass"): string[];
+  hasAnyOutgoingTargets(agentName: string): boolean;
   hasOutgoingTarget(sourceAgentName: string, targetAgentName: string): boolean;
+  getReviewFailLoopLimit(sourceAgentName: string, targetAgentName: string): number;
+  findNextPendingRepairReviewer(
+    repairTargetAgentId: string,
+    excludeReviewerAgentId: string,
+    pendingReviewerIds: Iterable<string>,
+  ): string | null;
   matchCanonicalTargets(
     sourceAgentName: string,
     actualTargets: string[],
@@ -104,6 +142,7 @@ export async function assertSchedulerScript(
   options: AssertSchedulerScriptOptions,
 ): Promise<void> {
   const parsed = parseScenario(options.topology, options.script);
+  const expectedDecisions = options.expectedDecisions ?? null;
   const sourceStates = new Map<string, SourceState>();
   const ensureSourceState = (agentName: string): SourceState => {
     const existing = sourceStates.get(agentName);
@@ -114,7 +153,7 @@ export async function assertSchedulerScript(
       defaultTargets: parsed.resolver.getAssociationTargets(agentName),
       currentRevision: 0,
       reviewerPassRevision: new Map(),
-      expectedNextTargets: null,
+      expectedNextAction: null,
     };
     sourceStates.set(agentName, created);
     return created;
@@ -124,6 +163,7 @@ export async function assertSchedulerScript(
   }
 
   const actualScript: string[] = [];
+  const actualDecisions: SchedulerScriptDecision[] = [];
   const replyIndexByAgent = new Map<string, number>();
   const activeBatches: ActiveBatch[] = [];
   const reviewFailLoopCountByEdge = new Map<string, number>();
@@ -133,6 +173,15 @@ export async function assertSchedulerScript(
     const expected = parsed.normalizedScript[actualScript.length - 1];
     assert.equal(line, expected, `第 ${actualScript.length} 条脚本不匹配`);
   };
+  const appendDecision = (decision: SchedulerScriptDecision) => {
+    actualDecisions.push(decision);
+    if (!expectedDecisions) {
+      return;
+    }
+    const expected = expectedDecisions[actualDecisions.length - 1];
+    assert.notEqual(expected, undefined, `第 ${actualDecisions.length} 个调度决策超出了 expectedDecisions`);
+    assert.deepEqual(decision, expected, `第 ${actualDecisions.length} 个调度决策不匹配`);
+  };
 
   const getNextReply = (agentName: string): ParsedReply => {
     const currentIndex = replyIndexByAgent.get(agentName) ?? 0;
@@ -141,6 +190,47 @@ export async function assertSchedulerScript(
     assert.notEqual(reply, undefined, `脚本里缺少 ${agentName} 第 ${currentIndex + 1} 轮回复`);
     replyIndexByAgent.set(agentName, currentIndex + 1);
     return reply;
+  };
+  const buildNextDecision = (lastResponder: string): SchedulerScriptDecision => {
+    if (activeBatches.length > 0) {
+      return {
+        type: "waiting",
+        waitingReason: "wait_pending_reviewers",
+      };
+    }
+
+    const nextExpectedSources = [...sourceStates.entries()]
+      .filter(([, state]) => state.expectedNextAction && state.expectedNextAction.targets.length > 0)
+      .map(([agentName]) => agentName);
+    if (nextExpectedSources.length > 0) {
+      assert.equal(nextExpectedSources.length, 1, "同一时刻只能有一个 Source 等待下一轮修复/剩余派发");
+      const nextSource = nextExpectedSources[0] ?? "";
+      const expectedAction = ensureSourceState(nextSource).expectedNextAction;
+      assert.notEqual(expectedAction, null, `${nextSource} 缺少 expectedNextAction`);
+      if (expectedAction?.kind === "repair") {
+        return {
+          type: "execute_batch",
+          sourceAgentId: expectedAction.reviewerAgentId,
+          targets: [expectedAction.repairTargetAgentId],
+        };
+      }
+      return {
+        type: "execute_batch",
+        sourceAgentId: nextSource,
+        targets: [...(expectedAction?.targets ?? [])],
+      };
+    }
+
+    if (!parsed.resolver.hasAnyOutgoingTargets(lastResponder)) {
+      return {
+        type: "finished",
+      };
+    }
+
+    return {
+      type: "waiting",
+      waitingReason: "no_runnable_agents",
+    };
   };
 
   const finalizeBatchIfPossible = () => {
@@ -152,9 +242,38 @@ export async function assertSchedulerScript(
 
       activeBatches.pop();
       const sourceState = ensureSourceState(current.source);
-      const firstFailed = current.responses.find((item) => item.outcome === "fail") ?? null;
+      const firstFailed = current.canonicalTargets
+        .map((canonicalTarget) =>
+          current.responses.find(
+            (item) =>
+              item.outcome === "fail"
+              && (current.canonicalTargetByActual.get(item.agent) ?? item.agent) === canonicalTarget,
+          ) ?? null)
+        .find((item) => item !== null) ?? null;
       if (firstFailed) {
-        sourceState.expectedNextTargets = [firstFailed.agent];
+        if (firstFailed.loopLimitExceeded) {
+          if (firstFailed.escalationDispatched) {
+            sourceState.expectedNextAction = null;
+            continue;
+          }
+          const escalationTargets = parsed.resolver.getTriggeredTargets(firstFailed.agent, "review_pass");
+          assert.ok(
+            escalationTargets.length > 0,
+            `${firstFailed.agent} -> ${current.source} 连续回流已超过 ${parsed.resolver.getReviewFailLoopLimit(firstFailed.agent, current.source)} 轮上限`,
+          );
+          ensureSourceState(firstFailed.agent).expectedNextAction = {
+            kind: "redispatch",
+            targets: escalationTargets,
+          };
+          sourceState.expectedNextAction = null;
+          continue;
+        }
+        sourceState.expectedNextAction = {
+          kind: "repair",
+          targets: [firstFailed.agent],
+          reviewerAgentId: firstFailed.agent,
+          repairTargetAgentId: current.source,
+        };
         continue;
       }
 
@@ -171,11 +290,16 @@ export async function assertSchedulerScript(
           (target) => sourceState.reviewerPassRevision.get(target) !== sourceState.currentRevision,
         );
         const staleTargets = [...trailingTargets, ...leadingStaleTargets];
-        sourceState.expectedNextTargets = staleTargets.length > 0 ? staleTargets : null;
+        sourceState.expectedNextAction = staleTargets.length > 0
+          ? {
+              kind: "redispatch",
+              targets: staleTargets,
+            }
+          : null;
         continue;
       }
 
-      sourceState.expectedNextTargets = null;
+      sourceState.expectedNextAction = null;
     }
   };
 
@@ -183,6 +307,7 @@ export async function assertSchedulerScript(
     const reply = getNextReply(agentName);
     const currentBatch = activeBatches[activeBatches.length - 1] ?? null;
     const normalizedReplyTargets = reply.targets.map((target) => parsed.resolver.resolve(target));
+    let nextDecision: SchedulerScriptDecision | null = null;
 
     if (currentBatch) {
       const responderIndex = currentBatch.remainingTargets.indexOf(agentName);
@@ -194,13 +319,33 @@ export async function assertSchedulerScript(
       currentBatch.remainingTargets.splice(responderIndex, 1);
     } else {
       const sourceState = ensureSourceState(agentName);
-      const expectedTargets = sourceState.expectedNextTargets;
+      const expectedAction = sourceState.expectedNextAction;
+      const expectedTargets = expectedAction?.targets ?? null;
       if (expectedTargets) {
-        assert.deepEqual(
-          normalizedReplyTargets,
-          expectedTargets,
-          `${agentName} 的 @ 目标与预期不一致`,
-        );
+        const expectedRepairTarget = expectedAction?.kind === "repair"
+          ? expectedAction.reviewerAgentId
+          : expectedTargets.length === 1 ? expectedTargets[0] ?? "" : "";
+        const reviewPassTargets = parsed.resolver.getTriggeredTargets(agentName, "review_pass");
+        const expectedEscalation = expectedRepairTarget
+          && reviewPassTargets.length > 0
+          && (reviewFailLoopCountByEdge.get(buildReviewFailLoopEdgeKey(agentName, expectedRepairTarget)) ?? 0)
+            >= parsed.resolver.getReviewFailLoopLimit(agentName, expectedRepairTarget)
+          && Boolean(
+            normalizedReplyTargets.length > 0
+            && parsed.resolver.matchCanonicalTargets(
+              agentName,
+              normalizedReplyTargets,
+              reviewPassTargets,
+              "review_pass",
+            ),
+          );
+        if (!expectedEscalation) {
+          assert.deepEqual(
+            normalizedReplyTargets,
+            expectedTargets,
+            `${agentName} 的 @ 目标与预期不一致`,
+          );
+        }
       } else if (normalizedReplyTargets.length > 0) {
         const directReviewFailTargets = parsed.resolver.getTriggeredTargets(agentName, "review_fail");
         const matchesAssociationTargets = parsed.resolver.matchCanonicalTargets(
@@ -227,9 +372,10 @@ export async function assertSchedulerScript(
 
     if (!currentBatch) {
       const sourceState = ensureSourceState(agentName);
-      sourceState.expectedNextTargets = null;
+      sourceState.expectedNextAction = null;
 
       if (normalizedReplyTargets.length === 0) {
+        appendDecision(buildNextDecision(agentName));
         return;
       }
 
@@ -245,7 +391,7 @@ export async function assertSchedulerScript(
       }
 
       const directReviewFailTargets = parsed.resolver.getTriggeredTargets(agentName, "review_fail");
-      const canonicalTargets = sourceState.expectedNextTargets
+      const canonicalTargets = sourceState.expectedNextAction?.targets
         ?? parsed.resolver.matchCanonicalTargets(
           agentName,
           normalizedReplyTargets,
@@ -272,36 +418,76 @@ export async function assertSchedulerScript(
         sourceRevision: sourceState.currentRevision,
         sourceHadBody: reply.body.length > 0,
       });
+      appendDecision({
+        type: "execute_batch",
+        sourceAgentId: agentName,
+        targets: [...normalizedReplyTargets],
+      });
       return;
     }
 
     const currentSource = currentBatch.source;
     const failTargets = parsed.resolver.getTriggeredTargets(agentName, "review_fail");
+    const reviewPassTargets = parsed.resolver.getTriggeredTargets(agentName, "review_pass");
+    const loopEdgeKey = buildReviewFailLoopEdgeKey(agentName, currentSource);
+    const currentLoopCount = reviewFailLoopCountByEdge.get(loopEdgeKey) ?? 0;
+    const reviewFailLoopLimit = parsed.resolver.getReviewFailLoopLimit(agentName, currentSource);
     const isFail = normalizedReplyTargets.length === 1
       && normalizedReplyTargets[0] === currentSource
       && failTargets.includes(currentSource);
+    const isLoopLimitEscalation = !isFail
+      && normalizedReplyTargets.length > 0
+      && reviewPassTargets.length > 0
+      && failTargets.includes(currentSource)
+      && currentLoopCount >= reviewFailLoopLimit
+      && Boolean(
+        parsed.resolver.matchCanonicalTargets(
+          agentName,
+          normalizedReplyTargets,
+          reviewPassTargets,
+          "review_pass",
+        ),
+      );
 
     currentBatch.responses.push({
       agent: agentName,
-      outcome: isFail ? "fail" : "pass",
+      outcome: isFail || isLoopLimitEscalation ? "fail" : "pass",
+      loopLimitExceeded: isLoopLimitEscalation,
+      escalationDispatched: isLoopLimitEscalation,
     });
 
-    if (!isFail) {
+    if (!isFail && !isLoopLimitEscalation) {
       clearReviewFailLoopCountsForReviewer(reviewFailLoopCountByEdge, agentName);
       const sourceState = ensureSourceState(currentSource);
       const canonicalTarget = currentBatch.canonicalTargetByActual.get(agentName) ?? agentName;
       sourceState.reviewerPassRevision.set(canonicalTarget, currentBatch.sourceRevision);
     } else {
-      const edgeKey = buildReviewFailLoopEdgeKey(agentName, currentSource);
-      const nextLoopCount = (reviewFailLoopCountByEdge.get(edgeKey) ?? 0) + 1;
-      reviewFailLoopCountByEdge.set(edgeKey, nextLoopCount);
-      assert.ok(
-        nextLoopCount <= MAX_REVIEW_FAIL_LOOP_COUNT,
-        `${agentName} -> ${currentSource} 连续回流已超过 ${MAX_REVIEW_FAIL_LOOP_COUNT} 轮上限`,
-      );
+      const nextLoopCount = (reviewFailLoopCountByEdge.get(loopEdgeKey) ?? 0) + 1;
+      reviewFailLoopCountByEdge.set(loopEdgeKey, nextLoopCount);
+      const loopLimitExceeded = isLoopLimitEscalation || nextLoopCount > reviewFailLoopLimit;
+      const latestResponse = currentBatch.responses[currentBatch.responses.length - 1];
+      if (latestResponse) {
+        latestResponse.loopLimitExceeded = loopLimitExceeded;
+      }
+      if (loopLimitExceeded) {
+        const pendingReviewerIds = currentBatch.responses
+          .filter((response) => response.outcome === "fail" && response.agent !== agentName)
+          .map((response) => response.agent);
+        const nextPendingReviewer = parsed.resolver.findNextPendingRepairReviewer(
+          currentSource,
+          agentName,
+          pendingReviewerIds,
+        );
+        if (!nextPendingReviewer) {
+          assert.ok(
+            reviewPassTargets.length > 0,
+            `${agentName} -> ${currentSource} 连续回流已超过 ${reviewFailLoopLimit} 轮上限`,
+          );
+        }
+      }
     }
 
-    if (!isFail && normalizedReplyTargets.length > 0) {
+    if ((!isFail || isLoopLimitEscalation) && normalizedReplyTargets.length > 0) {
       for (const target of normalizedReplyTargets) {
         assert.ok(
           parsed.resolver.hasOutgoingTarget(agentName, target),
@@ -313,7 +499,7 @@ export async function assertSchedulerScript(
       if (reply.body) {
         nestedSourceState.currentRevision += 1;
       }
-      nestedSourceState.expectedNextTargets = null;
+      nestedSourceState.expectedNextAction = null;
 
       activeBatches.push({
         source: agentName,
@@ -325,14 +511,25 @@ export async function assertSchedulerScript(
         sourceRevision: nestedSourceState.currentRevision,
         sourceHadBody: reply.body.length > 0,
       });
+      nextDecision = {
+        type: "execute_batch",
+        sourceAgentId: agentName,
+        targets: [...normalizedReplyTargets],
+      };
     }
 
     finalizeBatchIfPossible();
+    appendDecision(nextDecision ?? buildNextDecision(agentName));
   };
 
   const firstLine = parsed.lines[0];
   assert.notEqual(firstLine, undefined, "脚本不能为空");
   appendLine(firstLine.normalized);
+  appendDecision({
+    type: "execute_batch",
+    sourceAgentId: null,
+    targets: [parsed.startAgent],
+  });
 
   while (actualScript.length < parsed.normalizedScript.length) {
     const currentBatch = activeBatches[activeBatches.length - 1] ?? null;
@@ -345,7 +542,7 @@ export async function assertSchedulerScript(
     }
 
     const nextExpectedSources = [...sourceStates.entries()]
-      .filter(([, state]) => state.expectedNextTargets && state.expectedNextTargets.length > 0)
+      .filter(([, state]) => state.expectedNextAction && state.expectedNextAction.targets.length > 0)
       .map(([agentName]) => agentName);
     if (nextExpectedSources.length > 0) {
       assert.equal(nextExpectedSources.length, 1, "同一时刻只能有一个 Source 等待下一轮修复/剩余派发");
@@ -362,6 +559,13 @@ export async function assertSchedulerScript(
   }
 
   assert.deepEqual(actualScript, parsed.normalizedScript);
+  if (expectedDecisions) {
+    assert.equal(
+      actualDecisions.length,
+      expectedDecisions.length,
+      "actualDecisions 与 expectedDecisions 的条数不一致",
+    );
+  }
 }
 
 function parseScenario(topology: TopologyRecord, script: string[]): ParsedScenario {
@@ -448,6 +652,7 @@ function createAgentRefResolver(topology: TopologyRecord): AgentRefResolver {
   const staticAssociationTargets = new Map<string, string[]>();
   const staticTriggeredTargets = new Map<string, string[]>();
   const staticOutgoingTargets = new Map<string, Set<string>>();
+  const reviewFailLoopLimitByEdge = new Map<string, number>();
   const normalizeStoredTrigger = (triggerOn: unknown): TopologyEdgeTrigger | "association" | null => {
     if (triggerOn === "association") {
       return "association";
@@ -477,6 +682,15 @@ function createAgentRefResolver(topology: TopologyRecord): AgentRefResolver {
         current.push(edge.target);
       }
       staticTriggeredTargets.set(triggerKey, current);
+    }
+
+    if (normalizedEdgeTrigger === "needs_revision") {
+      reviewFailLoopLimitByEdge.set(
+        buildReviewFailLoopEdgeKey(edge.source, edge.target),
+        typeof edge.maxRevisionRounds === "number" && Number.isFinite(edge.maxRevisionRounds)
+          ? Math.max(1, Math.floor(edge.maxRevisionRounds))
+          : DEFAULT_NEEDS_REVISION_MAX_ROUNDS,
+      );
     }
 
     const outgoing = staticOutgoingTargets.get(edge.source) ?? new Set<string>();
@@ -760,6 +974,31 @@ function createAgentRefResolver(topology: TopologyRecord): AgentRefResolver {
           || (staticOutgoingTargets.get(sourceAgentName) ?? new Set<string>()).has(dynamicRef.spawnNodeName))
       );
     };
+  const hasAnyOutgoingTargets = (agentName: string): boolean => getAllOutgoingTargets(agentName).size > 0;
+
+  const getReviewFailLoopLimit = (sourceAgentName: string, targetAgentName: string): number =>
+    reviewFailLoopLimitByEdge.get(buildReviewFailLoopEdgeKey(sourceAgentName, targetAgentName))
+    ?? DEFAULT_NEEDS_REVISION_MAX_ROUNDS;
+
+  const findNextPendingRepairReviewer = (
+    repairTargetAgentId: string,
+    excludeReviewerAgentId: string,
+    pendingReviewerIds: Iterable<string>,
+  ): string | null => {
+    const pendingSet = new Set(pendingReviewerIds);
+    for (const edge of topology.edges) {
+      const normalizedEdgeTrigger = normalizeStoredTrigger(edge.triggerOn);
+      if (
+        normalizedEdgeTrigger === "needs_revision"
+        && edge.target === repairTargetAgentId
+        && edge.source !== excludeReviewerAgentId
+        && pendingSet.has(edge.source)
+      ) {
+        return edge.source;
+      }
+    }
+    return null;
+  };
 
   const matchesCanonicalTarget = (
     sourceAgentName: string,
@@ -805,7 +1044,10 @@ function createAgentRefResolver(topology: TopologyRecord): AgentRefResolver {
     isKnown,
     getAssociationTargets,
     getTriggeredTargets,
+    hasAnyOutgoingTargets,
     hasOutgoingTarget,
+    getReviewFailLoopLimit,
+    findNextPendingRepairReviewer,
     matchCanonicalTargets,
   };
 }

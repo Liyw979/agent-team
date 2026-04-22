@@ -90,6 +90,9 @@ export function instantiateSpawnBundle(input: {
       source: sourceNodeInstance.id,
       target: targetNodeInstance.id,
       triggerOn: edge.triggerOn,
+      ...(edge.triggerOn === "needs_revision" && typeof edge.maxRevisionRounds === "number"
+        ? { maxRevisionRounds: edge.maxRevisionRounds }
+        : {}),
     };
   });
 

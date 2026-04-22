@@ -270,165 +270,16 @@ test("router 会在并发 reviewer 未收齐前保持等待，不会提前回流
   });
 });
 
-test("同一 reviewer 连续第 5 次回流修复时会直接终止，避免无限循环", () => {
-  const topology: TopologyRecord = {
-    projectId: "router-project-loop-limit",
-    nodes: ["Build", "UnitTest"],
-    edges: [
-      { source: "Build", target: "UnitTest", triggerOn: "association" },
-      { source: "UnitTest", target: "Build", triggerOn: "needs_revision" },
-    ],
-  };
-  let state = createGraphTaskState({
-    taskId: "task-loop-limit",
-    projectId: topology.projectId,
-    topology,
-  });
-
-  for (let round = 1; round <= 4; round += 1) {
-    const afterBuild = applyAgentResultToGraphState(state, {
-      agentName: "Build",
-      status: "completed",
-      reviewAgent: false,
-      reviewDecision: "approved",
-      agentStatus: "completed",
-      agentContextContent: `Build 已修复第 ${round} 轮问题`,
-      opinion: null,
-      allowDirectFallbackWhenNoBatch: false,
-      signalDone: false,
-    });
-    assert.equal(afterBuild.decision.type, "execute_batch");
-    assert.deepEqual(afterBuild.decision.batch.jobs.map((job) => job.agentName), ["UnitTest"]);
-
-    const afterUnitTestFail = applyAgentResultToGraphState(afterBuild.state, {
-      agentName: "UnitTest",
-      status: "completed",
-      reviewAgent: true,
-      reviewDecision: "needs_revision",
-      agentStatus: "needs_revision",
-      agentContextContent: `UnitTest 第 ${round} 轮未通过`,
-      opinion: `请修复第 ${round} 轮问题`,
-      allowDirectFallbackWhenNoBatch: true,
-      signalDone: false,
-    });
-    assert.equal(afterUnitTestFail.decision.type, "execute_batch");
-    assert.deepEqual(afterUnitTestFail.decision.batch.jobs.map((job) => job.agentName), ["Build"]);
-    state = afterUnitTestFail.state;
-  }
-
-  const afterBuild = applyAgentResultToGraphState(state, {
-    agentName: "Build",
-    status: "completed",
-    reviewAgent: false,
-    reviewDecision: "approved",
-    agentStatus: "completed",
-    agentContextContent: "Build 已修复第 5 轮问题",
-    opinion: null,
-    allowDirectFallbackWhenNoBatch: false,
-    signalDone: false,
-  });
-  assert.equal(afterBuild.decision.type, "execute_batch");
-  assert.deepEqual(afterBuild.decision.batch.jobs.map((job) => job.agentName), ["UnitTest"]);
-
-  const afterUnitTestFail = applyAgentResultToGraphState(afterBuild.state, {
-    agentName: "UnitTest",
-    status: "completed",
-    reviewAgent: true,
-    reviewDecision: "needs_revision",
-    agentStatus: "needs_revision",
-    agentContextContent: "UnitTest 第 5 轮未通过",
-    opinion: "请修复第 5 轮问题",
-    allowDirectFallbackWhenNoBatch: true,
-    signalDone: false,
-  });
-  assert.deepEqual(afterUnitTestFail.decision, {
-    type: "failed",
-    errorMessage: "UnitTest -> Build 已连续交流 4 次，任务已结束",
-  });
-});
-
-test("needs_revision 边支持单独配置更小的回流上限", () => {
-  const topology: TopologyRecord = {
-    projectId: "router-project-loop-limit-override",
-    nodes: ["Build", "UnitTest"],
-    edges: [
-      { source: "Build", target: "UnitTest", triggerOn: "association" },
-      { source: "UnitTest", target: "Build", triggerOn: "needs_revision", maxRevisionRounds: 2 },
-    ],
-  };
-  let state = createGraphTaskState({
-    taskId: "task-loop-limit-override",
-    projectId: topology.projectId,
-    topology,
-  });
-
-  for (let round = 1; round <= 2; round += 1) {
-    const afterBuild = applyAgentResultToGraphState(state, {
-      agentName: "Build",
-      status: "completed",
-      reviewAgent: false,
-      reviewDecision: "approved",
-      agentStatus: "completed",
-      agentContextContent: `Build 已修复第 ${round} 轮问题`,
-      opinion: null,
-      allowDirectFallbackWhenNoBatch: false,
-      signalDone: false,
-    });
-    assert.equal(afterBuild.decision.type, "execute_batch");
-
-    const afterUnitTestFail = applyAgentResultToGraphState(afterBuild.state, {
-      agentName: "UnitTest",
-      status: "completed",
-      reviewAgent: true,
-      reviewDecision: "needs_revision",
-      agentStatus: "needs_revision",
-      agentContextContent: `UnitTest 第 ${round} 轮未通过`,
-      opinion: `请修复第 ${round} 轮问题`,
-      allowDirectFallbackWhenNoBatch: true,
-      signalDone: false,
-    });
-    assert.equal(afterUnitTestFail.decision.type, "execute_batch");
-    state = afterUnitTestFail.state;
-  }
-
-  const afterBuild = applyAgentResultToGraphState(state, {
-    agentName: "Build",
-    status: "completed",
-    reviewAgent: false,
-    reviewDecision: "approved",
-    agentStatus: "completed",
-    agentContextContent: "Build 已修复第 3 轮问题",
-    opinion: null,
-    allowDirectFallbackWhenNoBatch: false,
-    signalDone: false,
-  });
-  const afterUnitTestFail = applyAgentResultToGraphState(afterBuild.state, {
-    agentName: "UnitTest",
-    status: "completed",
-    reviewAgent: true,
-    reviewDecision: "needs_revision",
-    agentStatus: "needs_revision",
-    agentContextContent: "UnitTest 第 3 轮未通过",
-    opinion: "请修复第 3 轮问题",
-    allowDirectFallbackWhenNoBatch: true,
-    signalDone: false,
-  });
-
-  assert.deepEqual(afterUnitTestFail.decision, {
-    type: "failed",
-    errorMessage: "UnitTest -> Build 已连续交流 2 次，任务已结束",
-  });
-});
-
 test("并发 reviewer 中单条回流链路超限时，不应提前打断其他 reviewer", () => {
   const topology: TopologyRecord = {
     projectId: "router-project-parallel-loop-isolation",
-    nodes: ["Build", "UnitTest", "TaskReview", "CodeReview"],
+    nodes: ["Build", "UnitTest", "TaskReview", "CodeReview", "Judge"],
     edges: [
       { source: "Build", target: "UnitTest", triggerOn: "association" },
       { source: "Build", target: "TaskReview", triggerOn: "association" },
       { source: "Build", target: "CodeReview", triggerOn: "association" },
       { source: "UnitTest", target: "Build", triggerOn: "needs_revision", maxRevisionRounds: 1 },
+      { source: "UnitTest", target: "Judge", triggerOn: "approved" },
       { source: "TaskReview", target: "Build", triggerOn: "needs_revision" },
       { source: "CodeReview", target: "Build", triggerOn: "needs_revision" },
     ],
@@ -523,83 +374,23 @@ test("并发 reviewer 中单条回流链路超限时，不应提前打断其他 
     signalDone: false,
   });
 
-  assert.notEqual(afterUnitTestNeedsRevisionRound2.decision.type, "failed");
-});
-
-test("同一 reviewer 连续 4 次回流后，只要第 5 次改为通过，流程仍然允许继续", () => {
-  const topology: TopologyRecord = {
-    projectId: "router-project-loop-limit-pass-boundary",
-    nodes: ["Build", "UnitTest"],
-    edges: [
-      { source: "Build", target: "UnitTest", triggerOn: "association" },
-      { source: "UnitTest", target: "Build", triggerOn: "needs_revision" },
-    ],
-  };
-  let state = createGraphTaskState({
-    taskId: "task-loop-limit-pass-boundary",
-    projectId: topology.projectId,
-    topology,
-  });
-
-  for (let round = 1; round <= 4; round += 1) {
-    const afterBuild = applyAgentResultToGraphState(state, {
+  assert.equal(afterUnitTestNeedsRevisionRound2.decision.type, "execute_batch");
+  assert.deepEqual(afterUnitTestNeedsRevisionRound2.decision.batch.jobs, [
+    {
       agentName: "Build",
-      status: "completed",
-      reviewAgent: false,
-      reviewDecision: "approved",
-      agentStatus: "completed",
-      agentContextContent: `Build 已修复第 ${round} 轮问题`,
-      opinion: null,
-      allowDirectFallbackWhenNoBatch: false,
-      signalDone: false,
-    });
-    assert.equal(afterBuild.decision.type, "execute_batch");
-    assert.deepEqual(afterBuild.decision.batch.jobs.map((job) => job.agentName), ["UnitTest"]);
-
-    const afterUnitTestFail = applyAgentResultToGraphState(afterBuild.state, {
-      agentName: "UnitTest",
-      status: "completed",
-      reviewAgent: true,
-      reviewDecision: "needs_revision",
-      agentStatus: "needs_revision",
-      agentContextContent: `UnitTest 第 ${round} 轮未通过`,
-      opinion: `请修复第 ${round} 轮问题`,
-      allowDirectFallbackWhenNoBatch: true,
-      signalDone: false,
-    });
-    assert.equal(afterUnitTestFail.decision.type, "execute_batch");
-    assert.deepEqual(afterUnitTestFail.decision.batch.jobs.map((job) => job.agentName), ["Build"]);
-    state = afterUnitTestFail.state;
-  }
-
-  const afterBuild = applyAgentResultToGraphState(state, {
-    agentName: "Build",
-    status: "completed",
-    reviewAgent: false,
-    reviewDecision: "approved",
-    agentStatus: "completed",
-    agentContextContent: "Build 已修复第 5 轮问题",
-    opinion: null,
-    allowDirectFallbackWhenNoBatch: false,
-    signalDone: false,
-  });
-  assert.equal(afterBuild.decision.type, "execute_batch");
-  assert.deepEqual(afterBuild.decision.batch.jobs.map((job) => job.agentName), ["UnitTest"]);
-
-  const afterUnitTestPass = applyAgentResultToGraphState(afterBuild.state, {
-    agentName: "UnitTest",
-    status: "completed",
-    reviewAgent: true,
-    reviewDecision: "approved",
-    agentStatus: "completed",
-    agentContextContent: "UnitTest 第 5 轮通过",
-    opinion: null,
-    allowDirectFallbackWhenNoBatch: true,
-    signalDone: false,
-  });
-  assert.deepEqual(afterUnitTestPass.decision, {
-    type: "finished",
-  });
+      sourceAgentId: "CodeReview",
+      kind: "revision_request",
+    },
+  ]);
+  assert.equal(afterUnitTestNeedsRevisionRound2.decision.batch.sourceAgentId, "CodeReview");
+  assert.match(
+    afterUnitTestNeedsRevisionRound2.decision.batch.sourceContent ?? "",
+    /请修复 CodeReview 第 1 轮问题/u,
+  );
+  assert.equal(
+    afterUnitTestNeedsRevisionRound2.decision.batch.jobs.some((job) => job.agentName === "Judge"),
+    false,
+  );
 });
 
 test("用户消息命中 spawn 节点时会自动生成实例组并启动入口角色", () => {

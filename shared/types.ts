@@ -98,6 +98,7 @@ export interface SpawnRule {
     sourceRole: SpawnedAgentRole;
     targetRole: SpawnedAgentRole;
     triggerOn: TopologyEdgeTrigger;
+    maxRevisionRounds?: number;
   }>;
   exitWhen: "one_side_agrees" | "all_completed";
   reportToTemplateName?: string;
@@ -175,6 +176,7 @@ export interface RuntimeTopologyEdge {
   source: string;
   target: string;
   triggerOn: TopologyEdgeTrigger;
+  maxRevisionRounds?: number;
 }
 
 export interface SpawnItemPayload {
