@@ -33,21 +33,18 @@ function parseJsonObject(content: string): Record<string, unknown> | null {
   return null;
 }
 
-export function extractSpawnItemsFromContent(
-  content: string,
-  itemsFrom = "items",
-): { items: SpawnItemPayload[] } {
+export function extractSpawnItemsFromContent(content: string): { items: SpawnItemPayload[] } {
   const parsed = parseJsonObject(content);
   if (!parsed) {
     throw new Error("spawn 上游输出必须提供 JSON 对象，且对象里包含可展开的 items 数组。");
   }
 
-  const rawItems = parsed[itemsFrom];
+  const rawItems = parsed.items;
   if (rawItems === undefined) {
-    throw new Error(`spawn 上游输出缺少 ${itemsFrom} 字段。`);
+    throw new Error("spawn 上游输出缺少 items 字段。");
   }
   if (!Array.isArray(rawItems)) {
-    throw new Error(`spawn 上游输出中的 ${itemsFrom} 字段必须是数组。`);
+    throw new Error("spawn 上游输出中的 items 字段必须是数组。");
   }
 
   return {

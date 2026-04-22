@@ -147,8 +147,8 @@ function buildTeamDslFromWorkspaceSnapshot(input: {
         return {
           type: "agent" as const,
           name,
-          ...(nextAgent.prompt ? { prompt: nextAgent.prompt } : {}),
-          ...(nextAgent.isWritable === true ? { writable: true } : {}),
+          prompt: nextAgent.prompt,
+          writable: nextAgent.isWritable === true,
         };
       }
 
@@ -156,15 +156,16 @@ function buildTeamDslFromWorkspaceSnapshot(input: {
       return {
         type: "agent" as const,
         name,
-        ...(existingNode?.prompt ? { prompt: existingNode.prompt } : {}),
-        ...(existingNode?.writable === true ? { writable: true } : {}),
+        prompt: existingNode?.prompt ?? "",
+        writable: existingNode?.writable === true,
       };
     }),
-    links: input.workspace.topology.edges.map((edge) => [
-      edge.source,
-      edge.target,
-      edge.triggerOn,
-    ]),
+    links: input.workspace.topology.edges.map((edge) => ({
+      from: edge.source,
+      to: edge.target,
+      trigger_type: edge.triggerOn,
+      message_type: edge.messageMode ?? "last",
+    })),
   };
 }
 
@@ -290,7 +291,7 @@ test("task init 会补齐 OpenCode 运行态", async () => {
   stubOpenCodeSessions(orchestrator);
 
   let project = await orchestrator.getWorkspaceSnapshot(projectPath);
-  project = await addBuiltinAgents(orchestrator, project.cwd, ["Build"]);
+  project = await addBuiltinAgents(orchestrator, project.cwd, ["Build"], "Build");
   const task = await orchestrator.initializeTask({ cwd: project.cwd, title: "demo" });
 
   assert.equal(task.task.cwd, project.cwd);
@@ -675,7 +676,7 @@ test("initializeTask reuses a preallocated task id when provided", async () => {
   stubOpenCodeSessions(orchestrator);
 
   let project = await orchestrator.getWorkspaceSnapshot(projectPath);
-  project = await addBuiltinAgents(orchestrator, project.cwd, ["Build"]);
+  project = await addBuiltinAgents(orchestrator, project.cwd, ["Build"], "Build");
   const task = await orchestrator.initializeTask({
     cwd: project.cwd,
     title: "demo",
@@ -950,7 +951,7 @@ test("Build 只有在团队 DSL 中声明后才会出现在 agents", async () =>
   const project = await orchestrator.getWorkspaceSnapshot(projectPath);
   assert.equal(project.agents.some((agent) => agent.name === "Build"), false);
 
-  const withBuild = await addBuiltinAgents(orchestrator, project.cwd, ["Build"]);
+  const withBuild = await addBuiltinAgents(orchestrator, project.cwd, ["Build"], "Build");
   assert.equal(withBuild.agents.some((agent) => agent.name === "Build"), true);
   assert.equal(withBuild.agents.find((agent) => agent.name === "Build")?.isWritable, true);
   assert.equal(buildInjectedConfigFromAgents(withBuild.agents), null);
@@ -971,23 +972,26 @@ test("applyTeamDsl 会一次性写入当前 Project 的 agents 与 topology", as
       {
         type: "agent",
         name: "Build",
+        prompt: "",
         writable: true,
       },
       {
         type: "agent",
         name: "BA",
         prompt: TEST_AGENT_PROMPTS.BA,
+        writable: false,
       },
       {
         type: "agent",
         name: "SecurityResearcher",
         prompt: "你负责漏洞挖掘。",
+        writable: false,
       },
     ],
     links: [
-      ["BA", "Build", "association"],
-      ["Build", "SecurityResearcher", "association"],
-      ["SecurityResearcher", "Build", "needs_revision"],
+      { from: "BA", to: "Build", trigger_type: "association", message_type: "last" },
+      { from: "Build", to: "SecurityResearcher", trigger_type: "association", message_type: "last" },
+      { from: "SecurityResearcher", to: "Build", trigger_type: "needs_revision", message_type: "last" },
     ],
   });
 
@@ -1034,15 +1038,17 @@ test("applyTeamDsl 会直接以 DSL prompt 为唯一真源", async () => {
         type: "agent",
         name: "BA",
         prompt: "DSL BA prompt",
+        writable: false,
       },
       {
         type: "agent",
         name: "Build",
+        prompt: "",
         writable: true,
       },
     ],
     links: [
-      ["BA", "Build", "association"],
+      { from: "BA", to: "Build", trigger_type: "association", message_type: "last" },
     ],
   });
 
@@ -1066,7 +1072,7 @@ test("保存拓扑后不会再生成旧工作区快照文件", async () => {
   });
 
   let project = await orchestrator.getWorkspaceSnapshot(projectPath);
-  project = await addBuiltinAgents(orchestrator, project.cwd, ["Build"]);
+  project = await addBuiltinAgents(orchestrator, project.cwd, ["Build"], "Build");
   project = await addCustomAgent(orchestrator, project.cwd, "BA", "你是 BA。");
 
   const saved = await orchestrator.saveTopology({
@@ -1113,11 +1119,10 @@ test("保存拓扑后会把动态 spawn 团队配置保留在当前运行时快�
       ],
       spawnRules: [
         {
-          id: "finding-debate",
-          name: "漏洞疑点辩论",
-          sourceTemplateName: "初筛",
-          itemKey: "findings",
-          entryRole: "pro",
+	          id: "finding-debate",
+	          name: "漏洞疑点辩论",
+	          sourceTemplateName: "初筛",
+	          entryRole: "pro",
           spawnedAgents: [
             { role: "pro", templateName: "正方模板" },
             { role: "con", templateName: "反方模板" },
@@ -1173,11 +1178,10 @@ test("保存拓扑后会保留 spawnEnabled 标记，避免 GUI 点击后回读�
       ],
       spawnRules: [
         {
-          id: "spawn-rule:UnitTest",
-          name: "UnitTest",
-          sourceTemplateName: "Build",
-          itemKey: "spawn_items",
-          entryRole: "entry",
+	          id: "spawn-rule:UnitTest",
+	          name: "UnitTest",
+	          sourceTemplateName: "Build",
+	          entryRole: "entry",
           spawnedAgents: [
             { role: "entry", templateName: "UnitTest" },
           ],
@@ -1331,7 +1335,7 @@ test("Build 与其他显式可写 Agent 可以同时保持可写", async () => {
   });
 
   let project = await orchestrator.getWorkspaceSnapshot(projectPath);
-  project = await addBuiltinAgents(orchestrator, project.cwd, ["Build"]);
+  project = await addBuiltinAgents(orchestrator, project.cwd, ["Build"], "Build");
   project = await addCustomAgent(orchestrator, project.cwd, "BA", "你是 BA。", true);
 
   assert.deepEqual(

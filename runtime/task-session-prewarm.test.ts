@@ -25,7 +25,6 @@ test("resolveTaskAgentNamesToPrewarm 不会为仅作为 spawn 模板存在的静
         name: "疑点辩论",
         spawnNodeName: "疑点辩论",
         sourceTemplateName: "初筛",
-        itemKey: "items",
         entryRole: "正方",
         spawnedAgents: [
           { role: "正方", templateName: "正方" },

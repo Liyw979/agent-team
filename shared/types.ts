@@ -90,8 +90,6 @@ export interface SpawnRule {
   name: string;
   spawnNodeName: string;
   sourceTemplateName?: string;
-  itemsFrom?: string;
-  itemKey?: string;
   entryRole: SpawnedAgentRole;
   spawnedAgents: SpawnedAgentTemplate[];
   edges: Array<{
@@ -522,11 +520,6 @@ export function getSpawnRules(topology: TopologyRecord): SpawnRule[] {
     spawnedAgents: rule.spawnedAgents.map((agent) => ({ ...agent })),
     edges: rule.edges.map((edge) => ({ ...edge })),
   }));
-}
-
-export function resolveSpawnItemsField(rule: Pick<SpawnRule, "itemsFrom" | "itemKey">): string {
-  const field = rule.itemsFrom?.trim() || rule.itemKey?.trim() || "items";
-  return field.length > 0 ? field : "items";
 }
 
 export function createTopologyLangGraphRecord(input: {

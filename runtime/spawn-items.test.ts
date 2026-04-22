@@ -12,15 +12,7 @@ test("extractSpawnItemsFromContent 默认读取 JSON 里的 items 数组", () =>
   ]);
 });
 
-test("extractSpawnItemsFromContent 支持显式 itemsFrom 覆盖默认字段名", () => {
-  const parsed = extractSpawnItemsFromContent(`{"findings":[{"title":"命令注入"}]}`, "findings");
-
-  assert.deepEqual(parsed.items, [
-    { id: "item-1", title: "命令注入" },
-  ]);
-});
-
-test("extractSpawnItemsFromContent 在缺少目标数组字段时返回明确错误", () => {
+test("extractSpawnItemsFromContent 只读取固定 items 字段", () => {
   assert.throws(
     () => extractSpawnItemsFromContent(`{"summary":"无 findings"}`),
     /items/,

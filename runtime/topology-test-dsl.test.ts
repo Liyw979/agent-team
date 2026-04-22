@@ -62,7 +62,6 @@ test("createTopology 支持把 spawn 作为下游模式写进 DSL", () => {
       id: "spawn-rule:TaskReview",
       name: "TaskReview",
       sourceTemplateName: "Build",
-      itemKey: "spawn_items",
       entryRole: "entry",
       spawnedAgents: [{ role: "entry", templateName: "TaskReview" }],
       edges: [],

@@ -24,7 +24,7 @@ export function extractDslAgentsFromTopology(
 ): AgentRecord[] | null {
   const nodeRecords = topology.nodeRecords?.filter((node) => node.kind === "agent") ?? [];
   const hasDslPromptMetadata = nodeRecords.some((node) =>
-    typeof node.prompt === "string" || node.writable === true,
+    typeof node.prompt === "string" || typeof node.writable === "boolean",
   );
   if (nodeRecords.length === 0 || !hasDslPromptMetadata) {
     return null;
@@ -46,7 +46,7 @@ export function extractDslAgentsFromTopology(
 
   return dslAgents.map((agent) => ({
     ...agent,
-    isWritable: agent.isWritable ?? agent.name === "Build",
+    isWritable: agent.isWritable ?? false,
   }));
 }
 

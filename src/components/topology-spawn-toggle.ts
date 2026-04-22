@@ -51,7 +51,6 @@ function buildSpawnRuleFromReachable(topology: TopologyRecord, sourceNodeId: str
     id: `spawn-rule:${targetNodeId}`,
     name: targetNodeId,
     sourceTemplateName: sourceNodeId,
-    itemKey: "spawn_items",
     entryRole: "entry",
     spawnedAgents: targetTemplates.map((item, index) => ({
       role: index === 0 ? "entry" : item.nodeId,

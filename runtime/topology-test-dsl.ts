@@ -28,7 +28,6 @@ type SpawnLinkInput =
 
 interface SpawnTemplateInput {
   name?: string;
-  itemKey?: string;
   entryRole?: string;
   agents?: SpawnAgentInput[];
   links?: SpawnLinkInput[];
@@ -214,7 +213,6 @@ function buildSpawnRules(input: CreateTopologyDslInput): SpawnRule[] {
       id: `spawn-rule:${target}`,
       name: config?.name ?? target,
       sourceTemplateName,
-      itemKey: config?.itemKey ?? "spawn_items",
       entryRole: config?.entryRole ?? "entry",
       spawnedAgents: normalizeSpawnedAgents(target, config),
       edges: normalizeSpawnLinks(config),

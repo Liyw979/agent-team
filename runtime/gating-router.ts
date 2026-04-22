@@ -2,7 +2,6 @@ import {
   DEFAULT_NEEDS_REVISION_MAX_ROUNDS,
   getNeedsRevisionEdgeLoopLimit,
   getSpawnRules,
-  resolveSpawnItemsField,
   type AgentStatus,
 } from "@shared/types";
 
@@ -699,7 +698,6 @@ function materializeSpawnNodeTargets(
   const sequence = getNextSpawnSequence(state, spawnRuleId);
   const parsed = tryExtractSpawnItemsFromContent(
     sourceContent,
-    resolveSpawnItemsField(rule),
     spawnRuleId,
     sequence,
     allowRawFallback,
@@ -731,13 +729,12 @@ function materializeSpawnNodeTargets(
 
 function tryExtractSpawnItemsFromContent(
   sourceContent: string,
-  itemsFrom: string,
   spawnRuleId: string,
   sequence: number,
   allowSingleItemFallback: boolean,
 ) {
   try {
-    return extractSpawnItemsFromContent(sourceContent, itemsFrom);
+    return extractSpawnItemsFromContent(sourceContent);
   } catch (error) {
     if (!allowSingleItemFallback) {
       throw error;

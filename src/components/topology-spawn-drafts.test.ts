@@ -72,7 +72,6 @@ test("getTopologyDisplayNodeIds 会用 runtime 实例替换已展开的静态模
         name: "疑点辩论",
         spawnNodeName: "疑点辩论",
         sourceTemplateName: "初筛",
-        itemKey: "findings",
         entryRole: "正方",
         spawnedAgents: [
           { role: "正方", templateName: "正方" },

@@ -16,32 +16,36 @@ import { z } from "zod";
 
 export interface TeamDslAgentRecord {
   name: string;
-  prompt?: string;
-  fromTemplate?: string;
-  writable?: boolean;
+  prompt: string;
+  writable: boolean;
 }
 
 interface GraphDslAgentNode {
   type: "agent";
   name: string;
-  prompt?: string;
-  fromTemplate?: string;
-  writable?: boolean;
+  prompt: string;
+  writable: boolean;
 }
 
 interface GraphDslSpawnNode {
   type: "spawn";
   name: string;
-  itemsFrom?: string;
   graph: GraphDslGraph;
 }
 
 type GraphDslNode = GraphDslAgentNode | GraphDslSpawnNode;
 
+interface GraphDslLink {
+  from: string;
+  to: string;
+  trigger_type: TopologyEdgeTrigger;
+  message_type: TopologyEdgeMessageMode;
+}
+
 export interface GraphDslGraph {
   entry: string;
   nodes: GraphDslNode[];
-  links: Array<readonly [string, string, TopologyEdgeTrigger, TopologyEdgeMessageMode?]>;
+  links: GraphDslLink[];
 }
 
 export type TeamDslDefinition = GraphDslGraph;
@@ -58,20 +62,19 @@ export interface CompiledTeamDsl {
   topology: TopologyRecord;
 }
 
-const GraphDslLinkSchema = z.tuple([
-  z.string(),
-  z.string(),
-  z.enum(["association", "approved", "needs_revision"]),
-  z.enum(["none", "last", "all"]).optional(),
-]);
+const GraphDslLinkSchema: z.ZodType<GraphDslLink> = z.object({
+  from: z.string(),
+  to: z.string(),
+  trigger_type: z.enum(["association", "approved", "needs_revision"]),
+  message_type: z.enum(["none", "last", "all"]),
+}).strict();
 
 const GraphDslAgentNodeSchema: z.ZodType<GraphDslAgentNode> = z.object({
   type: z.literal("agent"),
   name: z.string(),
-  prompt: z.string().optional(),
-  fromTemplate: z.string().optional(),
-  writable: z.boolean().optional(),
-});
+  prompt: z.string(),
+  writable: z.boolean(),
+}).strict();
 
 const GraphDslGraphSchema: z.ZodType<GraphDslGraph> = z.lazy(() =>
   z.object({
@@ -84,9 +87,8 @@ const GraphDslGraphSchema: z.ZodType<GraphDslGraph> = z.lazy(() =>
 const GraphDslSpawnNodeSchema: z.ZodType<GraphDslSpawnNode> = z.object({
   type: z.literal("spawn"),
   name: z.string(),
-  itemsFrom: z.string().optional(),
   graph: GraphDslGraphSchema,
-});
+}).strict();
 
 const GraphDslNodeSchema: z.ZodType<GraphDslNode> = z.lazy(() =>
   z.discriminatedUnion("type", [GraphDslAgentNodeSchema, GraphDslSpawnNodeSchema]),
@@ -101,7 +103,7 @@ function normalizeComparableAgents(agents: Array<{
     .map((agent) => ({
       name: agent.name,
       prompt: agent.prompt ?? "",
-      isWritable: usesOpenCodeBuiltinPrompt(agent.name) ? true : agent.isWritable === true,
+      isWritable: agent.isWritable === true,
     }))
     .sort((left, right) => left.name.localeCompare(right.name));
 }
@@ -192,28 +194,28 @@ function compileAgentDefinition(agent: TeamDslAgentRecord): CompiledTeamDslAgent
     throw new Error("DSL Agent 名称不能为空。");
   }
 
-  const templateName = agent.fromTemplate?.trim() || (isBuiltinTemplateName(name) ? name : null);
-  const prompt = agent.prompt?.trim();
+  const templateName = isBuiltinTemplateName(name) ? name : null;
+  const prompt = agent.prompt.trim();
   if (!templateName && !prompt) {
     throw new Error(`DSL Agent ${name} 不是内置模板，必须提供 prompt。`);
   }
 
   if (usesOpenCodeBuiltinPrompt(name) && prompt) {
-    throw new Error("Build 使用 OpenCode 内置 prompt，DSL 中不允许覆盖 prompt。");
+    throw new Error(`${name} 使用 OpenCode 内置 prompt，DSL 中不允许覆盖 prompt。`);
   }
 
   return {
     name,
     prompt: prompt || null,
-    templateName,
-    isWritable: agent.writable === true,
+    templateName: templateName || null,
+    isWritable: agent.writable,
   };
 }
 
 function normalizeCompiledWritableAgents(agents: CompiledTeamDslAgent[]): CompiledTeamDslAgent[] {
   return agents.map((agent) => ({
     ...agent,
-    isWritable: usesOpenCodeBuiltinPrompt(agent.name) || agent.isWritable === true,
+    isWritable: agent.isWritable === true,
   }));
 }
 
@@ -302,7 +304,17 @@ function formatGraphDslParseError(error: z.ZodError): string {
   if (issue.code === z.ZodIssueCode.invalid_enum_value) {
     return `${path} 只允许 ${issue.options.join(" / ")}。`;
   }
+  if (
+    issue.code === z.ZodIssueCode.invalid_type
+    && issue.path[0] === "links"
+    && issue.expected === "object"
+  ) {
+    return `${formatZodIssuePath(issue.path)} 必须使用对象格式，并显式写出 from、to、trigger_type、message_type。`;
+  }
   if (issue.code === z.ZodIssueCode.invalid_type) {
+    if (issue.received === "undefined") {
+      return `${path} 必须显式写出，不能省略。`;
+    }
     return `${path} 类型错误，期望 ${translateZodExpectedType(issue.expected)}。`;
   }
   return `${path} 校验失败：${issue.message}`;
@@ -320,11 +332,11 @@ function resolveSpawnReportTo(
   graph: GraphDslGraph,
   spawnNodeName: string,
 ): { target: string; triggerOn: TopologyEdgeTrigger } | undefined {
-  const outgoingLinks = graph.links.filter(([source]) => source === spawnNodeName);
+  const outgoingLinks = graph.links.filter((link) => link.from === spawnNodeName);
   return outgoingLinks.length === 1
     ? {
-        target: outgoingLinks[0]![1],
-        triggerOn: outgoingLinks[0]![2],
+        target: outgoingLinks[0]!.to,
+        triggerOn: outgoingLinks[0]!.trigger_type,
       }
     : undefined;
 }
@@ -347,9 +359,9 @@ function collectGraphDslNodeDefinitions(
   if (!localNames.has(graph.entry)) {
     throw new Error(`graph.entry 指向了不存在的节点：${graph.entry}`);
   }
-  for (const [source, target] of graph.links) {
-    if (!localNames.has(source) || !localNames.has(target)) {
-      throw new Error(`graph.links 引用了不存在的节点：${source} -> ${target}`);
+  for (const link of graph.links) {
+    if (!localNames.has(link.from) || !localNames.has(link.to)) {
+      throw new Error(`graph.links 引用了不存在的节点：${link.from} -> ${link.to}`);
     }
   }
 
@@ -362,7 +374,6 @@ function collectGraphDslNodeDefinitions(
       context.agentDefinitions.set(node.name, {
         name: node.name,
         prompt: node.prompt,
-        fromTemplate: node.fromTemplate,
         writable: node.writable,
       });
       context.nodeRecords.set(node.name, {
@@ -386,17 +397,16 @@ function collectGraphDslNodeDefinitions(
       id: spawnRuleId,
       name: node.name,
       spawnNodeName: node.name,
-      itemsFrom: node.itemsFrom?.trim() || "items",
       entryRole: node.graph.entry,
       spawnedAgents: node.graph.nodes.map((childNode) => ({
         role: childNode.name,
         templateName: childNode.name,
       })),
-      edges: node.graph.links.map(([sourceRole, targetRole, triggerOn, messageMode]) => ({
-        sourceRole,
-        targetRole,
-        triggerOn,
-        messageMode: normalizeTopologyEdgeMessageMode(messageMode),
+      edges: node.graph.links.map((link) => ({
+        sourceRole: link.from,
+        targetRole: link.to,
+        triggerOn: link.trigger_type,
+        messageMode: normalizeTopologyEdgeMessageMode(link.message_type),
       })),
       exitWhen: "all_completed",
       reportToTemplateName: reportTarget?.target,
@@ -428,25 +438,25 @@ function compileGraphDsl(input: GraphDslGraph): CompiledTeamDsl {
     return {
       ...node,
       ...(compiledAgent?.prompt !== null ? { prompt: compiledAgent?.prompt ?? undefined } : {}),
-      ...(compiledAgent?.isWritable ? { writable: true } : {}),
+      writable: compiledAgent?.isWritable === true,
     };
   });
 
   const topology: TopologyRecord = {
     nodes: input.nodes.map((node) => node.name),
-    edges: input.links.map(([source, target, triggerOn, messageMode]) => ({
-      source,
-      target,
-      triggerOn,
-      messageMode: normalizeTopologyEdgeMessageMode(messageMode),
+    edges: input.links.map((link) => ({
+      source: link.from,
+      target: link.to,
+      triggerOn: link.trigger_type,
+      messageMode: normalizeTopologyEdgeMessageMode(link.message_type),
     })),
     langgraph: createTopologyLangGraphRecord({
       nodes: input.nodes.map((node) => node.name),
-      edges: input.links.map(([source, target, triggerOn, messageMode]) => ({
-        source,
-        target,
-        triggerOn,
-        messageMode: normalizeTopologyEdgeMessageMode(messageMode),
+      edges: input.links.map((link) => ({
+        source: link.from,
+        target: link.to,
+        triggerOn: link.trigger_type,
+        messageMode: normalizeTopologyEdgeMessageMode(link.message_type),
       })),
       startTargets: [input.entry],
       endSources: null,

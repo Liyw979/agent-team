@@ -19,18 +19,22 @@
     {
       "type": "agent",
       "name": "BA",
-      "prompt": "你是 BA。负责把需求整理清楚。"
+      "prompt": "你是 BA。负责把需求整理清楚。",
+      "writable": false
     }
   ],
   "links": []
 }
 ```
 
-含义：
+根级字段含义：
 
-- `entry` 指定任务入口节点
-- `nodes` 定义所有节点
-- `links` 定义节点之间的流转关系
+- `entry`
+  当前图的入口节点名。任务未显式 `@Agent` 时，会从这个节点开始执行；该值必须能在同一层 `nodes` 中找到。
+- `nodes`
+  当前图声明的节点数组。每个元素必须是一个对象，且必须通过 `type` 明确声明为 `agent` 或 `spawn`。
+- `links`
+  当前图声明的有向边数组。每条边必须使用对象格式，显式写出 `from`、`to`、`trigger_type`、`message_type`。
 
 ## 2. `nodes` 怎么写
 
@@ -47,6 +51,7 @@
 {
   "type": "agent",
   "name": "Build",
+  "prompt": "",
   "writable": true
 }
 ```
@@ -54,21 +59,19 @@
 字段说明：
 
 - `type`
-  节点判别字段，用来决定当前节点按哪种结构解析。
-  当值为 `agent` 时，当前节点按执行型节点解析：声明 `prompt` / `fromTemplate` / `writable`，不声明 `graph`
+  节点判别字段。`agent` 表示这是一个执行型 Agent 节点，会被编译成可运行的 Agent。
 - `name`
-  节点名，必须全局唯一
+  Agent 名称，也是拓扑里的节点名；必须全局唯一，父图和子图里也不能重名。
 - `prompt`
-  非内置模板节点必须提供
+  Agent 的职责说明。必须显式提供；普通自定义 Agent 不能为空；`Build` 使用 OpenCode 内置 prompt，因此这里必须写空字符串 `""`，不能覆盖。
 - `writable`
-  是否允许写文件。`Build` 即使不显式写 `writable: true`，运行时也会被视为可写
-- `fromTemplate`
-  仅在你需要把节点名和模板名分开时使用
+  是否允许该 Agent 使用写入类能力。必须显式提供，`true` 表示可写，`false` 表示只读；不存在默认可写 Agent，`Build` 也必须显式写。
 
 约束：
 
 - `Build` 继续使用 OpenCode 内置 prompt，不允许在 JSON 里覆盖 `prompt`
-- 非内置模板节点如果不提供 `prompt`，编译会失败
+- 非内置模板节点如果不提供 `prompt` 或 `prompt` 为空，编译会失败
+- 任何 Agent 如果不提供 `writable`，编译会失败
 
 ### 2.2 `spawn` 节点
 
@@ -78,23 +81,29 @@
 {
   "type": "spawn",
   "name": "疑点辩论",
-  "itemsFrom": "findings",
   "graph": {
     "entry": "正方",
     "nodes": [
       {
         "type": "agent",
         "name": "正方",
-        "prompt": "你是正方。"
+        "prompt": "你是正方。",
+        "writable": false
       },
       {
         "type": "agent",
         "name": "反方",
-        "prompt": "你是反方。"
+        "prompt": "你是反方。",
+        "writable": false
       }
     ],
     "links": [
-      ["正方", "反方", "needs_revision"]
+      {
+        "from": "正方",
+        "to": "反方",
+        "trigger_type": "needs_revision",
+        "message_type": "last"
+      }
     ]
   }
 }
@@ -103,34 +112,62 @@
 字段说明：
 
 - `type`
-  节点判别字段，用来决定当前节点按哪种结构解析。
-  当值为 `spawn` 时，当前节点按展开型节点解析：声明 `graph`，不声明 `prompt`
+  节点判别字段。`spawn` 表示这是一个展开型调度节点，不是实际执行 Agent。
 - `name`
-  spawn 节点名，必须全局唯一
-- `itemsFrom`
-  可选。默认读取上游输出里的 `items` 数组；如果你的上游输出字段是 `findings` 或其他名字，就显式写出来
+  spawn 节点名；必须全局唯一，父图和子图里也不能重名。
 - `graph`
-  子图定义。子图自己也必须使用同一套 `entry + nodes + links` DSL
+  spawn 展开后要实例化的子图定义。子图自己也必须使用同一套 `entry + nodes + links` DSL。
+
+`graph` 内部字段含义：
+
+- `graph.entry`
+  子图入口节点名。每个展开出来的实例都会从这个子图入口 Agent 开始执行。
+- `graph.nodes`
+  子图节点数组，只能包含 `agent` 或嵌套 `spawn` 节点，并且节点名仍然必须全局唯一。
+- `graph.links`
+  子图内部边数组，格式与根图 `links` 完全一致。
 
 语义：
 
 - `spawn` 不是 agent，所以没有 `prompt`
+- `spawn` 固定读取上游输出 JSON 对象里的 `items` 数组，不支持配置其他字段名
 - 每个输入项都会实例化一份 `graph`
 - 子图全部完成后，`spawn` 节点自身视为完成
 - 完成后按父图里的普通 `links` 继续流转
 
 ## 3. `links` 怎么写
 
-`links` 统一写成三元组或四元组数组：
+`links` 统一写成对象数组，必须显式写出 `from`、`to`、`trigger_type`、`message_type`：
 
 ```json
 [
-  ["上游节点", "下游节点", "association"],
-  ["上游节点", "下游节点", "association", "all"]
+  {
+    "from": "上游节点",
+    "to": "下游节点",
+    "trigger_type": "association",
+    "message_type": "last"
+  },
+  {
+    "from": "上游节点",
+    "to": "另一个下游节点",
+    "trigger_type": "association",
+    "message_type": "all"
+  }
 ]
 ```
 
-当前支持的触发值只有三种：
+字段说明：
+
+- `from`
+  边的起点节点名；必须能在当前层 `nodes` 中找到。
+- `to`
+  边的终点节点名；必须能在当前层 `nodes` 中找到。
+- `trigger_type`
+  触发条件，决定这条边什么时候会被调度。
+- `message_type`
+  消息传递策略，决定沿这条边派发下游时携带哪些上游内容。
+
+`trigger_type` 当前支持三种值：
 
 - `association`
   表示普通协作流转。当前节点执行完成后，会沿这条边把结果继续派发给下游节点。
@@ -139,10 +176,10 @@
 - `needs_revision`
   表示审查不通过后的回流。当前节点明确要求继续修改或继续回应时，流程会沿这条边把意见退回给对应下游节点。
 
-第 4 个可选字段用于控制这条边派发下游时要不要带上历史消息：
+`message_type` 当前支持三种值：
 
 - `last`
-  默认值。只传递上游最后一条正文，就是当前系统原本的行为。
+  只传递上游最后一条正文。
 - `none`
   不传递上游最后一条正文。
 - `all`
@@ -152,9 +189,9 @@
 
 ```json
 [
-  ["BA", "Build", "association"],
-  ["Build", "CodeReview", "association", "last"],
-  ["CodeReview", "Build", "needs_revision"]
+  { "from": "BA", "to": "Build", "trigger_type": "association", "message_type": "last" },
+  { "from": "Build", "to": "CodeReview", "trigger_type": "association", "message_type": "last" },
+  { "from": "CodeReview", "to": "Build", "trigger_type": "needs_revision", "message_type": "last" }
 ]
 ```
 
@@ -175,20 +212,20 @@
 {
   "entry": "BA",
   "nodes": [
-    { "type": "agent", "name": "BA", "prompt": "..." },
-    { "type": "agent", "name": "Build", "writable": true },
-    { "type": "agent", "name": "CodeReview", "prompt": "..." },
-    { "type": "agent", "name": "UnitTest", "prompt": "..." },
-    { "type": "agent", "name": "TaskReview", "prompt": "..." }
+    { "type": "agent", "name": "BA", "prompt": "...", "writable": false },
+    { "type": "agent", "name": "Build", "prompt": "", "writable": true },
+    { "type": "agent", "name": "CodeReview", "prompt": "...", "writable": false },
+    { "type": "agent", "name": "UnitTest", "prompt": "...", "writable": false },
+    { "type": "agent", "name": "TaskReview", "prompt": "...", "writable": false }
   ],
   "links": [
-    ["BA", "Build", "association"],
-    ["Build", "CodeReview", "association"],
-    ["Build", "UnitTest", "association"],
-    ["Build", "TaskReview", "association"],
-    ["CodeReview", "Build", "needs_revision"],
-    ["UnitTest", "Build", "needs_revision"],
-    ["TaskReview", "Build", "needs_revision"]
+    { "from": "BA", "to": "Build", "trigger_type": "association", "message_type": "last" },
+    { "from": "Build", "to": "CodeReview", "trigger_type": "association", "message_type": "last" },
+    { "from": "Build", "to": "UnitTest", "trigger_type": "association", "message_type": "last" },
+    { "from": "Build", "to": "TaskReview", "trigger_type": "association", "message_type": "last" },
+    { "from": "CodeReview", "to": "Build", "trigger_type": "needs_revision", "message_type": "last" },
+    { "from": "UnitTest", "to": "Build", "trigger_type": "needs_revision", "message_type": "last" },
+    { "from": "TaskReview", "to": "Build", "trigger_type": "needs_revision", "message_type": "last" }
   ]
 }
 ```
@@ -202,17 +239,19 @@
 - `疑点辩论` 是 `spawn` 节点
 - `spawn.graph` 里定义正方、反方、裁决总结的子图
 - 在这份漏洞团队拓扑里，`裁决总结` 的要求是：若裁定为真实漏洞，就输出正式漏洞报告；若裁定为误报，就什么都不做
-- 根图写的是 `["疑点辩论", "初筛", "association"]`，因此 `裁决总结` 完成本轮裁决后，会按 `association` 触发 `初筛` 继续寻找下一个 finding
+- 根图写的是 `{ "from": "疑点辩论", "to": "初筛", "trigger_type": "association", "message_type": "none" }`，因此 `裁决总结` 完成本轮裁决后，会按 `association` 触发 `初筛` 继续寻找下一个 finding
 
 ## 6. 当前硬约束
 
 - 团队拓扑 JSON 只支持递归式 `entry + nodes + links`
 - 节点 `type` 是判别字段，只允许 `agent` 或 `spawn`
-- 当 `type = "agent"` 时，节点按执行型结构解析：使用 `prompt` / `fromTemplate` / `writable`，不使用 `graph`
+- 当 `type = "agent"` 时，节点按执行型结构解析：使用 `prompt` / `writable`，不使用 `graph`
 - 当 `type = "spawn"` 时，节点按展开型结构解析：使用 `graph`，不使用 `prompt`
 - 节点名必须全局唯一，不能在父子图里重名
 - `graph.entry` 必须指向本层真实存在的节点
-- `links` 里的 source / target 必须都能在当前层 `nodes` 中找到
+- `links` 必须使用对象格式，并显式写出 `from` / `to` / `trigger_type` / `message_type`
+- `links` 里的 `from` / `to` 必须都能在当前层 `nodes` 中找到
 - `spawn` 节点没有 `prompt`
-- 非内置模板 agent 必须提供 `prompt`
+- `spawn` 固定从上游输出的 `items` 数组展开子图
+- agent 必须显式提供 `prompt` 与 `writable`
 - `Build` 不允许覆盖 `prompt`

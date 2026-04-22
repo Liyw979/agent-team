@@ -1,7 +1,6 @@
 import {
   getSpawnRules,
   getTopologyNodeRecords,
-  resolveSpawnItemsField,
   type RuntimeTopologyEdge,
   type RuntimeTopologyNode,
   type SpawnBundleInstantiation,
@@ -161,8 +160,6 @@ export function validateSpawnRule(topology: TopologyRecord, rule: SpawnRule): vo
   if (rule.reportToTemplateName && !knownTemplateNames.has(rule.reportToTemplateName) && !knownNodeIds.has(rule.reportToTemplateName)) {
     throw new Error(`spawn rule report target 不存在：${rule.reportToTemplateName}`);
   }
-  resolveSpawnItemsField(rule);
-
   const knownRoles = new Set(rule.spawnedAgents.map((agent) => agent.role));
   if (!knownRoles.has(rule.entryRole)) {
     throw new Error(`spawn rule entry role 不存在：${rule.entryRole}`);

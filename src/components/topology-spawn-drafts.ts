@@ -145,7 +145,6 @@ export function upsertDebateSpawnDraft(
     id: spawnRuleId,
     name: teamName,
     sourceTemplateName: input.sourceTemplateName,
-    itemKey: "findings",
     entryRole: "pro",
     spawnedAgents: [
       { role: "pro", templateName: input.proTemplateName },
