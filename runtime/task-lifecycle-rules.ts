@@ -24,7 +24,10 @@ export function getPersistedCompletionSeedAgentNames(input: {
   agents: MinimalAgent[];
   messages: MinimalMessage[];
 }): string[] {
-  const validNames = new Set(input.topology.nodes);
+  const validNames = new Set([
+    ...input.topology.nodes,
+    ...input.agents.map((agent) => agent.name),
+  ]);
   const seeds = new Set<string>();
 
   for (const agent of input.agents) {
@@ -79,6 +82,26 @@ function collectReachableTopologyNodes(
   return visited;
 }
 
+function referencesMissingActivatedAgent(
+  message: MinimalMessage | undefined,
+  knownAgentNames: Set<string>,
+): boolean {
+  if (!message?.meta) {
+    return false;
+  }
+
+  if (message.meta.kind === "agent-dispatch") {
+    return parseTargetAgentIds(message.meta.targetAgentIds).some((targetName) => !knownAgentNames.has(targetName));
+  }
+
+  if (message.meta.kind === "revision-request") {
+    const targetAgentId = message.meta.targetAgentId?.trim();
+    return Boolean(targetAgentId && !knownAgentNames.has(targetAgentId));
+  }
+
+  return false;
+}
+
 export function shouldFinishTaskFromPersistedState(input: {
   taskStatus: TaskRecord["status"];
   topology: TopologyRecord;
@@ -91,6 +114,11 @@ export function shouldFinishTaskFromPersistedState(input: {
 
   const latestMessage = input.messages.at(-1);
   if (latestMessage?.sender === "user") {
+    return false;
+  }
+
+  const knownAgentNames = new Set(input.agents.map((agent) => agent.name));
+  if (referencesMissingActivatedAgent(latestMessage, knownAgentNames)) {
     return false;
   }
 

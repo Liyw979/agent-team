@@ -148,7 +148,7 @@ export class GatingScheduler {
 
     const readyTargets: string[] = [];
     for (const edge of outgoing) {
-      if (this.canScheduleTarget(completed, edge.target, agentStates)) {
+      if (this.canScheduleTarget(completed, edge.target, agentStates, "approved")) {
         readyTargets.push(edge.target);
         this.runtime.lastSignatureByAgent.set(
           edge.target,
@@ -214,7 +214,7 @@ export class GatingScheduler {
       }
 
       if (batch.targets.length === 1) {
-        const staleTargets = this.getAssociationTargets(sourceAgentId).filter(
+        const staleTargets = this.getAssociationTargetsForBatch(sourceAgentId, batch).filter(
           (targetName) => sourceState.reviewerPassRevision.get(targetName) !== batch.sourceRevision,
         );
         return {
@@ -264,7 +264,7 @@ export class GatingScheduler {
     const queuedTargets: string[] = [];
 
     for (const targetName of batch.targets) {
-      if (!this.canScheduleTarget(completedEdges, targetName, agentStates)) {
+      if (!this.canScheduleTarget(completedEdges, targetName, agentStates, "association")) {
         continue;
       }
 
@@ -305,19 +305,60 @@ export class GatingScheduler {
     return this.uniqueTargetNames(this.getOutgoingEdges(sourceAgentId, "association"));
   }
 
+  private getAssociationTargetsForBatch(
+    sourceAgentId: string,
+    batch: GatingAssociationDispatchBatchState,
+  ): string[] {
+    const outgoingTargets = this.getAssociationTargets(sourceAgentId);
+    if (outgoingTargets.length === 0) {
+      return [];
+    }
+
+    const spawnNodeIds = new Set(
+      (this.topology.nodeRecords ?? [])
+        .filter((node) => node.kind === "spawn")
+        .map((node) => node.id),
+    );
+    const hasSpawnTarget = outgoingTargets.some((targetName) => spawnNodeIds.has(targetName));
+    if (!hasSpawnTarget) {
+      return outgoingTargets;
+    }
+
+    return this.uniqueTargetNames(
+      outgoingTargets.flatMap((targetName) => (
+        spawnNodeIds.has(targetName) ? batch.targets : [targetName]
+      )).map((target) => ({ target })),
+    );
+  }
+
   private canScheduleTarget(
     completedEdges: Set<string>,
     targetName: string,
     agentStates: GatingAgentState[],
+    triggerKind: "association" | "approved",
   ): boolean {
     const agent = agentStates.find((item) => item.name === targetName);
     if (!agent) {
       return false;
     }
 
-    const incomingSuccessEdges = this.getIncomingEdges(targetName, "association")
-      .concat(this.getIncomingEdges(targetName, "approved"));
-    if (incomingSuccessEdges.some((edge) => !completedEdges.has(getTopologyEdgeId(edge)))) {
+    const incomingAssociationEdges = this.getIncomingEdges(targetName, "association");
+    if (incomingAssociationEdges.some((edge) => !completedEdges.has(getTopologyEdgeId(edge)))) {
+      return false;
+    }
+
+    const incomingApprovedEdges = this.getIncomingEdges(targetName, "approved");
+    if (
+      triggerKind === "association"
+      && incomingApprovedEdges.some((edge) => !completedEdges.has(getTopologyEdgeId(edge)))
+    ) {
+      return false;
+    }
+    if (
+      triggerKind === "approved"
+      && incomingApprovedEdges.length > 0
+      && !incomingApprovedEdges.some((edge) => completedEdges.has(getTopologyEdgeId(edge)))
+    ) {
       return false;
     }
 

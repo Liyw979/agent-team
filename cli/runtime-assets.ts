@@ -61,7 +61,8 @@ export function isCompiledRuntimeDir(runtimeDir: string): boolean {
 }
 
 export function isCompiledRuntimeExecutable(execPath: string): boolean {
-  const executableName = path.basename(execPath || "").toLowerCase();
+  const normalizedExecPath = (execPath || "").replace(/\\/g, "/");
+  const executableName = path.posix.basename(normalizedExecPath).toLowerCase();
   if (!executableName) {
     return false;
   }

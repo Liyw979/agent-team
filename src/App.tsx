@@ -36,6 +36,7 @@ import {
   buildAgentPromptDialogState,
   type AgentPromptDialogState,
 } from "./lib/agent-prompt-dialog";
+import { shouldRefreshForRuntimeEvent } from "./lib/runtime-event-refresh";
 import { decideUiSnapshotRefreshAcceptance } from "./lib/ui-snapshot-refresh-gate";
 import { getUiSnapshotPollingIntervalMs } from "./lib/ui-snapshot-polling";
 import { resolveAppPanelVisibility, type AppPanelMode } from "./lib/app-panel-visibility";
@@ -184,12 +185,10 @@ function App() {
 
       if (event.type === "runtime-updated") {
         const payload = event.payload as RuntimeUpdatedEventPayload;
-        const sessionIds = new Set(
-          currentUiSnapshot.task.agents
-            .map((agent) => agent.opencodeSessionId)
-            .filter((sessionId): sessionId is string => Boolean(sessionId)),
-        );
-        if (payload.sessionId && sessionIds.size > 0 && !sessionIds.has(payload.sessionId)) {
+        if (!shouldRefreshForRuntimeEvent({
+          currentTaskId: currentUiSnapshot.task.task.id,
+          payload,
+        })) {
           return;
         }
       }

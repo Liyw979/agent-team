@@ -139,22 +139,32 @@ function buildTeamDslFromWorkspaceSnapshot(input: {
   workspace: Awaited<ReturnType<Orchestrator["getWorkspaceSnapshot"]>>;
   nextAgents: Array<{ name: string; prompt: string; isWritable?: boolean }>;
 }): TeamDslDefinition {
-  const downstream: Record<string, Record<string, "association" | "approved" | "needs_revision">> = {};
-  for (const edge of input.workspace.topology.edges) {
-    downstream[edge.source] ??= {};
-    downstream[edge.source]![edge.target] = edge.triggerOn;
-  }
-
   return {
-    agents: input.nextAgents.map((agent) => ({
-      name: agent.name,
-      prompt: agent.prompt,
-      ...(agent.isWritable === true ? { writable: true } : {}),
-    })),
-    topology: {
-      nodes: [...new Set([...input.workspace.topology.nodes, ...input.nextAgents.map((agent) => agent.name)])],
-      downstream,
-    },
+    entry: input.workspace.topology.langgraph?.start.targets[0] ?? input.nextAgents[0]?.name ?? "Build",
+    nodes: [...new Set([...input.workspace.topology.nodes, ...input.nextAgents.map((agent) => agent.name)])].map((name) => {
+      const nextAgent = input.nextAgents.find((agent) => agent.name === name);
+      if (nextAgent) {
+        return {
+          type: "agent" as const,
+          name,
+          ...(nextAgent.prompt ? { prompt: nextAgent.prompt } : {}),
+          ...(nextAgent.isWritable === true ? { writable: true } : {}),
+        };
+      }
+
+      const existingNode = input.workspace.topology.nodeRecords?.find((node) => node.id === name);
+      return {
+        type: "agent" as const,
+        name,
+        ...(existingNode?.prompt ? { prompt: existingNode.prompt } : {}),
+        ...(existingNode?.writable === true ? { writable: true } : {}),
+      };
+    }),
+    links: input.workspace.topology.edges.map((edge) => [
+      edge.source,
+      edge.target,
+      edge.triggerOn,
+    ]),
   };
 }
 
@@ -264,6 +274,12 @@ async function waitForValue<T>(
   throw new Error(`Value did not satisfy the predicate in ${timeoutMs}ms.`);
 }
 
+function readBuiltinTopologyJson(fileName: string) {
+  return JSON.parse(
+    fs.readFileSync(path.join("config", "team-topologies", fileName), "utf8"),
+  ) as TeamDslDefinition;
+}
+
 test("task init 会补齐 OpenCode 运行态", async () => {
   const userDataPath = createTempDir();
   const projectPath = createTempDir();
@@ -281,6 +297,372 @@ test("task init 会补齐 OpenCode 运行态", async () => {
   assert.equal(task.messages.some((message) => /session/i.test(message.content)), false);
   assert.equal(task.agents.some((agent) => agent.name === "Build"), true);
   assert.equal(task.task.cwd, projectPath);
+});
+
+test("漏洞团队任务初始化时不会为仅作为 spawn 模板存在的静态 agent 预建 session", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  const orchestrator = createTestOrchestrator({
+    userDataPath,
+    enableEventStream: false,
+  });
+  stubOpenCodeSessions(orchestrator);
+
+  const compiled = compileTeamDsl(readBuiltinTopologyJson("vulnerability-team.topology.json"));
+  await orchestrator.applyTeamDsl({
+    cwd: projectPath,
+    compiled,
+  });
+
+  const task = await orchestrator.initializeTask({ cwd: projectPath, title: "vuln-demo" });
+  const agentByName = new Map(task.agents.map((agent) => [agent.name, agent]));
+
+  assert.equal(agentByName.get("初筛")?.opencodeSessionId, "session:vuln-demo:初筛");
+  assert.equal(agentByName.get("正方")?.opencodeSessionId, null);
+  assert.equal(agentByName.get("反方")?.opencodeSessionId, null);
+  assert.equal(agentByName.get("裁决总结")?.opencodeSessionId, null);
+});
+
+test("单节点任务进入 waiting 时不会因为缺少 workspace cwd 而在后台崩溃", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  const orchestrator = createTestOrchestrator({
+    userDataPath,
+    enableEventStream: false,
+  });
+  const typed = orchestrator as unknown as Orchestrator & {
+    createLangGraphBatchRunners: (
+      cwd: string,
+      taskId: string,
+      state: unknown,
+      batch: unknown,
+    ) => Promise<Array<{ id: string; agentName: string; promise: Promise<unknown> }>>;
+    trackBackgroundTask: (promise: Promise<unknown>, context: { taskId: string; agentName: string }) => void;
+    opencodeClient: {
+      createSession: (projectPath: string, title: string) => Promise<string>;
+      reloadConfig: () => Promise<void>;
+    };
+    opencodeRunner: {
+      run: (payload: { agent: string }) => Promise<{
+        status: "completed";
+        finalMessage: string;
+        fallbackMessage: null;
+        messageId: string;
+        timestamp: string;
+        rawMessage: {
+          content: string;
+          error: null;
+        };
+      }>;
+    };
+  };
+  stubOpenCodeAttachBaseUrl(orchestrator);
+
+  let backgroundRun: Promise<unknown> | null = null;
+  typed.trackBackgroundTask = (promise) => {
+    backgroundRun = promise;
+  };
+  typed.createLangGraphBatchRunners = async () => [];
+  typed.opencodeClient.createSession = async (_projectPath, title) => `session:${title}`;
+  typed.opencodeClient.reloadConfig = async () => undefined;
+  typed.opencodeRunner.run = async ({ agent }) => ({
+    status: "completed",
+    finalMessage: `${agent} 已完成本轮处理。`,
+    fallbackMessage: null,
+    messageId: `message:${agent}:waiting`,
+    timestamp: "2026-04-22T00:00:00.000Z",
+    rawMessage: {
+      content: `${agent} 已完成本轮处理。`,
+      error: null,
+    },
+  });
+
+  let project = await orchestrator.getWorkspaceSnapshot(projectPath);
+  project = await addCustomAgent(orchestrator, project.cwd, "BA", "你是 BA。");
+  await orchestrator.saveTopology({
+    cwd: project.cwd,
+    topology: {
+      cwd: project.cwd,
+      nodes: ["BA"],
+      edges: [],
+    },
+  });
+
+  const task = await orchestrator.submitTask({
+    cwd: project.cwd,
+    content: "@BA 请分析当前问题",
+    mentionAgent: "BA",
+  });
+
+  assert.notEqual(backgroundRun, null);
+  await assert.doesNotReject(async () => {
+    await backgroundRun;
+  });
+
+  const snapshot = await waitForTaskSnapshot(
+    orchestrator,
+    task.task.id,
+    (current) => current.task.status === "waiting",
+    3000,
+  );
+  assert.equal(snapshot.task.status, "waiting");
+});
+
+test("漏洞团队里反方返回 approved 后会继续派发到裁决总结，而不是后台中断", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  const orchestrator = createTestOrchestrator({
+    userDataPath,
+    enableEventStream: false,
+  });
+  const typed = orchestrator as unknown as Orchestrator & {
+    opencodeClient: {
+      createSession: (projectPath: string, title: string) => Promise<string>;
+      reloadConfig: () => Promise<void>;
+    };
+    opencodeRunner: {
+      run: (payload: { agent: string }) => Promise<{
+        status: "completed";
+        finalMessage: string;
+        fallbackMessage: null;
+        messageId: string;
+        timestamp: string;
+        rawMessage: {
+          content: string;
+          error: null;
+        };
+      }>;
+    };
+  };
+  stubOpenCodeAttachBaseUrl(orchestrator);
+
+  const runCountByAgent = new Map<string, number>();
+  const nextCount = (agent: string) => {
+    const next = (runCountByAgent.get(agent) ?? 0) + 1;
+    runCountByAgent.set(agent, next);
+    return next;
+  };
+
+  typed.opencodeClient.createSession = async (_projectPath, title) => `session:${title}`;
+  typed.opencodeClient.reloadConfig = async () => undefined;
+  typed.opencodeRunner.run = async ({ agent }) => {
+    const count = nextCount(agent);
+    if (agent === "初筛" && count === 1) {
+      return {
+        status: "completed",
+        finalMessage: [
+          "- 可疑点标题：HTTP/2 请求未强制要求 :authority 或 host",
+          "- 涉及文件与函数：a",
+          "- 为什么可疑：b",
+          "- 初步风险等级：高危",
+        ].join("\n"),
+        fallbackMessage: null,
+        messageId: "message:初筛:1",
+        timestamp: "2026-04-22T00:00:00.000Z",
+        rawMessage: {
+          content: "初筛第 1 轮已产出 finding",
+          error: null,
+        },
+      };
+    }
+
+    if (agent === "初筛") {
+      throw new Error("测试在首个裁决完成后主动停止后续初筛回流。");
+    }
+
+    if (agent === "反方") {
+      return {
+        status: "completed",
+        finalMessage: "证据链已经闭环，交给裁决。\n\n<approved>同意进入裁决。</approved>",
+        fallbackMessage: null,
+        messageId: `message:反方:${count}`,
+        timestamp: "2026-04-22T00:00:01.000Z",
+        rawMessage: {
+          content: "反方认可进入裁决",
+          error: null,
+        },
+      };
+    }
+
+    if (agent === "裁决总结") {
+      return {
+        status: "completed",
+        finalMessage: "裁决：该点更像真实漏洞，输出正式漏洞报告。",
+        fallbackMessage: null,
+        messageId: `message:裁决总结:${count}`,
+        timestamp: "2026-04-22T00:00:02.000Z",
+        rawMessage: {
+          content: "裁决总结已输出报告",
+          error: null,
+        },
+      };
+    }
+
+    return {
+      status: "completed",
+      finalMessage: `${agent} 已处理完成。`,
+      fallbackMessage: null,
+      messageId: `message:${agent}:${count}`,
+      timestamp: "2026-04-22T00:00:03.000Z",
+      rawMessage: {
+        content: `${agent} 已处理完成。`,
+        error: null,
+      },
+    };
+  };
+
+  const compiled = compileTeamDsl(readBuiltinTopologyJson("vulnerability-team.topology.json"));
+  await orchestrator.applyTeamDsl({
+    cwd: projectPath,
+    compiled,
+  });
+
+  const task = await orchestrator.submitTask({
+    cwd: projectPath,
+    content: "@初筛 请分析这个漏洞线索",
+    mentionAgent: "初筛",
+  });
+
+  const snapshot = await waitForTaskSnapshot(
+    orchestrator,
+    task.task.id,
+    (current) => current.messages.some((message) => message.sender.startsWith("裁决总结-")),
+    3000,
+  );
+
+  assert.equal(
+    snapshot.messages.some((message) => message.sender.startsWith("裁决总结-")),
+    true,
+  );
+});
+
+test("漏洞团队 spawn runtime agent 尚未落库时，getTaskSnapshot 不会把任务提前判 finished", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  const orchestrator = createTestOrchestrator({
+    userDataPath,
+    enableEventStream: false,
+  });
+  const typed = orchestrator as unknown as Orchestrator & {
+    store: {
+      getTask: (cwd: string, taskId: string) => { status: string };
+      listMessages: (cwd: string, taskId: string) => Array<{
+        sender: string;
+        meta?: {
+          kind?: string;
+          targetAgentIds?: string;
+          status?: string;
+        };
+      }>;
+      listTaskAgents: (cwd: string, taskId: string) => Array<{ name: string }>;
+    };
+    opencodeClient: {
+      createSession: (projectPath: string, title: string) => Promise<string>;
+      reloadConfig: () => Promise<void>;
+    };
+    opencodeRunner: {
+      run: (payload: { agent: string }) => Promise<{
+        status: "completed";
+        finalMessage: string;
+        fallbackMessage: null;
+        messageId: string;
+        timestamp: string;
+        rawMessage: {
+          content: string;
+          error: null;
+        };
+      }>;
+    };
+    buildProjectGitDiffSummary: (cwd: string) => Promise<string>;
+  };
+  stubOpenCodeAttachBaseUrl(orchestrator);
+
+  let gitSummaryCallCount = 0;
+  let releaseGitSummary: ((value: string) => void) | null = null;
+  const gitSummaryBlocked = new Promise<string>((resolve) => {
+    releaseGitSummary = resolve;
+  });
+
+  typed.opencodeClient.createSession = async (_projectPath, title) => `session:${title}`;
+  typed.opencodeClient.reloadConfig = async () => undefined;
+  typed.buildProjectGitDiffSummary = async () => {
+    gitSummaryCallCount += 1;
+    if (gitSummaryCallCount === 1) {
+      return "";
+    }
+    return gitSummaryBlocked;
+  };
+  typed.opencodeRunner.run = async ({ agent }) => {
+    if (agent === "初筛") {
+      return {
+        status: "completed",
+        finalMessage: [
+          "- 可疑点标题：HTTP/2 请求未强制要求 :authority 或 host",
+          "- 涉及文件与函数：a",
+          "- 为什么可疑：b",
+          "- 初步风险等级：高危",
+        ].join("\n"),
+        fallbackMessage: null,
+        messageId: "message:初筛:1",
+        timestamp: "2026-04-22T00:00:00.000Z",
+        rawMessage: {
+          content: "初筛第 1 轮已产出 finding",
+          error: null,
+        },
+      };
+    }
+
+    throw new Error("测试在验证 dispatch 窗口后主动终止后续执行。");
+  };
+
+  const compiled = compileTeamDsl(readBuiltinTopologyJson("vulnerability-team.topology.json"));
+  await orchestrator.applyTeamDsl({
+    cwd: projectPath,
+    compiled,
+  });
+
+  const task = await orchestrator.submitTask({
+    cwd: projectPath,
+    content: "@初筛 请分析这个漏洞线索",
+    mentionAgent: "初筛",
+  });
+
+  const runtimeAgentName = await waitForValue(
+    async () => {
+      const dispatchMessage = typed.store.listMessages(projectPath, task.task.id).findLast(
+        (message) => message.meta?.kind === "agent-dispatch" && message.sender === "初筛",
+      );
+      return dispatchMessage?.meta?.targetAgentIds ?? null;
+    },
+    (value) => typeof value === "string" && value.startsWith("反方-"),
+    3000,
+  );
+
+  assert.equal(typeof runtimeAgentName, "string");
+  assert.equal(
+    typed.store.listTaskAgents(projectPath, task.task.id).some((agent) => agent.name === runtimeAgentName),
+    false,
+  );
+
+  const snapshotDuringDispatchWindow = await orchestrator.getTaskSnapshot(task.task.id, projectPath);
+
+  assert.notEqual(snapshotDuringDispatchWindow.task.status, "finished");
+  assert.equal(
+    typed.store.listMessages(projectPath, task.task.id).some(
+      (message) => message.meta?.kind === "task-completed" && message.meta.status === "finished",
+    ),
+    false,
+  );
+  assert.equal(typed.store.getTask(projectPath, task.task.id).status, "running");
+
+  releaseGitSummary?.("");
+  const settledSnapshot = await waitForTaskSnapshot(
+    orchestrator,
+    task.task.id,
+    (current) => current.task.status === "failed",
+    3000,
+  );
+  assert.equal(settledSnapshot.task.status, "failed");
 });
 
 test("initializeTask reuses a preallocated task id when provided", async () => {
@@ -426,7 +808,7 @@ test("OpenCode 事件会触发 runtime-updated 前端事件", async () => {
 
   let project = await orchestrator.getWorkspaceSnapshot(projectPath);
   project = await addBuiltinAgents(orchestrator, project.cwd, ["Build"]);
-  await orchestrator.initializeTask({ cwd: project.cwd, title: "demo" });
+  const task = await orchestrator.initializeTask({ cwd: project.cwd, title: "demo" });
   assert.notEqual(eventHandler, null);
 
   eventHandler?.({
@@ -449,11 +831,12 @@ test("OpenCode 事件会触发 runtime-updated 前端事件", async () => {
   ) as {
     type: string;
     cwd: string;
-    payload?: { sessionId?: string | null };
+    payload?: { taskId?: string; sessionId?: string | null };
   };
 
   assert.notEqual(runtimeUpdatedEvent, undefined);
   assert.equal(runtimeUpdatedEvent?.cwd, project.cwd);
+  assert.equal(runtimeUpdatedEvent?.payload?.taskId, task.task.id);
   assert.equal(runtimeUpdatedEvent?.payload?.sessionId, "session-build-1");
   unsubscribe();
 });
@@ -583,26 +966,29 @@ test("applyTeamDsl 会一次性写入当前 Project 的 agents 与 topology", as
 
   const project = await orchestrator.getWorkspaceSnapshot(projectPath);
   const compiled = compileTeamDsl({
-    agents: [
+    entry: "BA",
+    nodes: [
       {
+        type: "agent",
         name: "Build",
+        writable: true,
       },
       {
+        type: "agent",
         name: "BA",
         prompt: TEST_AGENT_PROMPTS.BA,
       },
       {
+        type: "agent",
         name: "SecurityResearcher",
         prompt: "你负责漏洞挖掘。",
       },
     ],
-    topology: {
-      downstream: {
-        BA: { Build: "association" },
-        Build: { SecurityResearcher: "association" },
-        SecurityResearcher: { Build: "needs_revision" },
-      },
-    },
+    links: [
+      ["BA", "Build", "association"],
+      ["Build", "SecurityResearcher", "association"],
+      ["SecurityResearcher", "Build", "needs_revision"],
+    ],
   });
 
   const updated = await orchestrator.applyTeamDsl({
@@ -641,20 +1027,22 @@ test("applyTeamDsl 会直接以 DSL prompt 为唯一真源", async () => {
   const project = await orchestrator.getWorkspaceSnapshot(projectPath);
 
   const compiled = compileTeamDsl({
-    agents: [
+    entry: "BA",
+    nodes: [
       {
+        type: "agent",
         name: "BA",
         prompt: "DSL BA prompt",
       },
       {
+        type: "agent",
         name: "Build",
+        writable: true,
       },
     ],
-    topology: {
-      downstream: {
-        BA: { Build: "association" },
-      },
-    },
+    links: [
+      ["BA", "Build", "association"],
+    ],
   });
 
   const updated = await orchestrator.applyTeamDsl({
@@ -1769,7 +2157,6 @@ test("审视类 system prompt 会使用真实来源 Agent 名称", () => {
   const typed = orchestrator as unknown as Orchestrator & {
     createSystemPrompt: (
       agent: { name: string },
-      topology: { edges: Array<{ source: string; target: string; triggerOn: "association" | "needs_revision" | "approved" }> },
       prompt: {
         mode: "structured";
         from: string;
@@ -1777,30 +2164,18 @@ test("审视类 system prompt 会使用真实来源 Agent 名称", () => {
         agentMessage?: string;
         gitDiffSummary?: string;
       },
+      reviewAgent: boolean,
     ) => string;
   };
 
   const systemPrompt = typed.createSystemPrompt(
     { name: "TaskReview" },
     {
-      edges: [
-        {
-          source: "Build",
-          target: "TaskReview",
-          triggerOn: "association",
-        },
-        {
-          source: "TaskReview",
-          target: "Build",
-          triggerOn: "needs_revision",
-        },
-      ],
-    },
-    {
       mode: "structured",
       from: "BA",
       agentMessage: "这里应该替换成真实来源 Agent。",
     },
+    true,
   );
 
   assert.match(systemPrompt, /你需要对 `\[From BA Agent\]` 做出回应。/);
@@ -2352,7 +2727,7 @@ test("最大连续回流达到上限后，聊天页面会直接展示明确失�
   assert.notEqual(failedCompletionMessage, undefined);
   assert.equal(
     failedCompletionMessage?.content,
-    "UnitTest -> Build 连续回流已达到 4 轮上限，任务已终止以避免无限循环",
+    "UnitTest -> Build 已连续交流 4 次，任务已结束",
   );
 });
 
@@ -2453,7 +2828,7 @@ test("聊天页面会按每条 needs_revision 边的单独上限展示失败原�
   assert.notEqual(failedCompletionMessage, undefined);
   assert.equal(
     failedCompletionMessage?.content,
-    "UnitTest -> Build 连续回流已达到 2 轮上限，任务已终止以避免无限循环",
+    "UnitTest -> Build 已连续交流 2 次，任务已结束",
   );
 });
 

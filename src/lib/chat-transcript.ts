@@ -53,8 +53,8 @@ export function formatChatTranscript(
   }
 
   const headerLines = [
-    options.logFilePath ? `日志: ${options.logFilePath}` : null,
-    options.taskUrl ? `url: ${options.taskUrl}` : null,
+    options.logFilePath ? `日志：${options.logFilePath}` : null,
+    options.taskUrl ? `网页：${options.taskUrl}` : null,
   ].filter((line): line is string => Boolean(line));
 
   if (headerLines.length === 0) {

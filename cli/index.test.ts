@@ -144,6 +144,7 @@ test("task ui and task headless both pass command.cwd into project resolution", 
 
 test("CLI attach output only shows opencode attach commands", () => {
   assert.match(CLI_SOURCE, /renderTaskAttachCommands/);
+  assert.match(CLI_SOURCE, /collectNewTaskAttachCommandEntries/);
   assert.match(CLI_SOURCE, /buildCliOpencodeAttachCommand/);
   assert.doesNotMatch(CLI_SOURCE, /buildCliAttachAgentCommand/);
   assert.doesNotMatch(CLI_SOURCE, /resolveTaskAgentAttachBaseUrl/);

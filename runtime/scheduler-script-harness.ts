@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 
-import type { TopologyRecord } from "@shared/types";
-
-const MAX_REVIEW_FAIL_LOOP_COUNT = 4;
+import {
+  DEFAULT_NEEDS_REVISION_MAX_ROUNDS,
+  type TopologyEdgeTrigger,
+  type TopologyRecord,
+} from "@shared/types";
 
 interface ParsedScriptLine {
   sender: string;
@@ -22,17 +24,21 @@ interface SourceState {
   defaultTargets: string[];
   currentRevision: number;
   reviewerPassRevision: Map<string, number>;
-  expectedNextTargets: string[] | null;
+  expectedNextAction: ExpectedNextAction | null;
 }
 
 interface BatchResponse {
   agent: string;
   outcome: "pass" | "fail";
+  loopLimitExceeded: boolean;
+  escalationDispatched: boolean;
 }
 
 interface ActiveBatch {
   source: string;
   targets: string[];
+  canonicalTargets: string[];
+  canonicalTargetByActual: Map<string, string>;
   remainingTargets: string[];
   responses: BatchResponse[];
   sourceRevision: number;
@@ -45,33 +51,119 @@ interface ParsedScenario {
   lines: ParsedScriptLine[];
   repliesByAgent: Map<string, ParsedReply[]>;
   agentOrder: string[];
-  validAgents: Set<string>;
-  normalizeAgentRef: (name: string) => string;
+  resolver: AgentRefResolver;
 }
+
+type ExpectedNextAction =
+  | {
+      kind: "repair";
+      targets: string[];
+      reviewerAgentId: string;
+      repairTargetAgentId: string;
+    }
+  | {
+      kind: "redispatch";
+      targets: string[];
+    };
 
 interface AssertSchedulerScriptOptions {
   topology: TopologyRecord;
   script: string[];
+  expectedDecisions?: SchedulerScriptDecision[];
+}
+
+type SchedulerScriptDecision =
+  | {
+      type: "execute_batch";
+      sourceAgentId: string | null;
+      targets: string[];
+    }
+  | {
+      type: "waiting";
+      waitingReason: string;
+    }
+  | {
+      type: "finished";
+    };
+
+interface DynamicSpawnAgentRef {
+  key: string;
+  spawnNodeName: string;
+  spawnRuleId: string;
+  templateName: string;
+  role: string;
+  index: number;
+  sourceTemplateName: string | null;
+  reportToTemplateName: string | null;
+  reportToTriggerOn: TopologyEdgeTrigger;
+  isEntry: boolean;
+}
+
+interface SpawnRuleState {
+  ruleId: string;
+  spawnNodeName: string;
+  sourceTemplateName: string | null;
+  reportToTemplateName: string | null;
+  reportToTriggerOn: TopologyEdgeTrigger;
+  entryRole: string;
+  entryTemplateName: string | null;
+  roleToTemplate: Map<string, string>;
+  templateToRole: Map<string, string>;
+  edges: Array<{
+    sourceRole: string;
+    targetRole: string;
+    triggerOn: TopologyEdgeTrigger;
+  }>;
+  terminalRoles: string[];
+}
+
+interface AgentRefResolver {
+  resolve(name: string): string;
+  isKnown(agentName: string): boolean;
+  getAssociationTargets(agentName: string): string[];
+  getTriggeredTargets(agentName: string, triggerOn: "review_fail" | "review_pass"): string[];
+  hasAnyOutgoingTargets(agentName: string): boolean;
+  hasOutgoingTarget(sourceAgentName: string, targetAgentName: string): boolean;
+  getReviewFailLoopLimit(sourceAgentName: string, targetAgentName: string): number;
+  findNextPendingRepairReviewer(
+    repairTargetAgentId: string,
+    excludeReviewerAgentId: string,
+    pendingReviewerIds: Iterable<string>,
+  ): string | null;
+  matchCanonicalTargets(
+    sourceAgentName: string,
+    actualTargets: string[],
+    canonicalTargets: string[],
+    triggerOn: "association" | "review_fail" | "review_pass",
+  ): string[] | null;
 }
 
 export async function assertSchedulerScript(
   options: AssertSchedulerScriptOptions,
 ): Promise<void> {
   const parsed = parseScenario(options.topology, options.script);
-  const associationTargets = buildAssociationTargets(options.topology);
-  const outgoingTargets = buildOutgoingTargets(options.topology);
-  const reviewFailTargets = buildTriggeredTargets(options.topology, "review_fail");
+  const expectedDecisions = options.expectedDecisions ?? null;
   const sourceStates = new Map<string, SourceState>();
+  const ensureSourceState = (agentName: string): SourceState => {
+    const existing = sourceStates.get(agentName);
+    if (existing) {
+      return existing;
+    }
+    const created: SourceState = {
+      defaultTargets: parsed.resolver.getAssociationTargets(agentName),
+      currentRevision: 0,
+      reviewerPassRevision: new Map(),
+      expectedNextAction: null,
+    };
+    sourceStates.set(agentName, created);
+    return created;
+  };
   for (const agentName of parsed.agentOrder) {
-      sourceStates.set(agentName, {
-        defaultTargets: associationTargets.get(agentName) ?? [],
-        currentRevision: 0,
-        reviewerPassRevision: new Map(),
-        expectedNextTargets: null,
-    });
+    ensureSourceState(agentName);
   }
 
   const actualScript: string[] = [];
+  const actualDecisions: SchedulerScriptDecision[] = [];
   const replyIndexByAgent = new Map<string, number>();
   const activeBatches: ActiveBatch[] = [];
   const reviewFailLoopCountByEdge = new Map<string, number>();
@@ -80,6 +172,15 @@ export async function assertSchedulerScript(
     actualScript.push(line);
     const expected = parsed.normalizedScript[actualScript.length - 1];
     assert.equal(line, expected, `第 ${actualScript.length} 条脚本不匹配`);
+  };
+  const appendDecision = (decision: SchedulerScriptDecision) => {
+    actualDecisions.push(decision);
+    if (!expectedDecisions) {
+      return;
+    }
+    const expected = expectedDecisions[actualDecisions.length - 1];
+    assert.notEqual(expected, undefined, `第 ${actualDecisions.length} 个调度决策超出了 expectedDecisions`);
+    assert.deepEqual(decision, expected, `第 ${actualDecisions.length} 个调度决策不匹配`);
   };
 
   const getNextReply = (agentName: string): ParsedReply => {
@@ -90,6 +191,47 @@ export async function assertSchedulerScript(
     replyIndexByAgent.set(agentName, currentIndex + 1);
     return reply;
   };
+  const buildNextDecision = (lastResponder: string): SchedulerScriptDecision => {
+    if (activeBatches.length > 0) {
+      return {
+        type: "waiting",
+        waitingReason: "wait_pending_reviewers",
+      };
+    }
+
+    const nextExpectedSources = [...sourceStates.entries()]
+      .filter(([, state]) => state.expectedNextAction && state.expectedNextAction.targets.length > 0)
+      .map(([agentName]) => agentName);
+    if (nextExpectedSources.length > 0) {
+      assert.equal(nextExpectedSources.length, 1, "同一时刻只能有一个 Source 等待下一轮修复/剩余派发");
+      const nextSource = nextExpectedSources[0] ?? "";
+      const expectedAction = ensureSourceState(nextSource).expectedNextAction;
+      assert.notEqual(expectedAction, null, `${nextSource} 缺少 expectedNextAction`);
+      if (expectedAction?.kind === "repair") {
+        return {
+          type: "execute_batch",
+          sourceAgentId: expectedAction.reviewerAgentId,
+          targets: [expectedAction.repairTargetAgentId],
+        };
+      }
+      return {
+        type: "execute_batch",
+        sourceAgentId: nextSource,
+        targets: [...(expectedAction?.targets ?? [])],
+      };
+    }
+
+    if (!parsed.resolver.hasAnyOutgoingTargets(lastResponder)) {
+      return {
+        type: "finished",
+      };
+    }
+
+    return {
+      type: "waiting",
+      waitingReason: "no_runnable_agents",
+    };
+  };
 
   const finalizeBatchIfPossible = () => {
     while (activeBatches.length > 0) {
@@ -99,17 +241,44 @@ export async function assertSchedulerScript(
       }
 
       activeBatches.pop();
-      const sourceState = sourceStates.get(current.source);
-      assert.notEqual(sourceState, undefined, `缺少 SourceState：${current.source}`);
-
-      const firstFailed = current.responses.find((item) => item.outcome === "fail") ?? null;
+      const sourceState = ensureSourceState(current.source);
+      const firstFailed = current.canonicalTargets
+        .map((canonicalTarget) =>
+          current.responses.find(
+            (item) =>
+              item.outcome === "fail"
+              && (current.canonicalTargetByActual.get(item.agent) ?? item.agent) === canonicalTarget,
+          ) ?? null)
+        .find((item) => item !== null) ?? null;
       if (firstFailed) {
-        sourceState.expectedNextTargets = [firstFailed.agent];
+        if (firstFailed.loopLimitExceeded) {
+          if (firstFailed.escalationDispatched) {
+            sourceState.expectedNextAction = null;
+            continue;
+          }
+          const escalationTargets = parsed.resolver.getTriggeredTargets(firstFailed.agent, "review_pass");
+          assert.ok(
+            escalationTargets.length > 0,
+            `${firstFailed.agent} -> ${current.source} 连续回流已超过 ${parsed.resolver.getReviewFailLoopLimit(firstFailed.agent, current.source)} 轮上限`,
+          );
+          ensureSourceState(firstFailed.agent).expectedNextAction = {
+            kind: "redispatch",
+            targets: escalationTargets,
+          };
+          sourceState.expectedNextAction = null;
+          continue;
+        }
+        sourceState.expectedNextAction = {
+          kind: "repair",
+          targets: [firstFailed.agent],
+          reviewerAgentId: firstFailed.agent,
+          repairTargetAgentId: current.source,
+        };
         continue;
       }
 
-      if (current.sourceHadBody && current.targets.length === 1) {
-        const currentReviewer = current.targets[0] ?? "";
+      if (current.sourceHadBody && current.canonicalTargets.length === 1) {
+        const currentReviewer = current.canonicalTargets[0] ?? "";
         const currentReviewerIndex = sourceState.defaultTargets.indexOf(currentReviewer);
         const trailingTargets = currentReviewerIndex >= 0
           ? sourceState.defaultTargets.slice(currentReviewerIndex + 1)
@@ -121,17 +290,24 @@ export async function assertSchedulerScript(
           (target) => sourceState.reviewerPassRevision.get(target) !== sourceState.currentRevision,
         );
         const staleTargets = [...trailingTargets, ...leadingStaleTargets];
-        sourceState.expectedNextTargets = staleTargets.length > 0 ? staleTargets : null;
+        sourceState.expectedNextAction = staleTargets.length > 0
+          ? {
+              kind: "redispatch",
+              targets: staleTargets,
+            }
+          : null;
         continue;
       }
 
-      sourceState.expectedNextTargets = null;
+      sourceState.expectedNextAction = null;
     }
   };
 
   const processReplyLine = (agentName: string): void => {
     const reply = getNextReply(agentName);
     const currentBatch = activeBatches[activeBatches.length - 1] ?? null;
+    const normalizedReplyTargets = reply.targets.map((target) => parsed.resolver.resolve(target));
+    let nextDecision: SchedulerScriptDecision | null = null;
 
     if (currentBatch) {
       const responderIndex = currentBatch.remainingTargets.indexOf(agentName);
@@ -142,22 +318,50 @@ export async function assertSchedulerScript(
       );
       currentBatch.remainingTargets.splice(responderIndex, 1);
     } else {
-      const sourceState = sourceStates.get(agentName);
-      assert.notEqual(sourceState, undefined, `缺少 SourceState：${agentName}`);
-      const expectedTargets = sourceState.expectedNextTargets;
+      const sourceState = ensureSourceState(agentName);
+      const expectedAction = sourceState.expectedNextAction;
+      const expectedTargets = expectedAction?.targets ?? null;
       if (expectedTargets) {
-        assert.deepEqual(
-          reply.targets.map(parsed.normalizeAgentRef),
-          expectedTargets,
-          `${agentName} 的 @ 目标与预期不一致`,
+        const expectedRepairTarget = expectedAction?.kind === "repair"
+          ? expectedAction.reviewerAgentId
+          : expectedTargets.length === 1 ? expectedTargets[0] ?? "" : "";
+        const reviewPassTargets = parsed.resolver.getTriggeredTargets(agentName, "review_pass");
+        const expectedEscalation = expectedRepairTarget
+          && reviewPassTargets.length > 0
+          && (reviewFailLoopCountByEdge.get(buildReviewFailLoopEdgeKey(agentName, expectedRepairTarget)) ?? 0)
+            >= parsed.resolver.getReviewFailLoopLimit(agentName, expectedRepairTarget)
+          && Boolean(
+            normalizedReplyTargets.length > 0
+            && parsed.resolver.matchCanonicalTargets(
+              agentName,
+              normalizedReplyTargets,
+              reviewPassTargets,
+              "review_pass",
+            ),
+          );
+        if (!expectedEscalation) {
+          assert.deepEqual(
+            normalizedReplyTargets,
+            expectedTargets,
+            `${agentName} 的 @ 目标与预期不一致`,
+          );
+        }
+      } else if (normalizedReplyTargets.length > 0) {
+        const directReviewFailTargets = parsed.resolver.getTriggeredTargets(agentName, "review_fail");
+        const matchesAssociationTargets = parsed.resolver.matchCanonicalTargets(
+          agentName,
+          normalizedReplyTargets,
+          sourceState.defaultTargets,
+          "association",
         );
-      } else if (reply.targets.length > 0) {
-        const directReviewFailTargets = reviewFailTargets.get(agentName) ?? [];
-        const normalizedTargets = reply.targets.map(parsed.normalizeAgentRef);
-        const matchesAssociationTargets = areSameOrderedTargets(normalizedTargets, sourceState.defaultTargets);
-        const matchesDirectReviewFailTargets = areSameOrderedTargets(normalizedTargets, directReviewFailTargets);
+        const matchesDirectReviewFailTargets = parsed.resolver.matchCanonicalTargets(
+          agentName,
+          normalizedReplyTargets,
+          directReviewFailTargets,
+          "review_fail",
+        );
         assert.equal(
-          matchesAssociationTargets || matchesDirectReviewFailTargets,
+          Boolean(matchesAssociationTargets || matchesDirectReviewFailTargets),
           true,
           `${agentName} 的初始/全量派发目标必须等于 topology.association 默认顺序，或匹配其 direct review_fail 下游`,
         );
@@ -167,112 +371,178 @@ export async function assertSchedulerScript(
     appendLine(reply.normalized);
 
     if (!currentBatch) {
-      const sourceState = sourceStates.get(agentName);
-      assert.notEqual(sourceState, undefined, `缺少 SourceState：${agentName}`);
-      sourceState.expectedNextTargets = null;
+      const sourceState = ensureSourceState(agentName);
+      sourceState.expectedNextAction = null;
 
-      if (reply.targets.length === 0) {
+      if (normalizedReplyTargets.length === 0) {
+        appendDecision(buildNextDecision(agentName));
         return;
       }
-
-      const normalizedReplyTargets = reply.targets.map(parsed.normalizeAgentRef);
 
       if (reply.body) {
         sourceState.currentRevision += 1;
       }
 
-      for (const target of reply.targets) {
-        const normalizedTarget = parsed.normalizeAgentRef(target);
+      for (const target of normalizedReplyTargets) {
         assert.ok(
-          (outgoingTargets.get(agentName) ?? new Set()).has(normalizedTarget),
+          parsed.resolver.hasOutgoingTarget(agentName, target),
           `脚本里的派发 ${agentName}: @${target} 没有对应的拓扑边`,
         );
       }
 
+      const directReviewFailTargets = parsed.resolver.getTriggeredTargets(agentName, "review_fail");
+      const canonicalTargets = sourceState.expectedNextAction?.targets
+        ?? parsed.resolver.matchCanonicalTargets(
+          agentName,
+          normalizedReplyTargets,
+          sourceState.defaultTargets,
+          "association",
+        )
+        ?? parsed.resolver.matchCanonicalTargets(
+          agentName,
+          normalizedReplyTargets,
+          directReviewFailTargets,
+          "review_fail",
+        )
+        ?? normalizedReplyTargets;
+
       activeBatches.push({
         source: agentName,
         targets: [...normalizedReplyTargets],
+        canonicalTargets: [...canonicalTargets],
+        canonicalTargetByActual: new Map(
+          normalizedReplyTargets.map((target, index) => [target, canonicalTargets[index] ?? target]),
+        ),
         remainingTargets: [...normalizedReplyTargets],
         responses: [],
         sourceRevision: sourceState.currentRevision,
         sourceHadBody: reply.body.length > 0,
       });
+      appendDecision({
+        type: "execute_batch",
+        sourceAgentId: agentName,
+        targets: [...normalizedReplyTargets],
+      });
       return;
     }
 
     const currentSource = currentBatch.source;
-    const failTargets = reviewFailTargets.get(agentName) ?? [];
-    const isFail = reply.targets.length === 1
-      && parsed.normalizeAgentRef(reply.targets[0] ?? "") === currentSource
+    const failTargets = parsed.resolver.getTriggeredTargets(agentName, "review_fail");
+    const reviewPassTargets = parsed.resolver.getTriggeredTargets(agentName, "review_pass");
+    const loopEdgeKey = buildReviewFailLoopEdgeKey(agentName, currentSource);
+    const currentLoopCount = reviewFailLoopCountByEdge.get(loopEdgeKey) ?? 0;
+    const reviewFailLoopLimit = parsed.resolver.getReviewFailLoopLimit(agentName, currentSource);
+    const isFail = normalizedReplyTargets.length === 1
+      && normalizedReplyTargets[0] === currentSource
       && failTargets.includes(currentSource);
+    const isLoopLimitEscalation = !isFail
+      && normalizedReplyTargets.length > 0
+      && reviewPassTargets.length > 0
+      && failTargets.includes(currentSource)
+      && currentLoopCount >= reviewFailLoopLimit
+      && Boolean(
+        parsed.resolver.matchCanonicalTargets(
+          agentName,
+          normalizedReplyTargets,
+          reviewPassTargets,
+          "review_pass",
+        ),
+      );
 
     currentBatch.responses.push({
       agent: agentName,
-      outcome: isFail ? "fail" : "pass",
+      outcome: isFail || isLoopLimitEscalation ? "fail" : "pass",
+      loopLimitExceeded: isLoopLimitEscalation,
+      escalationDispatched: isLoopLimitEscalation,
     });
 
-    if (!isFail) {
+    if (!isFail && !isLoopLimitEscalation) {
       clearReviewFailLoopCountsForReviewer(reviewFailLoopCountByEdge, agentName);
-      const sourceState = sourceStates.get(currentSource);
-      assert.notEqual(sourceState, undefined, `缺少 SourceState：${currentSource}`);
-      sourceState.reviewerPassRevision.set(agentName, currentBatch.sourceRevision);
+      const sourceState = ensureSourceState(currentSource);
+      const canonicalTarget = currentBatch.canonicalTargetByActual.get(agentName) ?? agentName;
+      sourceState.reviewerPassRevision.set(canonicalTarget, currentBatch.sourceRevision);
     } else {
-      const edgeKey = buildReviewFailLoopEdgeKey(agentName, currentSource);
-      const nextLoopCount = (reviewFailLoopCountByEdge.get(edgeKey) ?? 0) + 1;
-      reviewFailLoopCountByEdge.set(edgeKey, nextLoopCount);
-      assert.ok(
-        nextLoopCount <= MAX_REVIEW_FAIL_LOOP_COUNT,
-        `${agentName} -> ${currentSource} 连续回流已超过 ${MAX_REVIEW_FAIL_LOOP_COUNT} 轮上限`,
-      );
+      const nextLoopCount = (reviewFailLoopCountByEdge.get(loopEdgeKey) ?? 0) + 1;
+      reviewFailLoopCountByEdge.set(loopEdgeKey, nextLoopCount);
+      const loopLimitExceeded = isLoopLimitEscalation || nextLoopCount > reviewFailLoopLimit;
+      const latestResponse = currentBatch.responses[currentBatch.responses.length - 1];
+      if (latestResponse) {
+        latestResponse.loopLimitExceeded = loopLimitExceeded;
+      }
+      if (loopLimitExceeded) {
+        const pendingReviewerIds = currentBatch.responses
+          .filter((response) => response.outcome === "fail" && response.agent !== agentName)
+          .map((response) => response.agent);
+        const nextPendingReviewer = parsed.resolver.findNextPendingRepairReviewer(
+          currentSource,
+          agentName,
+          pendingReviewerIds,
+        );
+        if (!nextPendingReviewer) {
+          assert.ok(
+            reviewPassTargets.length > 0,
+            `${agentName} -> ${currentSource} 连续回流已超过 ${reviewFailLoopLimit} 轮上限`,
+          );
+        }
+      }
     }
 
-    if (!isFail && reply.targets.length > 0) {
-      const normalizedReplyTargets = reply.targets.map(parsed.normalizeAgentRef);
-
-      for (const target of reply.targets) {
-        const normalizedTarget = parsed.normalizeAgentRef(target);
+    if ((!isFail || isLoopLimitEscalation) && normalizedReplyTargets.length > 0) {
+      for (const target of normalizedReplyTargets) {
         assert.ok(
-          (outgoingTargets.get(agentName) ?? new Set()).has(normalizedTarget),
+          parsed.resolver.hasOutgoingTarget(agentName, target),
           `脚本里的派发 ${agentName}: @${target} 没有对应的拓扑边`,
         );
       }
 
-      const nestedSourceState = sourceStates.get(agentName);
-      assert.notEqual(nestedSourceState, undefined, `缺少 SourceState：${agentName}`);
+      const nestedSourceState = ensureSourceState(agentName);
       if (reply.body) {
         nestedSourceState.currentRevision += 1;
       }
-      nestedSourceState.expectedNextTargets = null;
+      nestedSourceState.expectedNextAction = null;
 
       activeBatches.push({
         source: agentName,
         targets: [...normalizedReplyTargets],
+        canonicalTargets: [...normalizedReplyTargets],
+        canonicalTargetByActual: new Map(normalizedReplyTargets.map((target) => [target, target])),
         remainingTargets: [...normalizedReplyTargets],
         responses: [],
         sourceRevision: nestedSourceState.currentRevision,
         sourceHadBody: reply.body.length > 0,
       });
+      nextDecision = {
+        type: "execute_batch",
+        sourceAgentId: agentName,
+        targets: [...normalizedReplyTargets],
+      };
     }
 
     finalizeBatchIfPossible();
+    appendDecision(nextDecision ?? buildNextDecision(agentName));
   };
 
   const firstLine = parsed.lines[0];
   assert.notEqual(firstLine, undefined, "脚本不能为空");
   appendLine(firstLine.normalized);
+  appendDecision({
+    type: "execute_batch",
+    sourceAgentId: null,
+    targets: [parsed.startAgent],
+  });
 
   while (actualScript.length < parsed.normalizedScript.length) {
     const currentBatch = activeBatches[activeBatches.length - 1] ?? null;
     if (currentBatch) {
       const nextLine = parsed.lines[actualScript.length];
-      const nextAgent = nextLine ? parsed.normalizeAgentRef(nextLine.sender) : undefined;
+      const nextAgent = nextLine ? parsed.resolver.resolve(nextLine.sender) : undefined;
       assert.notEqual(nextAgent, undefined, `批次 ${currentBatch.source} 缺少下一个回应者`);
       processReplyLine(nextAgent);
       continue;
     }
 
     const nextExpectedSources = [...sourceStates.entries()]
-      .filter(([, state]) => state.expectedNextTargets && state.expectedNextTargets.length > 0)
+      .filter(([, state]) => state.expectedNextAction && state.expectedNextAction.targets.length > 0)
       .map(([agentName]) => agentName);
     if (nextExpectedSources.length > 0) {
       assert.equal(nextExpectedSources.length, 1, "同一时刻只能有一个 Source 等待下一轮修复/剩余派发");
@@ -289,10 +559,17 @@ export async function assertSchedulerScript(
   }
 
   assert.deepEqual(actualScript, parsed.normalizedScript);
+  if (expectedDecisions) {
+    assert.equal(
+      actualDecisions.length,
+      expectedDecisions.length,
+      "actualDecisions 与 expectedDecisions 的条数不一致",
+    );
+  }
 }
 
 function parseScenario(topology: TopologyRecord, script: string[]): ParsedScenario {
-  const normalizeAgentRef = createAgentRefNormalizer(topology);
+  const resolver = createAgentRefResolver(topology);
   const lines = script
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
@@ -302,23 +579,20 @@ function parseScenario(topology: TopologyRecord, script: string[]): ParsedScenar
   const firstLine = lines[0];
   assert.equal(firstLine?.sender, "user", "第一条脚本必须是 user: @Agent ...");
 
-  const startAgent = normalizeAgentRef(extractLeadingMention(firstLine.content) ?? "");
-  assert.notEqual(startAgent, undefined, "第一条脚本必须以 @Agent 开头");
-  const validAgents = new Set(topology.nodes);
-  assert.ok(validAgents.size > 0, "topology.nodes 至少要包含一个 Agent");
-  assert.ok(validAgents.has(startAgent), "第一条 user 消息的 @Agent 必须存在于 topology.nodes");
+  const startAgent = resolver.resolve(extractLeadingMention(firstLine.content) ?? "");
+  assert.notEqual(startAgent, "", "第一条脚本必须以 @Agent 开头");
+  assert.ok(resolver.isKnown(startAgent), "第一条 user 消息的 @Agent 必须存在于 topology.nodes");
   const agentOrder = [...topology.nodes];
-  for (const agentName of agentOrder) {
-    assert.ok(validAgents.has(agentName), `topology.nodes 包含未知 Agent：${agentName}`);
-  }
+  assert.ok(agentOrder.length > 0, "topology.nodes 至少要包含一个 Agent");
 
   const repliesByAgent = new Map<string, ParsedReply[]>();
   for (const line of lines.slice(1)) {
-    const normalizedSender = normalizeAgentRef(line.sender);
-    assert.ok(validAgents.has(normalizedSender), `脚本里出现了 topology 中不存在的 Agent：${line.sender}`);
+    const normalizedSender = resolver.resolve(line.sender);
+    assert.ok(resolver.isKnown(normalizedSender), `脚本里出现了 topology 中不存在的 Agent：${line.sender}`);
     const parsedReply = parseReply(line);
     for (const target of parsedReply.targets) {
-      assert.ok(validAgents.has(normalizeAgentRef(target)), `脚本里 @ 了 topology 中不存在的 Agent：${target}`);
+      const normalizedTarget = resolver.resolve(target);
+      assert.ok(resolver.isKnown(normalizedTarget), `脚本里 @ 了 topology 中不存在的 Agent：${target}`);
     }
     const currentReplies = repliesByAgent.get(normalizedSender) ?? [];
     currentReplies.push({
@@ -334,34 +608,458 @@ function parseScenario(topology: TopologyRecord, script: string[]): ParsedScenar
     lines,
     repliesByAgent,
     agentOrder,
-    validAgents,
-    normalizeAgentRef,
+    resolver,
   };
 }
 
-function createAgentRefNormalizer(topology: TopologyRecord): (name: string) => string {
-  const spawnTemplateNames = new Set(
+function createDynamicSpawnAgentKey(input: {
+  spawnNodeName: string;
+  templateName: string;
+  index: number;
+}): string {
+  return `spawn:${input.spawnNodeName}:${input.templateName}-${input.index}`;
+}
+
+function parseSpawnAliasRef(trimmed: string): { templateName: string; index: number } | null {
+  const spawnStyleMatch = trimmed.match(/^(.+)-spawn(\d+)$/u);
+  if (spawnStyleMatch) {
+    const templateName = spawnStyleMatch[1]?.trim() ?? "";
+    const index = Number.parseInt(spawnStyleMatch[2] ?? "", 10);
+    if (templateName && Number.isInteger(index) && index > 0) {
+      return { templateName, index };
+    }
+  }
+
+  const legacyMatch = trimmed.match(/^(.+)-(\d+)$/u);
+  if (!legacyMatch) {
+    return null;
+  }
+  const templateName = legacyMatch[1]?.trim() ?? "";
+  const index = Number.parseInt(legacyMatch[2] ?? "", 10);
+  if (!templateName || !Number.isInteger(index) || index <= 0) {
+    return null;
+  }
+  return { templateName, index };
+}
+
+function createAgentRefResolver(topology: TopologyRecord): AgentRefResolver {
+  const staticAgents = new Set(topology.nodes);
+  const staticSpawnTemplateNames = new Set(
     (topology.nodeRecords ?? [])
       .filter((node) => node.kind === "spawn")
       .map((node) => node.templateName),
   );
+  const staticAssociationTargets = new Map<string, string[]>();
+  const staticTriggeredTargets = new Map<string, string[]>();
+  const staticOutgoingTargets = new Map<string, Set<string>>();
+  const reviewFailLoopLimitByEdge = new Map<string, number>();
+  const normalizeStoredTrigger = (triggerOn: unknown): TopologyEdgeTrigger | "association" | null => {
+    if (triggerOn === "association") {
+      return "association";
+    }
+    if (triggerOn === "approved" || triggerOn === "review_pass") {
+      return "approved";
+    }
+    if (triggerOn === "needs_revision" || triggerOn === "review_fail") {
+      return "needs_revision";
+    }
+    return null;
+  };
+  for (const edge of topology.edges) {
+    const normalizedEdgeTrigger = normalizeStoredTrigger(edge.triggerOn);
+    if (normalizedEdgeTrigger === "association") {
+      const current = staticAssociationTargets.get(edge.source) ?? [];
+      if (!current.includes(edge.target)) {
+        current.push(edge.target);
+      }
+      staticAssociationTargets.set(edge.source, current);
+    }
 
-  return (name: string) => {
-    const trimmed = name.trim();
-    const match = trimmed.match(/^(.+)-(\d+)$/u);
+    if (normalizedEdgeTrigger === "approved" || normalizedEdgeTrigger === "needs_revision") {
+      const triggerKey = `${edge.source}::${normalizedEdgeTrigger}`;
+      const current = staticTriggeredTargets.get(triggerKey) ?? [];
+      if (!current.includes(edge.target)) {
+        current.push(edge.target);
+      }
+      staticTriggeredTargets.set(triggerKey, current);
+    }
+
+    if (normalizedEdgeTrigger === "needs_revision") {
+      reviewFailLoopLimitByEdge.set(
+        buildReviewFailLoopEdgeKey(edge.source, edge.target),
+        typeof edge.maxRevisionRounds === "number" && Number.isFinite(edge.maxRevisionRounds)
+          ? Math.max(1, Math.floor(edge.maxRevisionRounds))
+          : DEFAULT_NEEDS_REVISION_MAX_ROUNDS,
+      );
+    }
+
+    const outgoing = staticOutgoingTargets.get(edge.source) ?? new Set<string>();
+    outgoing.add(edge.target);
+    staticOutgoingTargets.set(edge.source, outgoing);
+  }
+
+  const spawnRuleStates: SpawnRuleState[] = (topology.spawnRules ?? []).map((rule) => {
+    const spawnNodeName = rule.spawnNodeName
+      || topology.nodeRecords?.find((node) => node.spawnRuleId === rule.id)?.id
+      || "";
+    const roleToTemplate = new Map(rule.spawnedAgents.map((agent) => [agent.role, agent.templateName]));
+    const templateToRole = new Map<string, string>();
+    for (const agent of rule.spawnedAgents) {
+      if (!templateToRole.has(agent.templateName)) {
+        templateToRole.set(agent.templateName, agent.role);
+      }
+    }
+    const terminalRoles = rule.spawnedAgents
+      .map((agent) => agent.role)
+      .filter((role) => !rule.edges.some((edge) => edge.sourceRole === role));
+    return {
+      ruleId: rule.id,
+      spawnNodeName,
+      sourceTemplateName: rule.sourceTemplateName ?? null,
+      reportToTemplateName: rule.reportToTemplateName ?? null,
+      reportToTriggerOn: rule.reportToTriggerOn ?? "approved",
+      entryRole: rule.entryRole,
+      entryTemplateName: roleToTemplate.get(rule.entryRole) ?? null,
+      roleToTemplate,
+      templateToRole,
+      edges: rule.edges.map((edge) => ({ ...edge })),
+      terminalRoles,
+    };
+  });
+
+  const spawnRuleById = new Map(spawnRuleStates.map((state) => [state.ruleId, state]));
+  const dynamicRuleIdByTemplateName = new Map<string, string>();
+  const dynamicRefsByKey = new Map<string, DynamicSpawnAgentRef>();
+
+  for (const state of spawnRuleStates) {
+    for (const [templateName] of state.templateToRole.entries()) {
+      if (templateName === state.spawnNodeName) {
+        continue;
+      }
+      const existing = dynamicRuleIdByTemplateName.get(templateName);
+      assert.ok(
+        existing === undefined || existing === state.ruleId,
+        `spawn 模板名 ${templateName} 在多个 spawn rule 中重复，脚本引用会产生歧义。`,
+      );
+      dynamicRuleIdByTemplateName.set(templateName, state.ruleId);
+    }
+  }
+
+  const createDynamicRef = (input: {
+    ruleId: string;
+    templateName: string;
+    role: string;
+    index: number;
+  }): DynamicSpawnAgentRef => {
+    const ruleState = spawnRuleById.get(input.ruleId);
+    assert.notEqual(ruleState, undefined, `未知 spawn rule：${input.ruleId}`);
+    const key = createDynamicSpawnAgentKey({
+      spawnNodeName: ruleState.spawnNodeName,
+      templateName: input.templateName,
+      index: input.index,
+    });
+    const existing = dynamicRefsByKey.get(key);
+    if (existing) {
+      return existing;
+    }
+    const created: DynamicSpawnAgentRef = {
+      key,
+      spawnNodeName: ruleState.spawnNodeName,
+      spawnRuleId: ruleState.ruleId,
+      templateName: input.templateName,
+      role: input.role,
+      index: input.index,
+      sourceTemplateName: ruleState.sourceTemplateName,
+      reportToTemplateName: ruleState.reportToTemplateName,
+      reportToTriggerOn: ruleState.reportToTriggerOn,
+      isEntry: input.role === ruleState.entryRole,
+    };
+    dynamicRefsByKey.set(key, created);
+    return created;
+  };
+
+  const resolveDisplayNameRef = (trimmed: string): string | null => {
+    const parsedAlias = parseSpawnAliasRef(trimmed);
+    if (!parsedAlias) {
+      return null;
+    }
+    const { templateName, index } = parsedAlias;
+    if (staticSpawnTemplateNames.has(templateName) && staticAgents.has(templateName)) {
+      return templateName;
+    }
+    const ruleId = dynamicRuleIdByTemplateName.get(templateName);
+    if (!ruleId) {
+      return null;
+    }
+    const ruleState = spawnRuleById.get(ruleId);
+    const role = ruleState?.templateToRole.get(templateName);
+    if (!ruleState || !role) {
+      return null;
+    }
+    return createDynamicRef({
+      ruleId,
+      templateName,
+      role,
+      index,
+    }).key;
+  };
+
+  const resolveRuntimeIdRef = (trimmed: string): string | null => {
+    const match = trimmed.match(/^([^#]+)#(.+)$/u);
     if (!match) {
+      return null;
+    }
+    const role = match[1]?.trim() ?? "";
+    const groupId = match[2]?.trim() ?? "";
+    if (!role || !groupId) {
+      return null;
+    }
+    const ruleState = spawnRuleStates.find((state) => groupId.startsWith(`${state.ruleId}:`));
+    if (!ruleState) {
+      return null;
+    }
+    const templateName = ruleState.roleToTemplate.get(role);
+    if (!templateName) {
+      return null;
+    }
+    if (templateName === ruleState.spawnNodeName) {
+      return ruleState.spawnNodeName;
+    }
+    const indexMatch = groupId.match(/(\d+)(?!.*\d)/u);
+    const index = Number.parseInt(indexMatch?.[1] ?? "", 10);
+    if (!Number.isInteger(index) || index <= 0) {
+      return null;
+    }
+    return createDynamicRef({
+      ruleId: ruleState.ruleId,
+      templateName,
+      role,
+      index,
+    }).key;
+  };
+
+  const resolve = (name: string): string => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      return "";
+    }
+    if (staticAgents.has(trimmed)) {
       return trimmed;
     }
-    const templateName = match[1]?.trim() ?? trimmed;
-    return spawnTemplateNames.has(templateName) ? templateName : trimmed;
+    return resolveRuntimeIdRef(trimmed) ?? resolveDisplayNameRef(trimmed) ?? trimmed;
+  };
+
+  const isKnown = (agentName: string): boolean => staticAgents.has(agentName) || dynamicRefsByKey.has(agentName);
+
+  const normalizeTrigger = (
+    triggerOn: "association" | "review_fail" | "review_pass" | TopologyEdgeTrigger,
+  ): TopologyEdgeTrigger | "association" => {
+    if (triggerOn === "review_fail") {
+      return "needs_revision";
+    }
+    if (triggerOn === "review_pass") {
+      return "approved";
+    }
+    return triggerOn;
+  };
+
+  const getDynamicRef = (agentName: string): DynamicSpawnAgentRef | null => dynamicRefsByKey.get(agentName) ?? null;
+
+  const getAssociationTargets = (agentName: string): string[] => {
+    if (staticAgents.has(agentName)) {
+      return [...(staticAssociationTargets.get(agentName) ?? [])];
+    }
+    return [];
+  };
+
+  const getTriggeredTargets = (
+    agentName: string,
+    triggerOn: "review_fail" | "review_pass",
+  ): string[] => {
+    const dynamicRef = getDynamicRef(agentName);
+    const normalizedTrigger = normalizeTrigger(triggerOn);
+    if (!dynamicRef) {
+      return [...(staticTriggeredTargets.get(`${agentName}::${normalizedTrigger}`) ?? [])];
+    }
+
+    const ruleState = spawnRuleById.get(dynamicRef.spawnRuleId);
+    if (!ruleState) {
+      return [];
+    }
+
+    const targets: string[] = [];
+    for (const edge of ruleState.edges) {
+      if (edge.sourceRole !== dynamicRef.role || edge.triggerOn !== normalizedTrigger) {
+        continue;
+      }
+      const targetTemplateName = ruleState.roleToTemplate.get(edge.targetRole);
+      if (!targetTemplateName) {
+        continue;
+      }
+      if (targetTemplateName === ruleState.spawnNodeName) {
+        targets.push(ruleState.spawnNodeName);
+        continue;
+      }
+      targets.push(createDynamicRef({
+        ruleId: ruleState.ruleId,
+        templateName: targetTemplateName,
+        role: edge.targetRole,
+        index: dynamicRef.index,
+      }).key);
+    }
+
+    if (
+      ruleState.terminalRoles.includes(dynamicRef.role)
+      && dynamicRef.reportToTemplateName
+      && dynamicRef.reportToTriggerOn === normalizedTrigger
+      && !targets.includes(dynamicRef.reportToTemplateName)
+    ) {
+      targets.push(dynamicRef.reportToTemplateName);
+    }
+
+    return targets;
+  };
+
+  const getAllOutgoingTargets = (agentName: string): Set<string> => {
+    const dynamicRef = getDynamicRef(agentName);
+    if (!dynamicRef) {
+      return new Set(staticOutgoingTargets.get(agentName) ?? []);
+    }
+
+    const ruleState = spawnRuleById.get(dynamicRef.spawnRuleId);
+    if (!ruleState) {
+      return new Set();
+    }
+
+    const targets = new Set<string>();
+    for (const edge of ruleState.edges) {
+      if (edge.sourceRole !== dynamicRef.role) {
+        continue;
+      }
+      const targetTemplateName = ruleState.roleToTemplate.get(edge.targetRole);
+      if (!targetTemplateName) {
+        continue;
+      }
+      if (targetTemplateName === ruleState.spawnNodeName) {
+        targets.add(ruleState.spawnNodeName);
+        continue;
+      }
+      targets.add(createDynamicRef({
+        ruleId: ruleState.ruleId,
+        templateName: targetTemplateName,
+        role: edge.targetRole,
+        index: dynamicRef.index,
+      }).key);
+    }
+
+    if (ruleState.terminalRoles.includes(dynamicRef.role) && dynamicRef.reportToTemplateName) {
+      targets.add(dynamicRef.reportToTemplateName);
+    }
+
+    return targets;
+  };
+
+  const hasOutgoingTarget = (sourceAgentName: string, targetAgentName: string): boolean =>
+    {
+      if (getAllOutgoingTargets(sourceAgentName).has(targetAgentName)) {
+        return true;
+      }
+      const dynamicRef = getDynamicRef(targetAgentName);
+      if (!dynamicRef) {
+        return false;
+      }
+      return (
+        dynamicRef.isEntry
+        && (dynamicRef.sourceTemplateName === sourceAgentName
+          || (staticOutgoingTargets.get(sourceAgentName) ?? new Set<string>()).has(dynamicRef.spawnNodeName))
+      );
+    };
+  const hasAnyOutgoingTargets = (agentName: string): boolean => getAllOutgoingTargets(agentName).size > 0;
+
+  const getReviewFailLoopLimit = (sourceAgentName: string, targetAgentName: string): number =>
+    reviewFailLoopLimitByEdge.get(buildReviewFailLoopEdgeKey(sourceAgentName, targetAgentName))
+    ?? DEFAULT_NEEDS_REVISION_MAX_ROUNDS;
+
+  const findNextPendingRepairReviewer = (
+    repairTargetAgentId: string,
+    excludeReviewerAgentId: string,
+    pendingReviewerIds: Iterable<string>,
+  ): string | null => {
+    const pendingSet = new Set(pendingReviewerIds);
+    for (const edge of topology.edges) {
+      const normalizedEdgeTrigger = normalizeStoredTrigger(edge.triggerOn);
+      if (
+        normalizedEdgeTrigger === "needs_revision"
+        && edge.target === repairTargetAgentId
+        && edge.source !== excludeReviewerAgentId
+        && pendingSet.has(edge.source)
+      ) {
+        return edge.source;
+      }
+    }
+    return null;
+  };
+
+  const matchesCanonicalTarget = (
+    sourceAgentName: string,
+    actualTargetName: string,
+    canonicalTargetName: string,
+    triggerOn: "association" | "review_fail" | "review_pass",
+  ): boolean => {
+    if (actualTargetName === canonicalTargetName) {
+      return true;
+    }
+    if (triggerOn !== "association") {
+      return false;
+    }
+    const dynamicRef = getDynamicRef(actualTargetName);
+    if (!dynamicRef) {
+      return false;
+    }
+    return (
+      dynamicRef.isEntry
+      && dynamicRef.spawnNodeName === canonicalTargetName
+      && (dynamicRef.sourceTemplateName === sourceAgentName
+        || (staticOutgoingTargets.get(sourceAgentName) ?? new Set<string>()).has(dynamicRef.spawnNodeName))
+    );
+  };
+
+  const matchCanonicalTargets = (
+    sourceAgentName: string,
+    actualTargets: string[],
+    canonicalTargets: string[],
+    triggerOn: "association" | "review_fail" | "review_pass",
+  ): string[] | null => {
+    if (actualTargets.length !== canonicalTargets.length) {
+      return null;
+    }
+    const matched = canonicalTargets.every((canonicalTarget, index) =>
+      matchesCanonicalTarget(sourceAgentName, actualTargets[index] ?? "", canonicalTarget, triggerOn),
+    );
+    return matched ? canonicalTargets : null;
+  };
+
+  return {
+    resolve,
+    isKnown,
+    getAssociationTargets,
+    getTriggeredTargets,
+    hasAnyOutgoingTargets,
+    hasOutgoingTarget,
+    getReviewFailLoopLimit,
+    findNextPendingRepairReviewer,
+    matchCanonicalTargets,
   };
 }
 
 function parseScriptLine(line: string): ParsedScriptLine {
-  const separatorIndex = line.indexOf(":");
-  assert.notEqual(separatorIndex, -1, `脚本缺少 sender 前缀：${line}`);
-  const sender = line.slice(0, separatorIndex).trim();
-  const content = line.slice(separatorIndex + 1).trim();
+  const separatorIndex = line.indexOf(": ");
+  const fallbackSeparatorIndex = separatorIndex >= 0 ? separatorIndex : line.indexOf(":");
+  const resolvedSeparatorIndex = fallbackSeparatorIndex;
+  assert.notEqual(resolvedSeparatorIndex, -1, `脚本缺少 sender 前缀：${line}`);
+  const separatorLength = separatorIndex >= 0 ? 2 : 1;
+  const sender = line.slice(0, resolvedSeparatorIndex).trim();
+  const content = line.slice(resolvedSeparatorIndex + separatorLength).trim();
   return {
     sender,
     content,
@@ -378,49 +1076,6 @@ function parseReply(line: ParsedScriptLine): ParsedReply {
     targets: inlineDispatch?.targets ?? (isMentionOnlyContent(line.content) ? extractMentions(line.content) : []),
     normalized: line.normalized,
   };
-}
-
-function buildAssociationTargets(topology: TopologyRecord): Map<string, string[]> {
-  const map = new Map<string, string[]>();
-  for (const edge of topology.edges) {
-    if (edge.triggerOn !== "association") {
-      continue;
-    }
-    const current = map.get(edge.source) ?? [];
-    if (!current.includes(edge.target)) {
-      current.push(edge.target);
-    }
-    map.set(edge.source, current);
-  }
-  return map;
-}
-
-function buildOutgoingTargets(topology: TopologyRecord): Map<string, Set<string>> {
-  const map = new Map<string, Set<string>>();
-  for (const edge of topology.edges) {
-    const current = map.get(edge.source) ?? new Set<string>();
-    current.add(edge.target);
-    map.set(edge.source, current);
-  }
-  return map;
-}
-
-function buildTriggeredTargets(
-  topology: TopologyRecord,
-  triggerOn: "review_fail" | "review_pass",
-): Map<string, string[]> {
-  const map = new Map<string, string[]>();
-  for (const edge of topology.edges) {
-    if (edge.triggerOn !== triggerOn) {
-      continue;
-    }
-    const current = map.get(edge.source) ?? [];
-    if (!current.includes(edge.target)) {
-      current.push(edge.target);
-    }
-    map.set(edge.source, current);
-  }
-  return map;
 }
 
 function extractLeadingMention(content: string): string | undefined {
@@ -470,10 +1125,6 @@ function extractInlineDispatch(content: string): { body: string; targets: string
 
 function formatScriptLine(sender: string, content: string): string {
   return `${sender}: ${content.trim()}`;
-}
-
-function areSameOrderedTargets(left: string[], right: string[]): boolean {
-  return left.length === right.length && left.every((target, index) => target === right[index]);
 }
 
 function buildReviewFailLoopEdgeKey(sourceAgentId: string, targetAgentId: string): string {

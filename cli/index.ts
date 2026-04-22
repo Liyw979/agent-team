@@ -23,7 +23,11 @@ import { resolveCliSignalPlan } from "./cli-signal-policy";
 import { ensureRuntimeAssets, isCompiledRuntime } from "./runtime-assets";
 import { resolveCliTaskStreamingPlan } from "./task-streaming-policy";
 import { renderTaskSessionSummary } from "./task-session-summary";
-import { renderTaskAttachCommands } from "./task-attach-display";
+import {
+  collectNewTaskAttachCommandEntries,
+  renderTaskAttachCommands,
+  type TaskAttachCommandEntry,
+} from "./task-attach-display";
 import { renderOpenCodeCleanupReport } from "./opencode-cleanup-report";
 import { buildUiUrl, UI_LOOPBACK_HOST } from "./ui-host-launch";
 import { startWebHost } from "./web-host";
@@ -165,21 +169,17 @@ function validateTaskUiCommand(
   }
 }
 
-async function printTaskAttachCommands(context: CliContext, task: TaskSnapshot) {
-  process.stdout.write(
-    renderTaskAttachCommands(
-      task.agents.map((agent) => ({
-        agentName: agent.name,
-        opencodeAttachCommand:
-          agent.opencodeAttachBaseUrl && agent.opencodeSessionId
-            ? buildCliOpencodeAttachCommand(
-                agent.opencodeAttachBaseUrl,
-                agent.opencodeSessionId,
-              )
-            : null,
-      })),
-    ),
-  );
+function buildTaskAttachEntries(task: TaskSnapshot): TaskAttachCommandEntry[] {
+  return task.agents.map((agent) => ({
+    agentName: agent.name,
+    opencodeAttachCommand:
+      agent.opencodeAttachBaseUrl && agent.opencodeSessionId
+        ? buildCliOpencodeAttachCommand(
+            agent.opencodeAttachBaseUrl,
+            agent.opencodeSessionId,
+          )
+        : null,
+  }));
 }
 
 async function renderTaskMessages(
@@ -193,14 +193,23 @@ async function renderTaskMessages(
 ) {
   let lastMessages = previousMessages;
   let attachPrinted = options?.printAttach !== true;
+  let lastAttachEntries: TaskAttachCommandEntry[] = [];
   let includeHistory = options?.includeHistory === true;
 
   while (true) {
     const snapshot = await context.orchestrator.getTaskSnapshot(taskId);
+    const attachEntries = buildTaskAttachEntries(snapshot);
 
     if (!attachPrinted) {
-      await printTaskAttachCommands(context, snapshot);
+      process.stdout.write(renderTaskAttachCommands(attachEntries));
       attachPrinted = true;
+      lastAttachEntries = attachEntries;
+    } else {
+      const newAttachEntries = collectNewTaskAttachCommandEntries(lastAttachEntries, attachEntries);
+      if (newAttachEntries.length > 0) {
+        process.stdout.write(renderTaskAttachCommands(newAttachEntries));
+      }
+      lastAttachEntries = attachEntries;
     }
 
     const entries = includeHistory

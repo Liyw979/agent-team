@@ -27,6 +27,8 @@
 
 - 团队拓扑 JSON 会先编译为 Agent 与拓扑记录，再应用到当前工作区，Task 启动时读取这份编译结果。team-dsl[compileTeamDsl]、cli[ensureJsonTopologyApplied]、orchestrator[applyTeamDsl]
 - Agent 的 prompt 与可写权限从当前拓扑的 `nodeRecords` 中提取，并在读取工作区 Agent 列表时即时恢复。project-agent-source[extractDslAgentsFromTopology]、orchestrator[listWorkspaceAgents]
+- 拓扑里单个 Agent 的 prompt 只能描述它自己的职责、输入与输出约束，不能提及其他 Agent、上下游、回流、裁决、交给谁处理、回应某个特定角色等协作关系；运行时每个 Agent 都应被视为不知道其他 Agent 的存在。team-dsl[compileTeamDsl]、project-agent-source[extractDslAgentsFromTopology]
+- 漏洞挖掘团队里会给出倾向性判断、通过/不通过结论或最终裁决的 Agent，prompt 必须显式要求“先阅读当前项目代码，再用文件、函数、调用链或约束作为支撑后才能下结论”；不能只根据上游口头材料直接裁定漏洞成立、误报或通过。config/team-topologies/vulnerability-team.topology.json、team-dsl[compileTeamDsl]
 - `Build` 使用 OpenCode 内置 prompt，拓扑归一化时会被识别为默认可写 Agent。types[usesOpenCodeBuiltinPrompt]、project-agent-source[extractDslAgentsFromTopology]
 - 团队拓扑 JSON 的 `agents` 数组统一使用对象格式；不再支持直接写成 `"Build"` 这类字符串简写。`Build` 即使未显式配置 `writable`，运行时也会默认视为可写。team-dsl[compileTeamDsl]、project-agent-source[extractDslAgentsFromTopology]
 - 团队拓扑 JSON 中每个 Agent 都可以通过 `writable` 字段显式声明是否具备写能力；系统允许多个可写 Agent 同时存在。project-agent-source[extractDslAgentsFromTopology, validateProjectAgents, buildInjectedConfigFromAgents]、orchestrator[submitTask, initializeTask]
@@ -36,6 +38,8 @@
 
 - 当前工作区的拓扑、Task、消息与运行态由当前 CLI 进程内存维护；不会再物化旧的 `<cwd>/.agent-team/state.json`。store[getState, hasWorkspaceState]、orchestrator[hydrateWorkspace, hydrateTask]
 - 新建 Task 需要显式传入团队拓扑 JSON 文件，CLI 会先校验参数再加载并应用定义。cli[validateTaskHeadlessCommand, validateTaskUiCommand, loadTeamDslDefinition, ensureJsonTopologyApplied]
+- 团队拓扑 JSON 只支持递归式 `entry + nodes + links` DSL。team-dsl[compileTeamDsl]
+- 递归式 DSL 中，节点 `type` 只允许 `agent` 或 `spawn`；`spawn` 自身不带 `prompt`，默认从上游结果里的 `items` 数组展开子图，也可用 `itemsFrom` 显式覆盖字段名。team-dsl[compileTeamDsl]、types[resolveSpawnItemsField]
 - Task 快照读取当前工作区拓扑与 Agent 定义，`TaskRecord` 本身只保存任务状态与定位信息。store[getTopology]、orchestrator[hydrateTask]、project-agent-source[extractDslAgentsFromTopology]
 - Task 定位索引同样只保存在当前进程内存；删除 Task 时会同步移除对应 locator。store[getTaskLocatorCwd, removeTaskLocator, deleteTask]、orchestrator[resolveTaskCwd]
 - LangGraph 运行时同样只在当前进程内存里维护每个 Task 的 checkpoint；删除 Task 时会同步清掉对应 thread。orchestrator[getLangGraphRuntime]、langgraph-runtime[deleteTask]
@@ -73,7 +77,10 @@
 ### 3.3 拓扑与调度
 
 - LangGraph 是唯一调度运行时核心；`TopologyRecord` 是产品真源，运行时会在主进程内把它编译为图状态与调度索引。langgraph-runtime[resumeTask]、gating-router[createGraphTaskState, applyAgentResultToGraphState]、topology-compiler[compileTopology]
-- 拓扑边持久化 `source / target / triggerOn`；`triggerOn` 只允许 `association`、`approved`、`needs_revision`。store[readWorkspaceState, writeWorkspaceState]、orchestrator[normalizeTopology]、topology-compiler[compileTopology]
+- 拓扑边持久化 `source / target / triggerOn`；`triggerOn` 只允许 `association`、`approved`、`needs_revision`。其中 `association` 表示普通协作流转，节点完成后直接触发下游；`approved` 表示审查通过后才触发下游；`needs_revision` 表示审查不通过后的回流或继续回应链路。store[readWorkspaceState, writeWorkspaceState]、orchestrator[normalizeTopology]、topology-compiler[compileTopology]
+- 递归式 DSL 中，`spawn` 仍会被当成拓扑中的正常节点；当父图里存在唯一的 `spawn -> 某节点` 回流边时，编译阶段会把这条边的 `triggerOn` 一并记到 `spawn rule` 上，再由子图唯一终局角色按这条触发类型直接回到外层节点，同时把 `spawn` 节点自身标记为已完成，避免激活残留卡住后续流程。漏洞团队当前写的是 `["疑点辩论", "初筛", "association"]`，所以它的 `裁决总结` 会按 `association` 回到 `初筛`。team-dsl[compileTeamDsl]、runtime-topology[instantiateSpawnBundle]、gating-router[applyAgentResultToGraphState]
+- 漏洞挖掘团队的默认对抗拓扑里，`初筛` 会先把 finding 交给 `反方`，而不是先交给 `正方`；这是一条刻意保留的拓扑设计技巧，用来先由反方挑战证据链、暴露缺口，再进入正反对抗，避免正方开场直接同意导致对抗性不足。config/team-topologies/vulnerability-team.topology.json、team-dsl[compileTeamDsl]、scheduler-script-harness[assertSchedulerScript]
+- 静态 `spawn` 节点属于调度节点，会保留在拓扑数据中供运行时识别，但前端拓扑图不会直接展示这类工厂节点；只有 `spawn` 实际展开出来的运行时 Agent 实例会作为可见节点显示。topology-spawn-drafts[getTopologyDisplayNodeIds]、TopologyGraph[TopologyGraph]、runtime-topology-graph[buildEffectiveTopology]
 - 当某个 Agent 存在“直接下游通过 `association` 触发、且该下游会用 `needs_revision` 直接回流给自己、同时该下游没有 `approved` 下游”的审查回路时，系统会先只放行这类直接审查回路；只有这些回路全部通过后，才会继续放行该 Agent 其余直接 `association` 下游，避免 Build 与单个审查 Agent 多轮对话时反复提前触发无关下游。gating-scheduler[planAssociationDispatch, recordAssociationBatchResponse]、gating-router[handleNeedsRevision, continueAfterAssociationBatchResponse]
 - 同一轮里若某个 Agent 需要同时触发多个直接 `association` 下游 reviewer，这批 reviewer 会并发启动；只有当前整批 reviewer 都返回后，系统才会决定是否回流给上游修复，或继续补跑这一轮尚未确认通过的 reviewer，避免把并发批次错误串成“一次只放行一个”。gating-scheduler[planAssociationDispatch, recordAssociationBatchResponse]、orchestrator[createLangGraphBatchRunners]
 - 团队成员列表支持直接调整 Agent 顺序；该顺序会持久化到拓扑配置，并直接决定拓扑图从左到右的节点排列。types[resolveTopologyAgentOrder]、orchestrator[saveTopology, normalizeTopology]、frontend-agent-order[orderAgentsForFrontend]
@@ -85,6 +92,7 @@
 - 拓扑节点顶部直接展示 Agent 当前状态徽标，包括 `未启动 / 运行中 / 已完成 / 执行失败`；审查类 Agent 则显示 `审查通过 / 审查不通过`。topology-graph-helpers[getTopologyAgentStatusBadgePresentation]、TopologyGraph[TopologyGraph]
 - 拓扑图中每个 Agent 节点头部都会在状态 icon 左侧提供 `attach` 按钮；点击后直接打开该 Agent 对应的 OpenCode attach 终端。topology-graph-helpers[getTopologyNodeHeaderActionOrder]、TopologyGraph[TopologyGraph]、App[App]、orchestrator[openAgentTerminal]
 - 拓扑图中的 Agent 节点颜色用于表达当前运行状态；内置与本地类型信息仅在编辑面板等辅助信息中展示。topology-graph-helpers[getTopologyAgentStatusBadgePresentation]、agent-colors[getAgentColorToken]、TopologyGraph[TopologyGraph]
+- 拓扑图会隐藏静态 `spawn` 工厂节点；当某个 `spawn` 子图已经实例化出 runtime agent 时，前端会用实例节点（如 `正方-1`）替换对应模板节点（如 `正方`）进行展示，避免模板卡片出现空历史区。topology-spawn-drafts[getTopologyDisplayNodeIds]、TopologyGraph[TopologyGraph]
 - 拓扑图在面板尺寸变化时会保持“Agent 在上、历史区在下、首尾节点贴近左右边界但保留少量留白、顶部预留连线通道”的布局约束，而不是把整张图简单等比缩放后居中。topology-canvas[buildTopologyCanvasLayout]、TopologyGraph[TopologyGraph]
 - 前端拓扑编辑面板支持为每一条 `needs_revision` 关系单独配置“最大反驳次数”；默认显示 `4`，不同审视关系可以分别保存不同数值。types[normalizeNeedsRevisionMaxRounds, getNeedsRevisionEdgeLoopLimit]、orchestrator[normalizeTopology]、store[readWorkspaceState, writeWorkspaceState]
 
@@ -120,6 +128,7 @@
 - OpenCode attach 入口统一位于拓扑图节点头部。topology-graph-helpers[getTopologyNodeHeaderActionOrder]、TopologyGraph[TopologyGraph]
 - Windows 上 attach 外部终端默认使用 `cmd.exe /k` 拉起可见窗口；若需备用路径，可在启动前设置 `AGENT_TEAM_WINDOWS_TERMINAL=powershell` 切换到 PowerShell 窗口启动。terminal-launcher[buildTerminalLaunchSpec]
 - 运行中的 Agent 会通过 OpenCode HTTP session 消息接口轮询实时工具调用与摘要，并显示在拓扑图节点内。web-api[getTaskRuntime]、App[App]、orchestrator[getTaskRuntime]、opencode-client[getSessionRuntime]
+- 同一工作区的 SSE 事件会按 `taskId` 区分当前页面所属 Task；当当前 Task 内部有新的 spawn runtime session 建立时，前端会立即刷新当前 Task 快照，使新实例节点尽快具备可点击的 `attach`。orchestrator[scheduleRuntimeRefresh]、runtime-event-refresh[shouldRefreshForRuntimeEvent]、App[App]
 - 应用退出时，会统一关闭当前工作区相关的 `opencode serve` 与其派生会话。orchestrator[dispose]、opencode-client[shutdown]、cli[disposeCliContext]
 
 ## 4. CLI 约定
@@ -132,6 +141,7 @@
 - `task ui` 启动前会检查当前选中的 Web 静态目录中是否存在 `index.html`；缺少入口文件时会直接报错，不会继续启动 Web Host 或打开浏览器。
 - `task ui` 打开的浏览器地址与本地 Web Host 监听地址统一使用 `localhost` 回环主机名，而不是 `127.0.0.1`，以兼容 Windows 上仅 `localhost` 可访问的本地浏览器环境。
 - CLI / 终端里所有用户可见 attach 文案都直接显示底层 `opencode attach ...`，不再展示 `task attach` 包装命令。
+- 当 Task 运行过程中因为 `spawn` 新增 runtime agent 且它获得新的 OpenCode session 时，CLI 会增量再次打印这些新实例的 `opencode attach ...` 命令，而不是只在任务启动时打印首批静态 Agent。
 - `bun run cli -- ...` 需要在仓库根目录执行；若从其他目录排查目标工作区，`task headless` / `task ui` 请显式传入 `--cwd`。
 
 常用命令示例：
@@ -219,6 +229,7 @@ bun run dist:mac-x64
 交付前检查：
 
 - 每次交付前必须在仓库根目录运行 `bun test`，并以测试通过作为交付前置条件。
+- 涉及调度状态变化、回流顺序、裁决转发、spawn 对话推进等用户可见协作语义时，新增覆盖优先写进 `runtime/scheduler-script-harness.test.ts` 这类 script 测试，用对话脚本验证真实流转；只有当该行为依赖内部暂存状态或 synthetic dispatch、无法自然表达为一段用户可见对话脚本时，才保留在 `runtime/gating-router.test.ts` / `runtime/orchestrator.test.ts` 做纯状态测试。
 
 打包注意事项：
 

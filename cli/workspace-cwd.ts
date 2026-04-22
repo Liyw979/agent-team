@@ -9,7 +9,7 @@ interface ResolveValidatedWorkspaceCwdInput {
 }
 
 export function resolveValidatedWorkspaceCwd(input: ResolveValidatedWorkspaceCwdInput): string {
-  const resolvedCwd = path.resolve(input.requestedCwd ?? input.currentCwd);
+  const resolvedCwd = path.resolve(input.currentCwd, input.requestedCwd ?? ".");
   if (!input.exists) {
     throw new Error(`工作目录不存在：${resolvedCwd}`);
   }

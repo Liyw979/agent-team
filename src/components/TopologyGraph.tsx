@@ -21,6 +21,7 @@ import {
   getTopologyNodeHeaderActionOrder,
   type TopologyAgentStatusBadgePresentation,
 } from "@/components/topology-graph-helpers";
+import { getTopologyDisplayNodeIds } from "@/components/topology-spawn-drafts";
 import { buildTopologyCanvasLayout } from "@/lib/topology-canvas";
 import { getTopologyPanelBodyClassName } from "@/lib/topology-panel-layout";
 import type {
@@ -205,6 +206,13 @@ export function TopologyGraph({
     () => new Map(task?.agents.map((agent) => [agent.name, agent]) ?? []),
     [task?.agents],
   );
+  const visibleTopologyCandidateNodeIds = useMemo(
+    () => Array.from(new Set([
+      ...(task?.agents.map((agent) => agent.name) ?? []),
+      ...Object.keys(runtimeSnapshots),
+    ])),
+    [runtimeSnapshots, task?.agents],
+  );
 
   useEffect(() => {
     const element = canvasViewportRef.current;
@@ -242,14 +250,19 @@ export function TopologyGraph({
     return () => {
       observer.disconnect();
     };
-  }, [topology?.nodes.length]);
+  }, [topology?.nodes.length, topology?.nodeRecords?.length]);
 
+  const visibleNodeIds = useMemo(
+    () => (topology ? getTopologyDisplayNodeIds(topology, visibleTopologyCandidateNodeIds) : []),
+    [topology, visibleTopologyCandidateNodeIds],
+  );
   const canvasLayout = useMemo(() => {
-    if (!topology) {
+    if (!topology || visibleNodeIds.length === 0) {
       return null;
     }
+
     return buildTopologyCanvasLayout({
-      nodes: topology.nodes,
+      nodes: visibleNodeIds,
       edges: topology.edges,
       availableWidth: canvasViewport?.width,
       availableHeight: canvasViewport?.height,
@@ -262,14 +275,18 @@ export function TopologyGraph({
       bottomPadding: 0,
       nodeHeight: NODE_HEIGHT,
     });
-  }, [canvasViewport?.height, canvasViewport?.width, topology]);
+  }, [canvasViewport?.height, canvasViewport?.width, topology, visibleNodeIds]);
   const historyByAgent = useMemo(() => {
-    if (!task || !topology) {
+    if (!topology) {
+      return new Map<string, AgentHistoryItem[]>();
+    }
+
+    if (!task || visibleNodeIds.length === 0) {
       return new Map<string, AgentHistoryItem[]>();
     }
 
     return new Map(
-      topology.nodes.map((agentName) => [
+      visibleNodeIds.map((agentName) => [
         agentName,
         buildAgentHistoryItems({
           agentId: agentName,
@@ -279,15 +296,11 @@ export function TopologyGraph({
         }).slice(-HISTORY_VISIBLE_ITEMS),
       ]),
     );
-<<<<<<< HEAD
-  }, [runtimeSnapshots, task, topology]);
-=======
   }, [runtimeSnapshots, task, topology, visibleNodeIds]);
   const finalLoopReviewerName = useMemo(
     () => (task ? getTopologyLoopLimitFailedReviewerName(task.messages) : null),
     [task],
   );
->>>>>>> 3f83ae6f (feat: mark final failed review states in topology UI)
 
   useEffect(() => {
     if (!selectedHistoryItem) {
@@ -314,7 +327,7 @@ export function TopologyGraph({
       return;
     }
 
-    const activeNodeIds = new Set(topology.nodes);
+    const activeNodeIds = new Set(visibleNodeIds);
     for (const nodeId of Object.keys(historyViewportRefs.current)) {
       if (!activeNodeIds.has(nodeId)) {
         delete historyViewportRefs.current[nodeId];
@@ -330,16 +343,16 @@ export function TopologyGraph({
         delete historyLastItemIdRef.current[nodeId];
       }
     }
-  }, [topology]);
+  }, [topology, visibleNodeIds]);
 
   useEffect(() => {
-    if (!topology) {
+    if (!topology || visibleNodeIds.length === 0) {
       return;
     }
 
     const frameIds: number[] = [];
 
-    for (const nodeId of topology.nodes) {
+    for (const nodeId of visibleNodeIds) {
       const historyItems = historyByAgent.get(nodeId) ?? [];
       const nextLastItemId = historyItems.at(-1)?.id ?? null;
       const previousLastItemId = historyLastItemIdRef.current[nodeId] ?? null;
@@ -371,7 +384,7 @@ export function TopologyGraph({
         cancelAnimationFrame(frameId);
       }
     };
-  }, [historyByAgent, topology]);
+  }, [historyByAgent, topology, visibleNodeIds]);
 
   if (!workspace || !task || !topology || !canvasLayout) {
     return (

@@ -198,6 +198,91 @@ test("最新一条仍是用户 @Agent 追问时，持久化补偿逻辑不会提
   assert.equal(shouldFinish, false);
 });
 
+test("spawn 运行时实例刚被 dispatch 但尚未完成时，持久化补偿逻辑不会提前把任务判 finished", () => {
+  const topology = createTopologyForTest({
+    projectId: "project-1",
+    nodes: ["初筛", "疑点辩论"],
+    edges: [
+      { source: "初筛", target: "疑点辩论", triggerOn: "association" },
+    ],
+  });
+  const runtimeAgentName = "正方-1";
+  const agents = [
+    createAgent({ name: "初筛", status: "completed", runCount: 1 }),
+    createAgent({ name: runtimeAgentName, status: "idle", runCount: 0 }),
+  ];
+  const messages = [
+    createMessage({
+      sender: "初筛",
+      content: "初筛发现了一个可疑点。",
+      meta: {
+        kind: "agent-final",
+      },
+    }),
+    createMessage({
+      sender: "初筛",
+      content: `@${runtimeAgentName}`,
+      timestamp: "2026-04-16T00:00:01.000Z",
+      meta: {
+        kind: "agent-dispatch",
+        sourceAgentId: "初筛",
+        targetAgentIds: runtimeAgentName,
+      },
+    }),
+  ];
+
+  const shouldFinish = shouldFinishTaskFromPersistedState({
+    taskStatus: "running",
+    topology,
+    agents,
+    messages,
+  });
+
+  assert.equal(shouldFinish, false);
+});
+
+test("spawn 运行时实例已写入 dispatch 消息但尚未落库为 task agent 时，持久化补偿逻辑不会提前把任务判 finished", () => {
+  const topology = createTopologyForTest({
+    projectId: "project-1",
+    nodes: ["初筛", "疑点辩论"],
+    edges: [
+      { source: "初筛", target: "疑点辩论", triggerOn: "association" },
+    ],
+  });
+  const runtimeAgentName = "正方-1";
+  const agents = [
+    createAgent({ name: "初筛", status: "completed", runCount: 1 }),
+  ];
+  const messages = [
+    createMessage({
+      sender: "初筛",
+      content: "初筛发现了一个可疑点。",
+      meta: {
+        kind: "agent-final",
+      },
+    }),
+    createMessage({
+      sender: "初筛",
+      content: `@${runtimeAgentName}`,
+      timestamp: "2026-04-16T00:00:01.000Z",
+      meta: {
+        kind: "agent-dispatch",
+        sourceAgentId: "初筛",
+        targetAgentIds: runtimeAgentName,
+      },
+    }),
+  ];
+
+  const shouldFinish = shouldFinishTaskFromPersistedState({
+    taskStatus: "running",
+    topology,
+    agents,
+    messages,
+  });
+
+  assert.equal(shouldFinish, false);
+});
+
 test("没有消息和运行痕迹时，持久化补偿逻辑只会把 Build 当默认入口 seed", () => {
   const topology = createTopologyForTest({
     projectId: "project-1",
@@ -302,8 +387,8 @@ test("任务失败完成消息优先展示明确失败原因", () => {
   const content = buildTaskCompletionMessageContent({
     status: "failed",
     taskTitle: "演示任务",
-    failureReason: "UnitTest -> Build 连续回流已达到 4 轮上限，任务已终止以避免无限循环",
+    failureReason: "UnitTest -> Build 已连续交流 4 次，任务已结束",
   });
 
-  assert.equal(content, "UnitTest -> Build 连续回流已达到 4 轮上限，任务已终止以避免无限循环");
+  assert.equal(content, "UnitTest -> Build 已连续交流 4 次，任务已结束");
 });
