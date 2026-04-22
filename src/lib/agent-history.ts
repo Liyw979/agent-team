@@ -5,6 +5,7 @@ import type {
 } from "@shared/types";
 import { isReviewAgentInTopology } from "@shared/types";
 import { stripReviewResponseMarkup } from "@shared/review-response";
+import { getLoopLimitFailedReviewerName } from "./review-loop-limit";
 
 export interface AgentHistoryItem {
   id: string;
@@ -61,6 +62,13 @@ function getFinalItemPresentation(input: {
   reviewAgent: boolean;
   status: string;
 }) {
+  if (input.status === "final_failed_review") {
+    return {
+      label: "审视不通过，最后一次",
+      tone: "failure" as const,
+    };
+  }
+
   if (input.status === "needs_revision") {
     return {
       label: "审视不通过",
@@ -87,6 +95,7 @@ function buildFinalHistoryItems(input: {
   topology: Pick<TopologyRecord, "edges">;
 }) {
   const reviewAgent = isReviewAgentInTopology(input.topology, input.agentId);
+  const finalLoopReviewerName = getLoopLimitFailedReviewerName(input.messages);
 
   return input.messages
     .filter((message) => message.sender === input.agentId && message.meta?.kind === "agent-final")
@@ -94,7 +103,9 @@ function buildFinalHistoryItems(input: {
       const status =
         message.meta?.reviewDecision === "needs_revision"
           ? "needs_revision"
-          : message.meta?.status ?? "completed";
+          : reviewAgent && message.meta?.status === "failed" && finalLoopReviewerName === input.agentId
+            ? "final_failed_review"
+            : message.meta?.status ?? "completed";
       const presentation = getFinalItemPresentation({
         reviewAgent,
         status,

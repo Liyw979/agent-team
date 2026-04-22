@@ -17,6 +17,7 @@ import { PANEL_HEADER_ACTION_BUTTON_CLASS } from "@/lib/panel-header-action-butt
 import { getPanelFullscreenButtonCopy } from "@/lib/panel-fullscreen-label";
 import {
   getTopologyAgentStatusBadgePresentation,
+  getTopologyLoopLimitFailedReviewerName,
   getTopologyNodeHeaderActionOrder,
   type TopologyAgentStatusBadgePresentation,
 } from "@/components/topology-graph-helpers";
@@ -79,6 +80,16 @@ function formatHistoryTimestamp(timestamp: string) {
     second: "2-digit",
     hour12: false,
   });
+}
+
+function resolveTopologyNodeDisplayStatus(input: {
+  taskAgentStatus?: string;
+  runtimeSnapshotStatus?: string;
+}) {
+  if (input.runtimeSnapshotStatus === "running") {
+    return "running";
+  }
+  return input.taskAgentStatus ?? input.runtimeSnapshotStatus ?? "idle";
 }
 
 function renderStatusBadgeIcon(presentation: TopologyAgentStatusBadgePresentation) {
@@ -286,6 +297,10 @@ export function TopologyGraph({
       ]),
     );
   }, [runtimeSnapshots, task, topology, visibleNodeIds]);
+  const finalLoopReviewerName = useMemo(
+    () => (task ? getTopologyLoopLimitFailedReviewerName(task.messages) : null),
+    [task],
+  );
 
   useEffect(() => {
     if (!selectedHistoryItem) {
@@ -430,12 +445,19 @@ export function TopologyGraph({
           >
             {canvasLayout.nodes.map((node) => {
               const taskAgent = taskAgents.get(node.id);
+              const runtimeSnapshot = runtimeSnapshots[node.id];
               const color = getAgentColorToken(node.id);
               const historyItems = historyByAgent.get(node.id) ?? [];
               const statusBadge = getTopologyAgentStatusBadgePresentation(
                 topology,
                 node.id,
-                taskAgent?.status ?? "idle",
+                resolveTopologyNodeDisplayStatus({
+                  taskAgentStatus: taskAgent?.status,
+                  runtimeSnapshotStatus: runtimeSnapshot?.runtimeStatus ?? runtimeSnapshot?.status,
+                }),
+                {
+                  finalLoopReviewerName,
+                },
               );
               const showAttachButton = typeof onOpenAgentTerminal === "function";
               const headerActions = getTopologyNodeHeaderActionOrder({

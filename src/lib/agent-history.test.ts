@@ -154,6 +154,52 @@ test("buildAgentHistoryItems 会移除历史消息中的多余空行，避免卡
   );
 });
 
+test("buildAgentHistoryItems 会把超限失败的 reviewer 标记为审视不通过，最后一次", () => {
+  const messages: MessageRecord[] = [
+    {
+      id: "review-final",
+      taskId: "task-1",
+      sender: "TaskReview",
+      content: "原始消息",
+      timestamp: "2026-04-20T09:05:00.000Z",
+      meta: {
+        kind: "agent-final",
+        status: "failed",
+        finalMessage: "当前 reviewer 未提供额外正文。",
+      },
+    },
+    {
+      id: "task-failed",
+      taskId: "task-1",
+      sender: "system",
+      content: "TaskReview -> Build 已连续交流 4 次，任务已结束",
+      timestamp: "2026-04-20T09:05:01.000Z",
+      meta: {
+        kind: "task-completed",
+        status: "failed",
+      },
+    },
+  ];
+
+  assert.deepEqual(
+    buildAgentHistoryItems({
+      agentId: "TaskReview",
+      messages,
+      topology,
+      runtimeSnapshot: undefined,
+    }).map((item) => ({
+      label: item.label,
+      detail: item.detail,
+    })),
+    [
+      {
+        label: "审视不通过，最后一次",
+        detail: "当前 reviewer 未提供额外正文。",
+      },
+    ],
+  );
+});
+
 test("buildAgentHistoryItems 不会把同一条最终回复同时展示成审视结果和普通消息", () => {
   const messages: MessageRecord[] = [
     {

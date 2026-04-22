@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   getTopologyAgentStatusBadgePresentation,
+  getTopologyLoopLimitFailedReviewerName,
   getTopologyNodeHeaderActionOrder,
 } from "./topology-graph-helpers";
 
@@ -62,6 +63,54 @@ test("getTopologyAgentStatusBadgePresentation 会把审查 agent 映射为审查
       className: "border border-[#d66b63]/45 bg-[#fff1ef] text-[#a33f38]",
       effectClassName: "",
     },
+  );
+
+  assert.deepEqual(
+    getTopologyAgentStatusBadgePresentation(topology, "CodeReview", "failed", {
+      finalLoopReviewerName: "CodeReview",
+    }),
+    {
+      label: "审查不通过，最后一次",
+      icon: "failed",
+      className: "border border-[#d66b63]/45 bg-[#fff1ef] text-[#a33f38]",
+      effectClassName: "",
+    },
+  );
+});
+
+test("getTopologyLoopLimitFailedReviewerName 会从任务失败原因里识别超限 reviewer", () => {
+  assert.equal(
+    getTopologyLoopLimitFailedReviewerName([
+      {
+        id: "completion-1",
+        taskId: "task-1",
+        sender: "system",
+        content: "UnitTest -> Build 已连续交流 4 次，任务已结束",
+        timestamp: "2026-04-22T08:35:33.589Z",
+        meta: {
+          kind: "task-completed",
+          status: "failed",
+        },
+      },
+    ]),
+    "UnitTest",
+  );
+
+  assert.equal(
+    getTopologyLoopLimitFailedReviewerName([
+      {
+        id: "completion-2",
+        taskId: "task-1",
+        sender: "system",
+        content: "所有Agent任务已完成",
+        timestamp: "2026-04-22T08:35:33.589Z",
+        meta: {
+          kind: "task-completed",
+          status: "finished",
+        },
+      },
+    ]),
+    null,
   );
 });
 

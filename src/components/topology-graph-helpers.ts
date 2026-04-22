@@ -1,4 +1,5 @@
 import { isReviewAgentInTopology, type TopologyEdge, type TopologyRecord } from "@shared/types";
+import type { MessageRecord } from "@shared/types";
 
 export interface TopologyAgentStatusBadgePresentation {
   label: string;
@@ -19,8 +20,15 @@ export function getTopologyAgentStatusBadgePresentation(
   topology: Pick<TopologyRecord, "edges">,
   agentName: string,
   agentState: string,
+  options?: {
+    finalLoopReviewerName?: string | null;
+  },
 ): TopologyAgentStatusBadgePresentation {
   const reviewAgent = isReviewAgentInTopology(topology, agentName);
+  const isFinalLoopFailedReviewer =
+    reviewAgent
+    && agentState === "failed"
+    && options?.finalLoopReviewerName === agentName;
 
   switch (agentState) {
     case "completed":
@@ -32,7 +40,9 @@ export function getTopologyAgentStatusBadgePresentation(
       };
     case "failed":
       return {
-        label: reviewAgent ? "审查不通过" : "执行失败",
+        label: reviewAgent
+          ? (isFinalLoopFailedReviewer ? "审查不通过，最后一次" : "审查不通过")
+          : "执行失败",
         icon: "failed",
         className: "border border-[#d66b63]/45 bg-[#fff1ef] text-[#a33f38]",
         effectClassName: "",
@@ -68,6 +78,18 @@ export function getTopologyAgentStatusLabel(
   agentState: string,
 ) {
   return getTopologyAgentStatusBadgePresentation(topology, agentName, agentState).label;
+}
+
+export function getTopologyLoopLimitFailedReviewerName(
+  messages: Pick<MessageRecord, "content" | "meta">[],
+): string | null {
+  const failedCompletionMessage = [...messages]
+    .reverse()
+    .find((message) => message.meta?.kind === "task-completed" && message.meta?.status === "failed");
+  const content = failedCompletionMessage?.content?.trim() ?? "";
+  const match = /^(.*?)\s*->\s*.*已连续交流\s+\d+\s+次，任务已结束$/u.exec(content);
+  const reviewerName = match?.[1]?.trim() ?? "";
+  return reviewerName || null;
 }
 
 export function getTopologyEdgeTriggerAppearance(triggerOn: TopologyEdge["triggerOn"]) {

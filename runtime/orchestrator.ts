@@ -416,6 +416,7 @@ export class Orchestrator {
           agentId: agent.name,
           sessionId: agent.opencodeSessionId,
           status: agent.status,
+          runtimeStatus: agent.status,
           messageCount: 0,
           updatedAt: null,
           headline: null,

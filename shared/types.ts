@@ -247,6 +247,7 @@ export interface AgentRuntimeSnapshot {
   agentId: string;
   sessionId: string | null;
   status: AgentStatus;
+  runtimeStatus: AgentStatus;
   messageCount: number;
   updatedAt: string | null;
   headline: string | null;
