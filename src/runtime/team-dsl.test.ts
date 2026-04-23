@@ -251,36 +251,36 @@ test("compileTeamDsl 会拒绝 tuple 形式的 links，要求显式 from to trig
 
 test("compileTeamDsl 支持在拓扑文件里直接连接 __end__", () => {
   const definition: TeamDslDefinition = {
-    entry: "初筛",
+    entry: "线索发现",
     nodes: [
-      agentNode("初筛", "你负责初筛。", false),
+      agentNode("线索发现", "你负责线索发现。", false),
       spawnNode(
         "疑点辩论",
         {
-          entry: "反方",
+          entry: "漏洞挑战",
           nodes: [
-            agentNode("反方", "你是反方。", false),
-            agentNode("裁决总结", "你是裁决总结。", false),
+            agentNode("漏洞挑战", "你是漏洞挑战。", false),
+            agentNode("讨论总结", "你是讨论总结。", false),
           ],
           links: [
-            link("反方", "裁决总结", "complete", "last"),
+            link("漏洞挑战", "讨论总结", "complete", "last"),
           ],
         },
       ),
     ],
     links: [
-      link("初筛", "疑点辩论", "continue", "all"),
-      link("疑点辩论", "初筛", "transfer", "none"),
-      endLink("初筛", "complete", "none"),
+      link("线索发现", "疑点辩论", "continue", "all"),
+      link("疑点辩论", "线索发现", "transfer", "none"),
+      endLink("线索发现", "complete", "none"),
     ],
   };
   const compiled = compileTeamDsl(definition);
 
   assert.deepEqual(compiled.topology.langgraph?.end, {
     id: "__end__",
-    sources: ["初筛"],
+    sources: ["线索发现"],
     incoming: [
-      { source: "初筛", triggerOn: "complete" },
+      { source: "线索发现", triggerOn: "complete" },
     ],
   });
   assert.equal(compiled.topology.edges.some((edge) => edge.target === "__end__"), false);
@@ -351,65 +351,65 @@ test("compileTeamDsl 会把 graph.entry 编译进 LangGraph START，并保持 EN
   });
 });
 
-test("compileTeamDsl 支持定义漏洞挖掘团队的正反多轮 spawn 辩论拓扑", () => {
+test("compileTeamDsl 支持定义漏洞挖掘团队的论证挑战多轮 spawn 辩论拓扑", () => {
   const definition: TeamDslDefinition = {
-    entry: "初筛",
+    entry: "线索发现",
     nodes: [
-      agentNode("初筛", "你负责持续阅读代码并找出新的可疑点。", false),
+      agentNode("线索发现", "你负责持续阅读代码并找出新的可疑点。", false),
       spawnNode(
         "疑点辩论",
         {
-          entry: "正方",
+          entry: "漏洞论证",
           nodes: [
-            agentNode("正方", "你是正方。你的目标是证明当前可疑点是真漏洞，并在多轮对话中持续回应反方质疑。", false),
-            agentNode("反方", "你是反方。你的目标是反驳漏洞成立，并在多轮对话中持续回应正方论据。", false),
-            agentNode("裁决总结", "你负责汇总正反双方多轮对弈后已经收敛的结果，给出最终裁决，并把结果反馈给初筛。", false),
+            agentNode("漏洞论证", "你是漏洞论证。你的目标是证明当前可疑点是真漏洞，并在多轮对话中持续回应漏洞挑战质疑。", false),
+            agentNode("漏洞挑战", "你是漏洞挑战。你的目标是反驳漏洞成立，并在多轮对话中持续回应漏洞论证论据。", false),
+            agentNode("讨论总结", "你负责汇总论证与挑战双方多轮对弈后已经形成的结果，给出最终判断，并把结果反馈给线索发现。", false),
           ],
           links: [
-            link("正方", "反方", "continue", "last"),
-            link("反方", "正方", "continue", "last"),
-            link("正方", "裁决总结", "complete", "last"),
-            link("反方", "裁决总结", "complete", "last"),
+            link("漏洞论证", "漏洞挑战", "continue", "last"),
+            link("漏洞挑战", "漏洞论证", "continue", "last"),
+            link("漏洞论证", "讨论总结", "complete", "last"),
+            link("漏洞挑战", "讨论总结", "complete", "last"),
           ],
         },
       ),
     ],
     links: [
-      link("初筛", "疑点辩论", "continue", "last"),
-      link("疑点辩论", "初筛", "transfer", "last"),
-      endLink("初筛", "complete", "none"),
+      link("线索发现", "疑点辩论", "continue", "last"),
+      link("疑点辩论", "线索发现", "transfer", "last"),
+      endLink("线索发现", "complete", "none"),
     ],
   };
   const compiled = compileTeamDsl(definition);
 
   assert.deepEqual(
     compiled.agents.map((agent) => agent.id),
-    ["初筛", "正方", "反方", "裁决总结"],
+    ["线索发现", "漏洞论证", "漏洞挑战", "讨论总结"],
   );
   assert.deepEqual(compiled.topology.edges, [
-    { source: "初筛", target: "疑点辩论", triggerOn: "continue", messageMode: "last" },
-    { source: "疑点辩论", target: "初筛", triggerOn: "transfer", messageMode: "last" },
+    { source: "线索发现", target: "疑点辩论", triggerOn: "continue", messageMode: "last" },
+    { source: "疑点辩论", target: "线索发现", triggerOn: "transfer", messageMode: "last" },
   ]);
   assert.deepEqual(compiled.topology.spawnRules?.[0]?.spawnedAgents, [
-    { role: "正方", templateName: "正方" },
-    { role: "反方", templateName: "反方" },
-    { role: "裁决总结", templateName: "裁决总结" },
+    { role: "漏洞论证", templateName: "漏洞论证" },
+    { role: "漏洞挑战", templateName: "漏洞挑战" },
+    { role: "讨论总结", templateName: "讨论总结" },
   ]);
-  assert.equal(compiled.topology.spawnRules?.[0]?.sourceTemplateName, "初筛");
-  assert.equal(compiled.topology.spawnRules?.[0]?.reportToTemplateName, "初筛");
+  assert.equal(compiled.topology.spawnRules?.[0]?.sourceTemplateName, "线索发现");
+  assert.equal(compiled.topology.spawnRules?.[0]?.reportToTemplateName, "线索发现");
   assert.equal(compiled.topology.spawnRules?.[0]?.reportToTriggerOn, "transfer");
   assert.deepEqual(compiled.topology.langgraph?.end, {
     id: "__end__",
-    sources: ["初筛"],
+    sources: ["线索发现"],
     incoming: [
-      { source: "初筛", triggerOn: "complete" },
+      { source: "线索发现", triggerOn: "complete" },
     ],
   });
   assert.deepEqual(compiled.topology.spawnRules?.[0]?.edges, [
-    { sourceRole: "正方", targetRole: "反方", triggerOn: "continue", messageMode: "last" },
-    { sourceRole: "反方", targetRole: "正方", triggerOn: "continue", messageMode: "last" },
-    { sourceRole: "正方", targetRole: "裁决总结", triggerOn: "complete", messageMode: "last" },
-    { sourceRole: "反方", targetRole: "裁决总结", triggerOn: "complete", messageMode: "last" },
+    { sourceRole: "漏洞论证", targetRole: "漏洞挑战", triggerOn: "continue", messageMode: "last" },
+    { sourceRole: "漏洞挑战", targetRole: "漏洞论证", triggerOn: "continue", messageMode: "last" },
+    { sourceRole: "漏洞论证", targetRole: "讨论总结", triggerOn: "complete", messageMode: "last" },
+    { sourceRole: "漏洞挑战", targetRole: "讨论总结", triggerOn: "complete", messageMode: "last" },
   ]);
 });
 
@@ -417,24 +417,24 @@ test("compileTeamDsl 会拒绝在 spawn 子图里直接连接 __end__", () => {
   assert.throws(
     () =>
       compileTeamDsl({
-        entry: "初筛",
+        entry: "线索发现",
         nodes: [
-          agentNode("初筛", "你负责初筛。", false),
+          agentNode("线索发现", "你负责线索发现。", false),
           spawnNode(
             "疑点辩论",
             {
-              entry: "反方",
+              entry: "漏洞挑战",
               nodes: [
-                agentNode("反方", "你是反方。", false),
+                agentNode("漏洞挑战", "你是漏洞挑战。", false),
               ],
               links: [
-                endLink("反方", "complete", "none"),
+                endLink("漏洞挑战", "complete", "none"),
               ],
             },
           ),
         ],
         links: [
-          link("初筛", "疑点辩论", "transfer", "all"),
+          link("线索发现", "疑点辩论", "transfer", "all"),
         ],
       }),
     /只有根图可以直接连接 __end__/u,
@@ -443,22 +443,22 @@ test("compileTeamDsl 会拒绝在 spawn 子图里直接连接 __end__", () => {
 
 test("__end__ 边支持复用 complete / continue 作为条件分支", () => {
   const compiled = compileTeamDsl({
-    entry: "初筛",
+    entry: "线索发现",
     nodes: [
-      agentNode("初筛", "你负责初筛。", false),
+      agentNode("线索发现", "你负责线索发现。", false),
       agentNode("疑点辩论", "你负责辩论。", false),
     ],
     links: [
-      link("初筛", "疑点辩论", "continue", "all"),
-      endLink("初筛", "complete", "none"),
+      link("线索发现", "疑点辩论", "continue", "all"),
+      endLink("线索发现", "complete", "none"),
     ],
   });
 
   assert.deepEqual(compiled.topology.langgraph?.end, {
     id: "__end__",
-    sources: ["初筛"],
+    sources: ["线索发现"],
     incoming: [
-      { source: "初筛", triggerOn: "complete" },
+      { source: "线索发现", triggerOn: "complete" },
     ],
   });
 });
@@ -467,13 +467,13 @@ test("compileTeamDsl 会拒绝省略 __end__ 边的 trigger_type", () => {
   assert.throws(
     () =>
       compileTeamDsl({
-        entry: "初筛",
+        entry: "线索发现",
         nodes: [
-          agentNode("初筛", "你负责初筛。", false),
+          agentNode("线索发现", "你负责线索发现。", false),
         ],
         links: [
           {
-            from: "初筛",
+            from: "线索发现",
             to: "__end__",
           },
         ],
@@ -486,13 +486,13 @@ test("compileTeamDsl 会拒绝省略 __end__ 边的 message_type", () => {
   assert.throws(
     () =>
       compileTeamDsl({
-        entry: "初筛",
+        entry: "线索发现",
         nodes: [
-          agentNode("初筛", "你负责初筛。", false),
+          agentNode("线索发现", "你负责线索发现。", false),
         ],
         links: [
           {
-            from: "初筛",
+            from: "线索发现",
             to: "__end__",
             trigger_type: "complete",
           },
@@ -504,23 +504,23 @@ test("compileTeamDsl 会拒绝省略 __end__ 边的 message_type", () => {
 
 test("compileTeamDsl 支持在 links 上显式声明边级消息传递策略", () => {
   const compiled = compileTeamDsl({
-    entry: "初筛",
+    entry: "线索发现",
     nodes: [
-      agentNode("初筛", "你负责初筛。", false),
+      agentNode("线索发现", "你负责线索发现。", false),
       agentNode("疑点辩论", "你负责辩论。", false),
-      agentNode("裁决总结", "你负责裁决。", false),
+      agentNode("讨论总结", "你负责裁决。", false),
     ],
     links: [
-      link("初筛", "疑点辩论", "transfer", "all"),
-      link("疑点辩论", "裁决总结", "transfer", "last"),
-      link("裁决总结", "初筛", "transfer", "none"),
+      link("线索发现", "疑点辩论", "transfer", "all"),
+      link("疑点辩论", "讨论总结", "transfer", "last"),
+      link("讨论总结", "线索发现", "transfer", "none"),
     ],
   });
 
   assert.deepEqual(compiled.topology.edges, [
-    { source: "初筛", target: "疑点辩论", triggerOn: "transfer", messageMode: "all" },
-    { source: "疑点辩论", target: "裁决总结", triggerOn: "transfer", messageMode: "last" },
-    { source: "裁决总结", target: "初筛", triggerOn: "transfer", messageMode: "none" },
+    { source: "线索发现", target: "疑点辩论", triggerOn: "transfer", messageMode: "all" },
+    { source: "疑点辩论", target: "讨论总结", triggerOn: "transfer", messageMode: "last" },
+    { source: "讨论总结", target: "线索发现", triggerOn: "transfer", messageMode: "none" },
   ]);
 });
 

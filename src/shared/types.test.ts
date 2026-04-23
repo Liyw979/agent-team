@@ -139,13 +139,13 @@ test("MessageRecord 使用必选 kind 作为判别字段，并为用户消息保
 
 test("getSpawnRules 保留显式声明的 messageMode，不再依赖默认补值", () => {
   const topology: TopologyRecord = {
-    nodes: ["初筛", "疑点辩论"],
+    nodes: ["线索发现", "疑点辩论"],
     edges: [],
     nodeRecords: [
       {
-        id: "初筛",
+        id: "线索发现",
         kind: "agent",
-        templateName: "初筛",
+        templateName: "线索发现",
       },
       {
         id: "疑点辩论",
@@ -159,11 +159,11 @@ test("getSpawnRules 保留显式声明的 messageMode，不再依赖默认补值
       {
         id: "疑点辩论",
         spawnNodeName: "疑点辩论",
-        sourceTemplateName: "初筛",
+        sourceTemplateName: "线索发现",
         entryRole: "pro",
         spawnedAgents: [
-          { role: "pro", templateName: "正方" },
-          { role: "con", templateName: "反方" },
+          { role: "pro", templateName: "漏洞论证" },
+          { role: "con", templateName: "漏洞挑战" },
         ],
         edges: [
           {

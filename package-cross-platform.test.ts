@@ -48,9 +48,9 @@ test("AGENTS.md 交付前检查移除旧的 bun test 描述，并改为 bun test
   assert.match(AGENTS_MD, /bun run knip --fix/);
 });
 
-test("AGENTS.md 记录漏洞团队初筛先连反方的拓扑设计技巧", () => {
-  assert.match(AGENTS_MD, /初筛.*反方/);
-  assert.match(AGENTS_MD, /先质疑.*再进入正反对抗|先由反方挑战.*再进入正反对抗/);
+test("AGENTS.md 记录漏洞团队线索发现先连漏洞挑战的拓扑设计技巧", () => {
+  assert.match(AGENTS_MD, /线索发现.*漏洞挑战/);
+  assert.match(AGENTS_MD, /漏洞挑战暴露证据链缺口.*论证与挑战对抗/);
 });
 
 test("AGENTS.md 记录漏洞团队结论前必须先阅读代码找支撑", () => {

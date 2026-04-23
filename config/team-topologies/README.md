@@ -82,25 +82,25 @@
   "type": "spawn",
   "id": "疑点辩论",
   "graph": {
-    "entry": "正方",
+    "entry": "漏洞论证",
     "nodes": [
       {
         "type": "agent",
-        "id": "正方",
-        "prompt": "你是正方。",
+        "id": "漏洞论证",
+        "prompt": "你负责漏洞论证。",
         "writable": false
       },
       {
         "type": "agent",
-        "id": "反方",
-        "prompt": "你是反方。",
+        "id": "漏洞挑战",
+        "prompt": "你负责漏洞挑战。",
         "writable": false
       }
     ],
     "links": [
       {
-        "from": "正方",
-        "to": "反方",
+        "from": "漏洞论证",
+        "to": "漏洞挑战",
         "trigger_type": "continue",
         "message_type": "last"
       }
@@ -172,7 +172,7 @@
 ```json
 [
   {
-    "from": "初筛",
+    "from": "线索发现",
     "to": "__end__",
     "trigger_type": "complete",
     "message_type": "none"
@@ -278,14 +278,14 @@
 
 `vulnerability-team.topology.json` 展示了递归 `spawn` 的写法：
 
-- 根图入口是 `初筛`
-- `初筛 -> 疑点辩论` 不是无条件流转：有新的 finding 时，`初筛` 的回复开头先输出 `<continue>`，再输出 finding 正文，并命中 `{ "from": "初筛", "to": "疑点辩论", "trigger_type": "continue", "message_type": "all" }`
-- 没有新的 finding 时，`初筛` 的回复开头先输出 `<complete>`，再输出简短说明，并命中 `{ "from": "初筛", "to": "__end__", "trigger_type": "complete", "message_type": "none" }`，直接结束到 `END`
-- `初筛` 的默认 prompt 要求每轮只返回一个可疑漏洞点，并且回复开头先输出 `<complete>` / `<continue>` 审查标签，再输出正文
+- 根图入口是 `线索发现`
+- `线索发现 -> 疑点辩论` 不是无条件流转：有新的 finding 时，`线索发现` 的回复开头先输出 `<continue>`，再输出 finding 正文，并命中 `{ "from": "线索发现", "to": "疑点辩论", "trigger_type": "continue", "message_type": "all" }`
+- 没有新的 finding 时，`线索发现` 的回复开头先输出 `<complete>`，再输出简短说明，并命中 `{ "from": "线索发现", "to": "__end__", "trigger_type": "complete", "message_type": "none" }`，直接结束到 `END`
+- `线索发现` 的默认 prompt 要求每轮只返回一个可疑漏洞点，并且回复开头先输出 `<complete>` / `<continue>` 审查标签，再输出正文
 - `疑点辩论` 是 `spawn` 节点
-- `spawn.graph` 里定义正方、反方、裁决总结的子图
-- 在这份漏洞团队拓扑里，`裁决总结` 的要求是：若裁定为真实漏洞，就输出正式漏洞报告；若裁定为误报，就什么都不做
-- 根图写的是 `{ "from": "疑点辩论", "to": "初筛", "trigger_type": "transfer", "message_type": "none" }`，因此 `裁决总结` 完成本轮裁决后，会按 `transfer` 触发 `初筛` 继续寻找下一个 finding
+- `spawn.graph` 里定义漏洞论证、漏洞挑战、讨论总结的子图
+- 在这份漏洞团队拓扑里，`讨论总结` 的要求是：若裁定为真实漏洞，就输出正式漏洞报告；若裁定为误报，就什么都不做
+- 根图写的是 `{ "from": "疑点辩论", "to": "线索发现", "trigger_type": "transfer", "message_type": "none" }`，因此 `讨论总结` 完成本轮裁决后，会按 `transfer` 触发 `线索发现` 继续寻找下一个 finding
 
 ## 6. 当前硬约束
 

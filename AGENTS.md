@@ -82,8 +82,8 @@
 
 - LangGraph 是唯一调度运行时核心；`TopologyRecord` 是产品真源，运行时会在主进程内把它编译为图状态与调度索引。langgraph-runtime[resumeTask]、gating-router[createGraphTaskState, applyAgentResultToGraphState]、topology-compiler[compileTopology]
 - 拓扑边持久化 `source / target / triggerOn`；`triggerOn` 只允许 `transfer`、`complete`、`continue`。其中 `transfer` 表示普通协作流转，节点完成后直接触发下游；`complete` 表示审查通过后才触发下游；`continue` 表示审查不通过后的回流或继续回应链路。store[readWorkspaceState, writeWorkspaceState]、orchestrator[normalizeTopology]、topology-compiler[compileTopology]
-- 递归式 DSL 中，`spawn` 仍会被当成拓扑中的正常节点；当父图里存在唯一的 `spawn -> 某节点` 回流边时，编译阶段会把这条边的 `triggerOn` 一并记到 `spawn rule` 上，再由子图唯一终局角色按这条触发类型直接回到外层节点，同时把 `spawn` 节点自身标记为已完成，避免激活残留卡住后续流程。漏洞团队当前写的是 `["疑点辩论", "初筛", "transfer"]`，所以它的 `裁决总结` 会按 `transfer` 回到 `初筛`。team-dsl[compileTeamDsl]、runtime-topology[instantiateSpawnBundle]、gating-router[applyAgentResultToGraphState]
-- 漏洞挖掘团队的默认对抗拓扑里，`初筛` 会先把 finding 交给 `反方`，而不是先交给 `正方`；这是一条刻意保留的拓扑设计技巧，用来先由反方挑战证据链、暴露缺口，再进入正反对抗，避免正方开场直接同意导致对抗性不足。config/team-topologies/vulnerability-team.topology.json、team-dsl[compileTeamDsl]、scheduler-script-harness[assertSchedulerScript]
+- 递归式 DSL 中，`spawn` 仍会被当成拓扑中的正常节点；当父图里存在唯一的 `spawn -> 某节点` 回流边时，编译阶段会把这条边的 `triggerOn` 一并记到 `spawn rule` 上，再由子图唯一终局角色按这条触发类型直接回到外层节点，同时把 `spawn` 节点自身标记为已完成，避免激活残留卡住后续流程。漏洞团队当前写的是 `["疑点辩论", "线索发现", "transfer"]`，所以它的 `讨论总结` 会按 `transfer` 回到 `线索发现`。team-dsl[compileTeamDsl]、runtime-topology[instantiateSpawnBundle]、gating-router[applyAgentResultToGraphState]
+- 漏洞挖掘团队的默认对抗拓扑里，`线索发现` 会先把 finding 交给 `漏洞挑战`，而不是先交给 `漏洞论证`；这是一条刻意保留的拓扑设计技巧，用来先由漏洞挑战暴露证据链缺口，再进入论证与挑战对抗，避免漏洞论证开场直接同意导致对抗性不足。config/team-topologies/vulnerability-team.topology.json、team-dsl[compileTeamDsl]、scheduler-script-harness[assertSchedulerScript]
 - 静态 `spawn` 节点属于调度节点，会保留在拓扑数据中供运行时识别，但前端拓扑图不会直接展示这类工厂节点；只有 `spawn` 实际展开出来的运行时 Agent 实例会作为可见节点显示。topology-spawn-drafts[getTopologyDisplayNodeIds]、TopologyGraph[TopologyGraph]、runtime-topology-graph[buildEffectiveTopology]
 - 当某个 Agent 存在“直接下游通过 `transfer` 触发、且该下游会用 `continue` 直接回流给自己、同时该下游没有 `complete` 下游”的审查回路时，系统会先只放行这类直接审查回路；只有这些回路全部通过后，才会继续放行该 Agent 其余直接 `transfer` 下游，避免 Build 与单个审查 Agent 多轮对话时反复提前触发无关下游。gating-scheduler[planHandoffDispatch, recordHandoffBatchResponse]、gating-router[handleActionRequired, continueAfterHandoffBatchResponse]
 - 同一轮里若某个 Agent 需要同时触发多个直接 `transfer` 下游 reviewer，这批 reviewer 会并发启动；只有当前整批 reviewer 都返回后，系统才会决定是否回流给上游修复，或继续补跑这一轮尚未确认通过的 reviewer，避免把并发批次错误串成“一次只放行一个”。gating-scheduler[planHandoffDispatch, recordHandoffBatchResponse]、orchestrator[createLangGraphBatchRunners]
@@ -96,7 +96,7 @@
 - 拓扑节点顶部直接展示 Agent 当前状态徽标，包括 `未启动 / 运行中 / 已完成 / 执行失败`；审查类 Agent 则显示 `审查通过 / 审查不通过`。topology-graph-helpers[getTopologyAgentStatusBadgePresentation]、TopologyGraph[TopologyGraph]
 - 拓扑图中每个 Agent 节点头部都会在状态 icon 左侧提供 `attach` 按钮；点击后直接打开该 Agent 对应的 OpenCode attach 终端。topology-graph-helpers[getTopologyNodeHeaderActionOrder]、TopologyGraph[TopologyGraph]、App[App]、orchestrator[openAgentTerminal]
 - 拓扑图中的 Agent 节点颜色用于表达当前运行状态；内置与本地类型信息仅在编辑面板等辅助信息中展示。topology-graph-helpers[getTopologyAgentStatusBadgePresentation]、agent-colors[getAgentColorToken]、TopologyGraph[TopologyGraph]
-- 拓扑图会隐藏静态 `spawn` 工厂节点；当某个 `spawn` 子图已经实例化出 runtime agent 时，前端会用实例节点（如 `正方-1`）替换对应模板节点（如 `正方`）进行展示，避免模板卡片出现空历史区。topology-spawn-drafts[getTopologyDisplayNodeIds]、TopologyGraph[TopologyGraph]
+- 拓扑图会隐藏静态 `spawn` 工厂节点；当某个 `spawn` 子图已经实例化出 runtime agent 时，前端会用实例节点（如 `漏洞论证-1`）替换对应模板节点（如 `漏洞论证`）进行展示，避免模板卡片出现空历史区。topology-spawn-drafts[getTopologyDisplayNodeIds]、TopologyGraph[TopologyGraph]
 - 拓扑图在面板尺寸变化时会保持“Agent 在上、历史区在下、首尾节点贴近左右边界但保留少量留白、顶部预留连线通道”的布局约束，而不是把整张图简单等比缩放后居中。topology-canvas[buildTopologyCanvasLayout]、TopologyGraph[TopologyGraph]
 - 前端拓扑编辑面板支持为每一条 `action_required` 关系单独配置“最大反驳次数”；默认显示 `4`，不同审视关系可以分别保存不同数值。types[normalizeActionRequiredMaxRounds, getActionRequiredEdgeLoopLimit]、orchestrator[normalizeTopology]、store[readWorkspaceState, writeWorkspaceState]
 

@@ -75,39 +75,39 @@ test("handoff 批次在 reviewer 未收齐前不会提前推进下一位 reviewe
 
 test("单 reviewer 的 spawn 展开批次收尾时，不会把静态 spawn 节点误判成 stale target", () => {
   const runtime = createGatingSchedulerRuntimeState();
-  runtime.activeHandoffBatchBySource.set("初筛", {
-    sourceAgentId: "初筛",
+  runtime.activeHandoffBatchBySource.set("线索发现", {
+    sourceAgentId: "线索发现",
     sourceContent: "发现一个可疑点",
-    targets: ["正方-1"],
-    pendingTargets: ["正方-1"],
+    targets: ["漏洞论证-1"],
+    pendingTargets: ["漏洞论证-1"],
     respondedTargets: [],
     sourceRevision: 1,
     failedTargets: [],
   });
-  runtime.sourceRevisionStateByAgent.set("初筛", {
+  runtime.sourceRevisionStateByAgent.set("线索发现", {
     currentRevision: 1,
     reviewerPassRevision: new Map(),
   });
 
   const scheduler = new GatingScheduler({
-    nodes: ["初筛", "疑点辩论"],
+    nodes: ["线索发现", "疑点辩论"],
     nodeRecords: [
-      { id: "初筛", kind: "agent", templateName: "初筛" },
+      { id: "线索发现", kind: "agent", templateName: "线索发现" },
       { id: "疑点辩论", kind: "spawn", templateName: "疑点辩论", spawnRuleId: "spawn-rule:疑点辩论" },
     ],
     edges: [
-      { source: "初筛", target: "疑点辩论", triggerOn: "transfer", messageMode: "last" },
+      { source: "线索发现", target: "疑点辩论", triggerOn: "transfer", messageMode: "last" },
     ],
   }, runtime);
 
   const continuation = scheduler.recordHandoffBatchResponse(
-    "正方-1",
+    "漏洞论证-1",
     "complete",
   );
 
   assert.deepEqual(continuation, {
     matchedBatch: true,
-    sourceAgentId: "初筛",
+    sourceAgentId: "线索发现",
     sourceContent: "发现一个可疑点",
     pendingTargets: [],
     repairReviewerAgentId: null,
@@ -160,29 +160,29 @@ test("单 reviewer 的修复批次收尾时，会继续补跑同源的其他 sta
 
 test("approved 多入边命中任意一条时，就可以继续派发目标节点", () => {
   const scheduler = new GatingScheduler({
-    nodes: ["正方", "反方", "裁决总结"],
+    nodes: ["漏洞论证", "漏洞挑战", "讨论总结"],
     edges: [
-      { source: "正方", target: "裁决总结", triggerOn: "complete", messageMode: "last" },
-      { source: "反方", target: "裁决总结", triggerOn: "complete", messageMode: "last" },
+      { source: "漏洞论证", target: "讨论总结", triggerOn: "complete", messageMode: "last" },
+      { source: "漏洞挑战", target: "讨论总结", triggerOn: "complete", messageMode: "last" },
     ],
   }, createGatingSchedulerRuntimeState());
 
   const plan = scheduler.planApprovedDispatch(
-    "正方",
-    "正方同意进入裁决",
+    "漏洞论证",
+    "漏洞论证同意进入裁决",
     [
-      { id: "正方", status: "completed" as const },
-      { id: "反方", status: "idle" as const },
-      { id: "裁决总结", status: "idle" as const },
+      { id: "漏洞论证", status: "completed" as const },
+      { id: "漏洞挑战", status: "idle" as const },
+      { id: "讨论总结", status: "idle" as const },
     ],
   );
 
   assert.deepEqual(plan, {
-    sourceAgentId: "正方",
-    sourceContent: "正方同意进入裁决",
-    displayTargets: ["裁决总结"],
-    triggerTargets: ["裁决总结"],
-    readyTargets: ["裁决总结"],
+    sourceAgentId: "漏洞论证",
+    sourceContent: "漏洞论证同意进入裁决",
+    displayTargets: ["讨论总结"],
+    triggerTargets: ["讨论总结"],
+    readyTargets: ["讨论总结"],
     queuedTargets: [],
   });
 });
