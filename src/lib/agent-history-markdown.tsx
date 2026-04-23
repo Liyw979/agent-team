@@ -1,5 +1,6 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import type { CSSProperties } from "react";
 
 import { MarkdownMessage } from "./chat-markdown";
 
@@ -9,7 +10,7 @@ const AGENT_HISTORY_MARKDOWN_STYLE = {
   "--chat-markdown-list-padding-left": "0.92rem",
   "--chat-markdown-inline-code-padding": "0.04rem 0.22rem",
   "--chat-markdown-pre-padding": "0.18rem 0.42rem",
-} as const;
+} as CSSProperties;
 
 export function AgentHistoryMarkdown({
   content,

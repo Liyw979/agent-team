@@ -10,3 +10,6 @@ src/cli/generated-embedded-assets.ts
 
 # Keep project agent definitions in version control.
 !.opencode/
+
+.idea
+tsconfig.web.tsbuildinfo

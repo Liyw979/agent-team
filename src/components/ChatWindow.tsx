@@ -80,7 +80,7 @@ function getCaretCoordinates(textarea: HTMLTextAreaElement, position: number) {
   div.style.wordWrap = "break-word";
 
   for (const property of properties) {
-    div.style[property] = style[property];
+    div.style.setProperty(property, style.getPropertyValue(property));
   }
 
   div.textContent = textarea.value.slice(0, position);

@@ -81,7 +81,7 @@ export function getTopologyAgentStatusLabel(
 }
 
 export function getTopologyLoopLimitFailedReviewerName(
-  messages: Pick<MessageRecord, "content" | "meta">[],
+  messages: Pick<MessageRecord, "id" | "content" | "meta">[],
 ): string | null {
   const failedCompletionMessage = [...messages]
     .reverse()

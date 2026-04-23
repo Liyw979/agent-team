@@ -8,7 +8,7 @@ import { getChatMarkdownSpacingStyle } from "./chat-markdown-spacing";
 import { getChatMarkdownStaticStyleSheet } from "./chat-markdown-style-sheet";
 import { getChatMarkdownTypographyStyle } from "./chat-markdown-typography";
 
-const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkBreaks] as const;
+const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkBreaks];
 
 function MarkdownContent({
   content,

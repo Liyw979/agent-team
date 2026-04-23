@@ -138,13 +138,14 @@ function App() {
       return;
     }
 
+    const activeTaskId = task.task.id;
     let cancelled = false;
     let timer: ReturnType<typeof setInterval> | null = null;
 
     async function loadRuntime() {
       try {
         const snapshots = await getTaskRuntime({
-          taskId: task.task.id,
+          taskId: activeTaskId,
         });
         if (cancelled) {
           return;
