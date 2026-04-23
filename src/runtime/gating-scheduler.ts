@@ -342,21 +342,21 @@ export class GatingScheduler {
     }
 
     const incomingHandoffEdges = this.getIncomingEdges(targetName, "transfer");
-    if (incomingHandoffEdges.some((edge) => !completedEdges.has(getTopologyEdgeId(edge)))) {
+    if (incomingHandoffEdges.some((edge) => !this.isIncomingEdgeSatisfied(edge, completedEdges))) {
       return false;
     }
 
     const incomingApprovedEdges = this.getIncomingEdges(targetName, "complete");
     if (
       triggerKind === "transfer"
-      && incomingApprovedEdges.some((edge) => !completedEdges.has(getTopologyEdgeId(edge)))
+      && incomingApprovedEdges.some((edge) => !this.isIncomingEdgeSatisfied(edge, completedEdges))
     ) {
       return false;
     }
     if (
       triggerKind === "complete"
       && incomingApprovedEdges.length > 0
-      && !incomingApprovedEdges.some((edge) => completedEdges.has(getTopologyEdgeId(edge)))
+      && !incomingApprovedEdges.some((edge) => this.isIncomingEdgeSatisfied(edge, completedEdges))
     ) {
       return false;
     }
@@ -371,6 +371,56 @@ export class GatingScheduler {
     }
 
     return true;
+  }
+
+  private isIncomingEdgeSatisfied(edge: TopologyEdge, completedEdges: Set<string>): boolean {
+    if (completedEdges.has(getTopologyEdgeId(edge))) {
+      return true;
+    }
+
+    return this.isSpawnReportEdgeSatisfiedByRuntimeReport(edge, completedEdges);
+  }
+
+  private isSpawnReportEdgeSatisfiedByRuntimeReport(edge: TopologyEdge, completedEdges: Set<string>): boolean {
+    const spawnRule = (this.topology.spawnRules ?? []).find((rule) => {
+      const spawnNodeName = rule.spawnNodeName
+        || this.topology.nodeRecords?.find((node) => node.spawnRuleId === rule.id)?.id
+        || "";
+      return (
+        spawnNodeName === edge.source
+        && rule.reportToTemplateName === edge.target
+        && (rule.reportToTriggerOn ?? "complete") === edge.triggerOn
+      );
+    });
+    if (!spawnRule) {
+      return false;
+    }
+
+    const terminalRoles = spawnRule.spawnedAgents
+      .map((agent) => agent.role)
+      .filter((role) => !spawnRule.edges.some((candidate) => candidate.sourceRole === role));
+    const terminalTemplateNames = new Set(
+      spawnRule.spawnedAgents
+        .filter((agent) => terminalRoles.includes(agent.role))
+        .map((agent) => agent.templateName),
+    );
+    if (terminalTemplateNames.size === 0) {
+      return false;
+    }
+
+    return this.topology.edges.some((candidate) => {
+      if (
+        candidate.source === edge.source
+        || candidate.target !== edge.target
+        || candidate.triggerOn !== edge.triggerOn
+        || !completedEdges.has(getTopologyEdgeId(candidate))
+      ) {
+        return false;
+      }
+
+      const sourceNode = this.topology.nodeRecords?.find((node) => node.id === candidate.source);
+      return sourceNode ? terminalTemplateNames.has(sourceNode.templateName) : false;
+    });
   }
 
   private buildTriggerSignature(completedEdges: Set<string>, targetName: string): string {
