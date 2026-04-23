@@ -1,5 +1,4 @@
 import {
-  DEFAULT_TOPOLOGY_EDGE_MESSAGE_MODE,
   getMessageTargetAgentIds,
   isAgentDispatchMessageRecord,
   isUserMessageRecord,
@@ -72,11 +71,11 @@ export function buildDownstreamForwardedContextFromMessages(
   sourceContent: string,
   options: {
     includeInitialTask?: boolean;
-    messageMode?: TopologyEdgeMessageMode;
-  } = {},
+    messageMode: TopologyEdgeMessageMode;
+  },
 ): { userMessage?: string; agentMessage: string } {
   const includeInitialTask = options.includeInitialTask ?? true;
-  const messageMode = options.messageMode ?? DEFAULT_TOPOLOGY_EDGE_MESSAGE_MODE;
+  const messageMode = options.messageMode;
   const initialUserContent = getInitialUserMessageContent(messages);
   const latestSourceContent = sourceContent.trim();
   const agentMessage = resolveForwardedAgentMessage(messages, latestSourceContent, messageMode);

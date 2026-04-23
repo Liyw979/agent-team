@@ -9,8 +9,8 @@ test("resolveTaskAgentNamesToPrewarm 不会为仅作为 spawn 模板存在的静
   const topology: TopologyRecord = {
     nodes: ["初筛", "正方", "反方", "裁决总结", "疑点辩论"],
     edges: [
-      { source: "初筛", target: "疑点辩论", triggerOn: "association" },
-      { source: "疑点辩论", target: "初筛", triggerOn: "association" },
+      { source: "初筛", target: "疑点辩论", triggerOn: "association", messageMode: "last" },
+      { source: "疑点辩论", target: "初筛", triggerOn: "association", messageMode: "last" },
     ],
     langgraph: {
       start: {
@@ -32,10 +32,10 @@ test("resolveTaskAgentNamesToPrewarm 不会为仅作为 spawn 模板存在的静
           { role: "裁决总结", templateName: "裁决总结" },
         ],
         edges: [
-          { sourceRole: "正方", targetRole: "反方", triggerOn: "needs_revision" },
-          { sourceRole: "反方", targetRole: "正方", triggerOn: "needs_revision" },
-          { sourceRole: "正方", targetRole: "裁决总结", triggerOn: "approved" },
-          { sourceRole: "反方", targetRole: "裁决总结", triggerOn: "approved" },
+          { sourceRole: "正方", targetRole: "反方", triggerOn: "needs_revision", messageMode: "last" },
+          { sourceRole: "反方", targetRole: "正方", triggerOn: "needs_revision", messageMode: "last" },
+          { sourceRole: "正方", targetRole: "裁决总结", triggerOn: "approved", messageMode: "last" },
+          { sourceRole: "反方", targetRole: "裁决总结", triggerOn: "approved", messageMode: "last" },
         ],
         exitWhen: "all_completed",
         reportToTemplateName: "初筛",

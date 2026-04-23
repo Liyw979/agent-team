@@ -67,6 +67,7 @@ function buildSpawnRuleFromReachable(topology: TopologyRecord, sourceNodeId: str
       sourceRole: index === 0 ? "entry" : item.nodeId,
       targetRole: targetTemplates[index + 1]?.nodeId ?? "entry",
       triggerOn: "association" as const,
+      messageMode: "last" as const,
     })),
     exitWhen: "one_side_agrees",
     reportToTemplateName: reportTarget,
@@ -145,6 +146,7 @@ export function setSpawnEnabledForDownstream(input: {
           source: input.sourceNodeId,
           target: input.targetNodeId,
           triggerOn: "association" as const,
+          messageMode: "last" as const,
         })
         .map((edge) => ({ ...edge }))
     : input.topology.edges.map((edge) => ({ ...edge }));
@@ -191,6 +193,7 @@ export function setDownstreamMode(input: {
           source: input.sourceNodeId,
           target: input.targetNodeId,
           triggerOn: normalizeTopologyEdgeTrigger(input.mode),
+          messageMode: "last" as const,
         });
 
   return {

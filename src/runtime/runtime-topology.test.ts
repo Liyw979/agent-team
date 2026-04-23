@@ -17,7 +17,7 @@ function createVulnTopology(): TopologyRecord {
       { id: "疑点辩论工厂", kind: "spawn", templateName: "正方模板", spawnRuleId: "finding-debate" },
     ],
     edges: [
-      { source: "初筛", target: "疑点辩论工厂", triggerOn: "association" },
+      { source: "初筛", target: "疑点辩论工厂", triggerOn: "association", messageMode: "all" },
     ],
     spawnRules: [
       {
@@ -80,6 +80,12 @@ test("instantiateSpawnBundle 会为一个 finding 生成正反 summary 三个运
   );
   assert.deepEqual(bundle.edges, [
     {
+      messageMode: "all",
+      source: "初筛",
+      target: "正方模板-1",
+      triggerOn: "association",
+    },
+    {
       messageMode: "last",
       source: "正方模板-1",
       target: "反方模板-1",
@@ -110,6 +116,54 @@ test("instantiateSpawnBundle 会为一个 finding 生成正反 summary 三个运
       triggerOn: "association",
     },
   ]);
+});
+
+test("instantiateSpawnBundle 会继承 source -> spawn 的 messageMode 到 entry 运行时实例边", () => {
+  const topology = createVulnTopology();
+
+  const bundle = instantiateSpawnBundle({
+    topology,
+    spawnRuleId: "finding-debate",
+    activationId: "activation-1",
+    item: {
+      id: "finding-001",
+      title: "上传文件名拼接路径",
+    },
+  });
+
+  assert.deepEqual(bundle.edges[0], {
+    source: "初筛",
+    target: "正方模板-1",
+    triggerOn: "association",
+    messageMode: "all",
+  });
+});
+
+test("instantiateSpawnBundle 识别 source 节点时不会误把 spawn 节点当成 sourceTemplateName", () => {
+  const topology = createVulnTopology();
+
+  const bundle = instantiateSpawnBundle({
+    topology: {
+      ...topology,
+      nodeRecords: [
+        { id: "疑点辩论工厂", kind: "spawn", templateName: "正方模板", spawnRuleId: "finding-debate" },
+        ...(topology.nodeRecords ?? []).filter((node) => node.id !== "疑点辩论工厂"),
+      ],
+    },
+    spawnRuleId: "finding-debate",
+    activationId: "activation-1",
+    item: {
+      id: "finding-001",
+      title: "上传文件名拼接路径",
+    },
+  });
+
+  assert.deepEqual(bundle.edges[0], {
+    source: "初筛",
+    target: "正方模板-1",
+    triggerOn: "association",
+    messageMode: "all",
+  });
 });
 
 test("同一 spawn rule 的多个实例会按顺序生成简短显示名，而不是暴露复杂内部 id", () => {

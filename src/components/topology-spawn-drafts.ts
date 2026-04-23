@@ -168,6 +168,7 @@ export function upsertDebateSpawnDraft(
     source: input.sourceTemplateName,
     target: spawnNodeId,
     triggerOn: "association" as const,
+    messageMode: "last" as const,
   });
 
   const nextSpawnRules = (topology.spawnRules ?? []).filter((rule) => rule.id !== spawnRuleId).concat(spawnRule);

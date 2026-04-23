@@ -12,10 +12,8 @@ import {
   type AgentRecord,
   BUILD_AGENT_NAME,
   createDefaultTopology,
-  DEFAULT_TOPOLOGY_EDGE_MESSAGE_MODE,
   normalizeNeedsRevisionMaxRounds,
   normalizeTopologyEdgeTrigger,
-  normalizeTopologyEdgeMessageMode,
   type DeleteTaskPayload,
   type GetTaskRuntimePayload,
   type InitializeTaskPayload,
@@ -71,7 +69,7 @@ import type { LangGraphTaskLoopHost } from "./langgraph-host";
 import type { GraphDispatchBatch, GraphAgentResult } from "./gating-router";
 import type { GraphTaskState } from "./gating-state";
 import { buildTaskCompletionMessageContent } from "./task-completion-message";
-import { getRuntimeTemplateName } from "./runtime-topology-graph";
+import { buildEffectiveTopology, getRuntimeTemplateName } from "./runtime-topology-graph";
 import type { CompiledTeamDsl } from "./team-dsl";
 import { shouldScheduleEventStreamReconnect } from "./event-stream-lifecycle";
 import { resolveExecutionReviewAgent } from "./review-agent-context";
@@ -1331,7 +1329,7 @@ export class Orchestrator {
         source: edge.source,
         target: edge.target,
         triggerOn: normalizeTopologyEdgeTrigger(edge.triggerOn),
-        messageMode: normalizeTopologyEdgeMessageMode(edge.messageMode),
+        messageMode: edge.messageMode,
         ...(normalizeTopologyEdgeTrigger(edge.triggerOn) === "needs_revision"
           ? {
               maxRevisionRounds: normalizeNeedsRevisionMaxRounds(edge.maxRevisionRounds),
@@ -1502,7 +1500,7 @@ export class Orchestrator {
           {
             includeInitialTask,
             messageMode: this.getEdgeMessageMode(
-              topology,
+              buildEffectiveTopology(state),
               batch.sourceAgentId,
               job.agentName,
               job.kind === "raw" ? "association" : job.kind,
@@ -1885,7 +1883,26 @@ export class Orchestrator {
         && item.target === targetAgentId
         && item.triggerOn === normalizedTriggerOn,
     );
-    return edge?.messageMode ?? DEFAULT_TOPOLOGY_EDGE_MESSAGE_MODE;
+    if (edge) {
+      return edge.messageMode;
+    }
+
+    const targetNode = topology.nodeRecords?.find((node) => node.id === targetAgentId);
+    if (targetNode) {
+      const inheritedEdge = topology.edges.find(
+        (item) =>
+          item.source === sourceAgentId
+          && item.target === targetNode.templateName
+          && item.triggerOn === normalizedTriggerOn,
+      );
+      if (inheritedEdge) {
+        return inheritedEdge.messageMode;
+      }
+    }
+
+    throw new Error(
+      `拓扑边不存在，无法解析 messageMode：${sourceAgentId} -> ${targetAgentId} (${normalizedTriggerOn})`,
+    );
   }
 
   private moveTaskToWaiting(cwd: string, taskId: string, sourceAgentId: string) {

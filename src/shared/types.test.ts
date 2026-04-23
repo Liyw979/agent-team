@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   createDefaultTopology,
+  getSpawnRules,
   getNeedsRevisionEdgeLoopLimit,
   isReviewAgentInTopology,
   normalizeTopologyEdgeTrigger,
@@ -74,6 +75,7 @@ test("存在 review 出边时 isReviewAgentInTopology 返回 true", () => {
         source: "TaskReview",
         target: "Build",
         triggerOn: "needs_revision",
+        messageMode: "last",
       },
     ],
   };
@@ -90,11 +92,13 @@ test("needs_revision 边默认回流上限为 4，且支持按边单独覆盖", 
         source: "UnitTest",
         target: "Build",
         triggerOn: "needs_revision",
+        messageMode: "last",
       },
       {
         source: "TaskReview",
         target: "Build",
         triggerOn: "needs_revision",
+        messageMode: "last",
         maxRevisionRounds: 7,
       },
     ],
@@ -126,4 +130,56 @@ test("MessageRecord 使用必选 kind 作为判别字段，并为用户消息保
   assert.equal(MESSAGE_RECORD_BLOCK.includes("  kind?:"), false);
   assert.match(TYPES_SOURCE, /kind:\s*"user"/u);
   assert.match(TYPES_SOURCE, /kind:\s*"system-message"/u);
+});
+
+test("getSpawnRules 保留显式声明的 messageMode，不再依赖默认补值", () => {
+  const topology: TopologyRecord = {
+    nodes: ["初筛", "疑点辩论"],
+    edges: [],
+    nodeRecords: [
+      {
+        id: "初筛",
+        kind: "agent",
+        templateName: "初筛",
+      },
+      {
+        id: "疑点辩论",
+        kind: "spawn",
+        templateName: "疑点辩论",
+        spawnEnabled: true,
+        spawnRuleId: "spawn-rule:疑点辩论",
+      },
+    ],
+    spawnRules: [
+      {
+        id: "spawn-rule:疑点辩论",
+        name: "疑点辩论",
+        spawnNodeName: "疑点辩论",
+        sourceTemplateName: "初筛",
+        entryRole: "pro",
+        spawnedAgents: [
+          { role: "pro", templateName: "正方" },
+          { role: "con", templateName: "反方" },
+        ],
+        edges: [
+          {
+            sourceRole: "pro",
+            targetRole: "con",
+            triggerOn: "needs_revision",
+            messageMode: "all",
+          },
+        ],
+        exitWhen: "all_completed",
+      },
+    ],
+  };
+
+  assert.deepEqual(getSpawnRules(topology)[0]?.edges, [
+    {
+      sourceRole: "pro",
+      targetRole: "con",
+      triggerOn: "needs_revision",
+      messageMode: "all",
+    },
+  ]);
 });

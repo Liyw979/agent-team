@@ -18,6 +18,7 @@ function createEdge(
     source,
     target,
     triggerOn,
+    messageMode: "last",
   };
 }
 

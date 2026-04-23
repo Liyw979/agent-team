@@ -2,7 +2,6 @@ import {
   type AgentRecord,
   createTopologyLangGraphRecord,
   normalizeNeedsRevisionMaxRounds,
-  normalizeTopologyEdgeMessageMode,
   type TopologyEdgeMessageMode,
   type TopologyEdgeTrigger,
   type TopologyLangGraphRecord,
@@ -116,7 +115,7 @@ function normalizeComparableTopology(topology: TopologyRecord): TopologyRecord {
         source: edge.source,
         target: edge.target,
         triggerOn: edge.triggerOn,
-        ...(edge.messageMode ? { messageMode: edge.messageMode } : {}),
+        messageMode: edge.messageMode,
         ...(edge.triggerOn === "needs_revision"
           ? {
               maxRevisionRounds: normalizeNeedsRevisionMaxRounds(edge.maxRevisionRounds),
@@ -349,6 +348,14 @@ function resolveSpawnReportTo(
     : undefined;
 }
 
+function resolveSpawnSourceTemplateName(
+  graph: GraphDslGraph,
+  spawnNodeName: string,
+): string | undefined {
+  const incomingLinks = graph.links.filter((link) => link.to === spawnNodeName);
+  return incomingLinks.length === 1 ? incomingLinks[0]!.from : undefined;
+}
+
 function collectGraphDslNodeDefinitions(
   graph: GraphDslGraph,
   context: {
@@ -394,6 +401,7 @@ function collectGraphDslNodeDefinitions(
 
     const spawnRuleId = `spawn-rule:${node.name}`;
     const reportTarget = resolveSpawnReportTo(graph, node.name);
+    const sourceTemplateName = resolveSpawnSourceTemplateName(graph, node.name);
     context.nodeRecords.set(node.name, {
       id: node.name,
       kind: "spawn",
@@ -405,6 +413,7 @@ function collectGraphDslNodeDefinitions(
       id: spawnRuleId,
       name: node.name,
       spawnNodeName: node.name,
+      ...(sourceTemplateName ? { sourceTemplateName } : {}),
       entryRole: node.graph.entry,
       spawnedAgents: node.graph.nodes.map((childNode) => ({
         role: childNode.name,
@@ -414,7 +423,7 @@ function collectGraphDslNodeDefinitions(
         sourceRole: link.from,
         targetRole: link.to,
         triggerOn: link.trigger_type,
-        messageMode: normalizeTopologyEdgeMessageMode(link.message_type),
+        messageMode: link.message_type,
       })),
       exitWhen: "all_completed",
       ...(reportTarget?.target ? { reportToTemplateName: reportTarget.target } : {}),
@@ -458,7 +467,7 @@ function compileGraphDsl(input: GraphDslGraph): CompiledTeamDsl {
       source: link.from,
       target: link.to,
       triggerOn: link.trigger_type,
-      messageMode: normalizeTopologyEdgeMessageMode(link.message_type),
+      messageMode: link.message_type,
     })),
     langgraph: createTopologyLangGraphRecord({
       nodes: input.nodes.map((node) => node.name),
@@ -466,7 +475,7 @@ function compileGraphDsl(input: GraphDslGraph): CompiledTeamDsl {
         source: link.from,
         target: link.to,
         triggerOn: link.trigger_type,
-        messageMode: normalizeTopologyEdgeMessageMode(link.message_type),
+        messageMode: link.message_type,
       })),
       startTargets: [input.entry],
       endSources: null,

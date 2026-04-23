@@ -51,15 +51,18 @@ export function instantiateSpawnBundle(input: {
   const effectiveSpawnNodeName = rule.spawnNodeName
     || topologyNodes.find((node) => node.spawnRuleId === rule.id)?.id
     || "";
-  const sourceLookupNames = [
-    effectiveSpawnNodeName,
-    rule.sourceTemplateName ?? "",
-  ].filter(Boolean);
+  const spawnNode = topologyNodes.find((node) =>
+    node.id === effectiveSpawnNodeName || node.templateName === effectiveSpawnNodeName,
+  );
+  if (!spawnNode) {
+    throw new Error(`spawn rule 缺少 spawn 节点：${effectiveSpawnNodeName || rule.id}`);
+  }
+  const sourceLookupName = rule.sourceTemplateName ?? spawnNode.id;
   const sourceNode = topologyNodes.find((node) =>
-    sourceLookupNames.includes(node.id) || sourceLookupNames.includes(node.templateName),
+    node.id === sourceLookupName || node.templateName === sourceLookupName,
   );
   if (!sourceNode) {
-    throw new Error(`spawn rule 缺少 spawn 节点：${effectiveSpawnNodeName || rule.id}`);
+    throw new Error(`spawn rule 缺少 source template：${sourceLookupName}`);
   }
 
   const groupId = `${sanitizeInstanceSegment(rule.id)}:${sanitizeInstanceSegment(input.item.id)}`;
@@ -89,12 +92,30 @@ export function instantiateSpawnBundle(input: {
       source: sourceNodeInstance.id,
       target: targetNodeInstance.id,
       triggerOn: edge.triggerOn,
-      ...(edge.messageMode ? { messageMode: edge.messageMode } : {}),
+      messageMode: edge.messageMode,
       ...(edge.triggerOn === "needs_revision" && typeof edge.maxRevisionRounds === "number"
         ? { maxRevisionRounds: edge.maxRevisionRounds }
         : {}),
     };
   });
+
+  const sourceToSpawnEdge = input.topology.edges.find((edge) =>
+    edge.source === sourceNode.id
+    && edge.target === spawnNode.id
+    && edge.triggerOn === "association",
+  );
+  const entryNode = nodes.find((node) => node.role === rule.entryRole);
+  if (sourceToSpawnEdge && entryNode) {
+    edges.unshift({
+      source: sourceNode.id,
+      target: entryNode.id,
+      triggerOn: sourceToSpawnEdge.triggerOn,
+      messageMode: sourceToSpawnEdge.messageMode,
+      ...(sourceToSpawnEdge.triggerOn === "needs_revision" && typeof sourceToSpawnEdge.maxRevisionRounds === "number"
+        ? { maxRevisionRounds: sourceToSpawnEdge.maxRevisionRounds }
+        : {}),
+    });
+  }
 
   const reportNode = rule.reportToTemplateName
     ? topologyNodes.find(

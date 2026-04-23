@@ -236,7 +236,7 @@ function buildTeamDslFromWorkspaceSnapshot(input: {
       from: edge.source,
       to: edge.target,
       trigger_type: edge.triggerOn,
-      message_type: edge.messageMode ?? "last",
+      message_type: edge.messageMode,
     })),
   };
 }
@@ -582,6 +582,17 @@ test("漏洞团队里反方返回 approved 后会继续派发到裁决总结，�
     content: "@初筛 请分析这个漏洞线索",
     mentionAgent: "初筛",
   });
+
+  await waitForValue(
+    async () => {
+      const dispatchMessage = typed.store.listMessages(projectPath, task.task.id).findLast(
+        (message) => isAgentDispatchMessageRecord(message) && message.sender === "初筛",
+      );
+      return dispatchMessage ? getMessageTargetAgentIds(dispatchMessage)[0] ?? null : null;
+    },
+    (value) => typeof value === "string" && value.startsWith("反方-"),
+    3000,
+  );
 
   const snapshot = await waitForTaskSnapshot(
     orchestrator,
@@ -1133,7 +1144,7 @@ test("保存拓扑后不会再生成旧工作区快照文件", async () => {
     topology: {
       ...project.topology,
       nodes: ["BA", "Build"],
-      edges: [{ source: "BA", target: "Build", triggerOn: "association" }],
+      edges: [{ source: "BA", target: "Build", triggerOn: "association", messageMode: "last" }],
     },
   });
 
@@ -1161,7 +1172,7 @@ test("保存拓扑后会把动态 spawn 团队配置保留在当前运行时快�
     topology: {
       ...project.topology,
       nodes: ["Build", "初筛", "正方模板", "反方模板", "Summary模板"],
-      edges: [{ source: "Build", target: "初筛", triggerOn: "association" }],
+      edges: [{ source: "Build", target: "初筛", triggerOn: "association", messageMode: "last" }],
       nodeRecords: [
         { id: "Build", kind: "agent", templateName: "Build" },
         { id: "初筛", kind: "agent", templateName: "初筛" },
@@ -1182,10 +1193,10 @@ test("保存拓扑后会把动态 spawn 团队配置保留在当前运行时快�
             { role: "summary", templateName: "Summary模板" },
           ],
           edges: [
-            { sourceRole: "pro", targetRole: "con", triggerOn: "needs_revision" },
-            { sourceRole: "con", targetRole: "pro", triggerOn: "needs_revision" },
-            { sourceRole: "pro", targetRole: "summary", triggerOn: "approved" },
-            { sourceRole: "con", targetRole: "summary", triggerOn: "approved" },
+            { sourceRole: "pro", targetRole: "con", triggerOn: "needs_revision", messageMode: "last" },
+            { sourceRole: "con", targetRole: "pro", triggerOn: "needs_revision", messageMode: "last" },
+            { sourceRole: "pro", targetRole: "summary", triggerOn: "approved", messageMode: "last" },
+            { sourceRole: "con", targetRole: "summary", triggerOn: "approved", messageMode: "last" },
           ],
           exitWhen: "one_side_agrees",
           reportToTemplateName: "初筛",
@@ -1223,7 +1234,7 @@ test("保存拓扑后会保留 spawnEnabled 标记，避免 GUI 点击后回读�
     topology: {
       ...project.topology,
       nodes: ["Build", "UnitTest", "BA"],
-      edges: [{ source: "Build", target: "UnitTest", triggerOn: "association" }],
+      edges: [{ source: "Build", target: "UnitTest", triggerOn: "association", messageMode: "last" }],
       nodeRecords: [
         { id: "Build", kind: "agent", templateName: "Build" },
         { id: "UnitTest", kind: "spawn", templateName: "UnitTest", spawnRuleId: "spawn-rule:UnitTest", spawnEnabled: true },
@@ -1482,7 +1493,7 @@ test("association 边配置为 none 时，下游 structured prompt 保留结构�
           source: string;
           target: string;
           triggerOn: "association" | "approved" | "needs_revision";
-          messageMode?: "none" | "last" | "all";
+          messageMode: "none" | "last" | "all";
         }>;
       },
       sourceAgentId: string,
@@ -1527,6 +1538,100 @@ test("association 边配置为 none 时，下游 structured prompt 保留结构�
   assert.match(prompt, /\[From 初筛 Agent\]/);
   assert.match(prompt, /continue/);
   assert.doesNotMatch(prompt, /这里是上一条完整正文/);
+});
+
+test("getEdgeMessageMode 支持读取运行时实例边的 messageMode", () => {
+  const orchestrator = createTestOrchestrator({
+    userDataPath: createTempDir(),
+    enableEventStream: false,
+  });
+
+  const typed = orchestrator as unknown as Orchestrator & {
+    getEdgeMessageMode: (
+      topology: {
+        edges: Array<{
+          source: string;
+          target: string;
+          triggerOn: "association" | "approved" | "needs_revision";
+          messageMode: "none" | "last" | "all";
+        }>;
+      },
+      sourceAgentId: string,
+      targetAgentId: string,
+      triggerOn: "association" | "approved" | "revision_request",
+    ) => "none" | "last" | "all";
+  };
+
+  const messageMode = typed.getEdgeMessageMode(
+    {
+      edges: [
+        {
+          source: "初筛",
+          target: "反方-1",
+          triggerOn: "association",
+          messageMode: "all",
+        },
+      ],
+    },
+    "初筛",
+    "反方-1",
+    "association",
+  );
+
+  assert.equal(messageMode, "all");
+});
+
+test("getEdgeMessageMode 在运行时实例缺少直连边时，会从模板节点边继承 messageMode", () => {
+  const orchestrator = createTestOrchestrator({
+    userDataPath: createTempDir(),
+    enableEventStream: false,
+  });
+
+  const typed = orchestrator as unknown as Orchestrator & {
+    getEdgeMessageMode: (
+      topology: {
+        edges: Array<{
+          source: string;
+          target: string;
+          triggerOn: "association" | "approved" | "needs_revision";
+          messageMode: "none" | "last" | "all";
+        }>;
+        nodeRecords?: Array<{
+          id: string;
+          kind: "agent" | "spawn";
+          templateName: string;
+        }>;
+      },
+      sourceAgentId: string,
+      targetAgentId: string,
+      triggerOn: "association" | "approved" | "revision_request",
+    ) => "none" | "last" | "all";
+  };
+
+  const messageMode = typed.getEdgeMessageMode(
+    {
+      edges: [
+        {
+          source: "初筛",
+          target: "疑点辩论",
+          triggerOn: "association",
+          messageMode: "all",
+        },
+      ],
+      nodeRecords: [
+        {
+          id: "反方-1",
+          kind: "agent",
+          templateName: "疑点辩论",
+        },
+      ],
+    },
+    "初筛",
+    "反方-1",
+    "association",
+  );
+
+  assert.equal(messageMode, "all");
 });
 
 test("只有第一次 Agent 间传递会携带 [Initial Task]", async () => {
@@ -1588,11 +1693,13 @@ test("只有第一次 Agent 间传递会携带 [Initial Task]", async () => {
           source: "BA",
           target: "Build",
           triggerOn: "association",
+          messageMode: "last",
         },
         {
           source: "Build",
           target: "QA",
           triggerOn: "association",
+          messageMode: "last",
         },
       ],
     },
@@ -1740,16 +1847,19 @@ test("单 reviewer 审查失败后会把 needs_revision 回流给 Build", async 
           source: "BA",
           target: "Build",
           triggerOn: "association",
+          messageMode: "last",
         },
         {
           source: "Build",
           target: "CodeReview",
           triggerOn: "association",
+          messageMode: "last",
         },
         {
           source: "CodeReview",
           target: "Build",
           triggerOn: "needs_revision",
+          messageMode: "last",
         },
       ],
     },
@@ -1846,21 +1956,25 @@ test("审查 Agent 的结构化 prompt 不会混入 Project Git Diff Summary", a
           source: "BA",
           target: "Build",
           triggerOn: "association",
+          messageMode: "last",
         },
         {
           source: "Build",
           target: "TaskReview",
           triggerOn: "association",
+          messageMode: "last",
         },
         {
           source: "Build",
           target: "Ops",
           triggerOn: "association",
+          messageMode: "last",
         },
         {
           source: "TaskReview",
           target: "Build",
           triggerOn: "needs_revision",
+          messageMode: "last",
         },
       ],
     },
@@ -1986,12 +2100,12 @@ test("修复首个失败 reviewer 后，Build 下一轮不会立刻全量重派�
       ...project.topology,
       nodes: ["Build", "UnitTest", "TaskReview", "CodeReview"],
       edges: [
-        { source: "Build", target: "UnitTest", triggerOn: "association" },
-        { source: "Build", target: "TaskReview", triggerOn: "association" },
-        { source: "Build", target: "CodeReview", triggerOn: "association" },
-        { source: "UnitTest", target: "Build", triggerOn: "needs_revision" },
-        { source: "TaskReview", target: "Build", triggerOn: "needs_revision" },
-        { source: "CodeReview", target: "Build", triggerOn: "needs_revision" },
+        { source: "Build", target: "UnitTest", triggerOn: "association", messageMode: "last" },
+        { source: "Build", target: "TaskReview", triggerOn: "association", messageMode: "last" },
+        { source: "Build", target: "CodeReview", triggerOn: "association", messageMode: "last" },
+        { source: "UnitTest", target: "Build", triggerOn: "needs_revision", messageMode: "last" },
+        { source: "TaskReview", target: "Build", triggerOn: "needs_revision", messageMode: "last" },
+        { source: "CodeReview", target: "Build", triggerOn: "needs_revision", messageMode: "last" },
       ],
     },
   });
@@ -2138,12 +2252,12 @@ test("审查 Agent 返回 needs_revision 后会在其余 reviewer 收齐后回�
       ...project.topology,
       nodes: ["Build", "UnitTest", "TaskReview", "CodeReview"],
       edges: [
-        { source: "Build", target: "UnitTest", triggerOn: "association" },
-        { source: "Build", target: "TaskReview", triggerOn: "association" },
-        { source: "Build", target: "CodeReview", triggerOn: "association" },
-        { source: "UnitTest", target: "Build", triggerOn: "needs_revision" },
-        { source: "TaskReview", target: "Build", triggerOn: "needs_revision" },
-        { source: "CodeReview", target: "Build", triggerOn: "needs_revision" },
+        { source: "Build", target: "UnitTest", triggerOn: "association", messageMode: "last" },
+        { source: "Build", target: "TaskReview", triggerOn: "association", messageMode: "last" },
+        { source: "Build", target: "CodeReview", triggerOn: "association", messageMode: "last" },
+        { source: "UnitTest", target: "Build", triggerOn: "needs_revision", messageMode: "last" },
+        { source: "TaskReview", target: "Build", triggerOn: "needs_revision", messageMode: "last" },
+        { source: "CodeReview", target: "Build", triggerOn: "needs_revision", messageMode: "last" },
       ],
     },
   });
@@ -2506,11 +2620,13 @@ test("审视 Agent 执行中止时不会伪造成整改意见", async () => {
         source: "Build",
         target: "CodeReview",
         triggerOn: "association" as const,
+        messageMode: "last" as const,
       },
       {
         source: "CodeReview",
         target: "Build",
         triggerOn: "needs_revision" as const,
+        messageMode: "last" as const,
       },
     ],
   };
@@ -2631,6 +2747,7 @@ test("Task 进入 finished 状态时会统一把所有 Agent 节点显示为已�
           source: "Build",
           target: "QA",
           triggerOn: "association",
+          messageMode: "last",
         },
       ],
     },
@@ -2712,8 +2829,8 @@ test("最大连续回流达到上限后，聊天页面会直接展示明确失�
     topology: {
       nodes: ["Build", "UnitTest"],
       edges: [
-        { source: "Build", target: "UnitTest", triggerOn: "association" },
-        { source: "UnitTest", target: "Build", triggerOn: "needs_revision" },
+        { source: "Build", target: "UnitTest", triggerOn: "association", messageMode: "last" },
+        { source: "UnitTest", target: "Build", triggerOn: "needs_revision", messageMode: "last" },
       ],
     },
   });
@@ -2828,8 +2945,8 @@ test("聊天页面会按每条 needs_revision 边的单独上限展示失败原�
     topology: {
       nodes: ["Build", "UnitTest"],
       edges: [
-        { source: "Build", target: "UnitTest", triggerOn: "association" },
-        { source: "UnitTest", target: "Build", triggerOn: "needs_revision", maxRevisionRounds: 2 },
+        { source: "Build", target: "UnitTest", triggerOn: "association", messageMode: "last" },
+        { source: "UnitTest", target: "Build", triggerOn: "needs_revision", maxRevisionRounds: 2, messageMode: "last" },
       ],
     },
   });
@@ -2983,10 +3100,10 @@ test("并发审查失败时不会提前追加任务结束系统消息", async ()
       ...project.topology,
       nodes: ["Build", "UnitTest", "TaskReview"],
       edges: [
-        { source: "Build", target: "UnitTest", triggerOn: "association" },
-        { source: "Build", target: "TaskReview", triggerOn: "association" },
-        { source: "UnitTest", target: "Build", triggerOn: "needs_revision" },
-        { source: "TaskReview", target: "Build", triggerOn: "needs_revision" },
+        { source: "Build", target: "UnitTest", triggerOn: "association", messageMode: "last" },
+        { source: "Build", target: "TaskReview", triggerOn: "association", messageMode: "last" },
+        { source: "UnitTest", target: "Build", triggerOn: "needs_revision", messageMode: "last" },
+        { source: "TaskReview", target: "Build", triggerOn: "needs_revision", messageMode: "last" },
       ],
     },
   });

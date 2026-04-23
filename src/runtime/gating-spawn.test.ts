@@ -9,18 +9,22 @@ import { spawnRuntimeAgentsForItems } from "./gating-spawn";
 function createSpawnTopology(): TopologyRecord {
   return {
     projectId: "spawn-state-project",
-    nodes: ["初筛", "正方模板", "反方模板", "Summary模板"],
+    nodes: ["初筛", "漏洞疑点辩论", "正方模板", "反方模板", "Summary模板"],
     nodeRecords: [
       { id: "初筛", kind: "agent", templateName: "初筛" },
+      { id: "漏洞疑点辩论", kind: "spawn", templateName: "漏洞疑点辩论", spawnRuleId: "finding-debate" },
       { id: "正方模板", kind: "agent", templateName: "正方模板" },
       { id: "反方模板", kind: "agent", templateName: "反方模板" },
       { id: "Summary模板", kind: "agent", templateName: "Summary模板" },
     ],
-    edges: [],
+    edges: [
+      { source: "初筛", target: "漏洞疑点辩论", triggerOn: "association", messageMode: "last" },
+    ],
     spawnRules: [
       {
         id: "finding-debate",
         name: "漏洞疑点辩论",
+        spawnNodeName: "漏洞疑点辩论",
         sourceTemplateName: "初筛",
         entryRole: "pro",
         spawnedAgents: [
@@ -29,10 +33,10 @@ function createSpawnTopology(): TopologyRecord {
           { role: "summary", templateName: "Summary模板" },
         ],
         edges: [
-          { sourceRole: "pro", targetRole: "con", triggerOn: "needs_revision" },
-          { sourceRole: "con", targetRole: "pro", triggerOn: "needs_revision" },
-          { sourceRole: "pro", targetRole: "summary", triggerOn: "approved" },
-          { sourceRole: "con", targetRole: "summary", triggerOn: "approved" },
+          { sourceRole: "pro", targetRole: "con", triggerOn: "needs_revision", messageMode: "last" },
+          { sourceRole: "con", targetRole: "pro", triggerOn: "needs_revision", messageMode: "last" },
+          { sourceRole: "pro", targetRole: "summary", triggerOn: "approved", messageMode: "last" },
+          { sourceRole: "con", targetRole: "summary", triggerOn: "approved", messageMode: "last" },
         ],
         exitWhen: "one_side_agrees",
         reportToTemplateName: "初筛",
@@ -59,7 +63,7 @@ test("spawnRuntimeAgentsForItems 会把 finding 批量实例化进 GraphTaskStat
 
   assert.equal(state.spawnBundles.length, 2);
   assert.equal(state.runtimeNodes.length, 6);
-  assert.equal(state.runtimeEdges.length, 10);
+  assert.equal(state.runtimeEdges.length, 12);
   assert.equal(state.agentStatusesByName["正方模板-1"], "idle");
   assert.equal(state.agentStatusesByName["Summary模板-2"], "idle");
 });

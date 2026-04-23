@@ -81,7 +81,7 @@ export interface SpawnRule {
     sourceRole: SpawnedAgentRole;
     targetRole: SpawnedAgentRole;
     triggerOn: TopologyEdgeTrigger;
-    messageMode?: TopologyEdgeMessageMode;
+    messageMode: TopologyEdgeMessageMode;
     maxRevisionRounds?: number;
   }>;
   exitWhen: "one_side_agrees" | "all_completed";
@@ -121,7 +121,7 @@ export interface TopologyEdge {
   source: string;
   target: string;
   triggerOn: TopologyEdgeTrigger;
-  messageMode?: TopologyEdgeMessageMode;
+  messageMode: TopologyEdgeMessageMode;
   maxRevisionRounds?: number;
 }
 
@@ -164,7 +164,7 @@ export interface RuntimeTopologyEdge {
   source: string;
   target: string;
   triggerOn: TopologyEdgeTrigger;
-  messageMode?: TopologyEdgeMessageMode;
+  messageMode: TopologyEdgeMessageMode;
   maxRevisionRounds?: number;
 }
 
@@ -441,13 +441,6 @@ export function getTopologyEdgeId(edge: Pick<TopologyEdge, "source" | "target" |
   return `${edge.source}__${edge.target}__${normalizeTopologyEdgeTrigger(edge.triggerOn)}`;
 }
 
-export function normalizeTopologyEdgeMessageMode(value: unknown): TopologyEdgeMessageMode {
-  if (value === "none" || value === "all") {
-    return value;
-  }
-  return DEFAULT_TOPOLOGY_EDGE_MESSAGE_MODE;
-}
-
 export function isReviewAgentInTopology(
   topology: Pick<TopologyRecord, "edges">,
   agentName: string,
@@ -610,9 +603,6 @@ export function getSpawnRules(topology: TopologyRecord): SpawnRule[] {
     edges: rule.edges.map((edge) => ({
       ...edge,
       triggerOn: normalizeTopologyEdgeTrigger(edge.triggerOn),
-      ...(edge.messageMode
-        ? { messageMode: normalizeTopologyEdgeMessageMode(edge.messageMode) }
-        : {}),
     })),
     ...(rule.reportToTriggerOn
       ? { reportToTriggerOn: normalizeTopologyEdgeTrigger(rule.reportToTriggerOn) }

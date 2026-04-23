@@ -26,7 +26,7 @@ type SpawnLinkInput =
       sourceRole: string;
       targetRole: string;
       triggerOn: TopologyEdgeTrigger;
-      messageMode?: TopologyEdgeMessageMode;
+      messageMode: TopologyEdgeMessageMode;
     };
 
 interface SpawnTemplateInput {
@@ -97,6 +97,7 @@ function buildEdges(input: CreateTopologyDslInput): TopologyEdge[] {
         source,
         target,
         triggerOn: mode === "spawn" ? "association" : normalizeTopologyEdgeTrigger(mode),
+        messageMode: "last",
       });
     }
   }
@@ -186,6 +187,7 @@ function normalizeSpawnLinks(config: SpawnTemplateInput | undefined): SpawnRule[
         sourceRole,
         targetRole,
         triggerOn: normalizeTopologyEdgeTrigger(triggerOn),
+        messageMode: "last",
       };
     }
 
@@ -193,14 +195,14 @@ function normalizeSpawnLinks(config: SpawnTemplateInput | undefined): SpawnRule[
       sourceRole: string;
       targetRole: string;
       triggerOn: TopologyEdgeTrigger;
-      messageMode?: TopologyEdgeMessageMode;
+      messageMode: TopologyEdgeMessageMode;
     }>;
 
     return {
       sourceRole: objectLink.sourceRole,
       targetRole: objectLink.targetRole,
       triggerOn: normalizeTopologyEdgeTrigger(objectLink.triggerOn),
-      ...(objectLink.messageMode ? { messageMode: objectLink.messageMode } : {}),
+      messageMode: objectLink.messageMode,
     };
   });
 }

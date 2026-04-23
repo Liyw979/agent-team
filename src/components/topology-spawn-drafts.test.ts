@@ -79,10 +79,10 @@ test("getTopologyDisplayNodeIds 会用 runtime 实例替换已展开的静态模
           { role: "裁决总结", templateName: "裁决总结" },
         ],
         edges: [
-          { sourceRole: "正方", targetRole: "反方", triggerOn: "needs_revision" },
-          { sourceRole: "反方", targetRole: "正方", triggerOn: "needs_revision" },
-          { sourceRole: "正方", targetRole: "裁决总结", triggerOn: "approved" },
-          { sourceRole: "反方", targetRole: "裁决总结", triggerOn: "approved" },
+          { sourceRole: "正方", targetRole: "反方", triggerOn: "needs_revision", messageMode: "last" },
+          { sourceRole: "反方", targetRole: "正方", triggerOn: "needs_revision", messageMode: "last" },
+          { sourceRole: "正方", targetRole: "裁决总结", triggerOn: "approved", messageMode: "last" },
+          { sourceRole: "反方", targetRole: "裁决总结", triggerOn: "approved", messageMode: "last" },
         ],
         exitWhen: "all_completed",
         reportToTemplateName: "初筛",
@@ -123,6 +123,6 @@ test("upsertDebateSpawnDraft 会生成 GUI 需要保存的 spawn 节点、spawnR
   assert.equal(next.nodeRecords?.some((node) => node.id === "疑点辩论工厂" && node.kind === "spawn"), true);
   assert.equal(next.spawnRules?.[0]?.id, "spawn-rule:疑点辩论工厂");
   assert.deepEqual(next.edges, [
-    { source: "初筛", target: "疑点辩论工厂", triggerOn: "association" },
+    { source: "初筛", target: "疑点辩论工厂", triggerOn: "association", messageMode: "last" },
   ]);
 });
