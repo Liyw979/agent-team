@@ -38,7 +38,7 @@ export function getTopologyAgentStatusBadgePresentation(
   switch (agentState) {
     case "completed":
       return {
-        label: reviewAgent ? "审查通过" : "已完成",
+        label: reviewAgent ? "已完成判定" : "已完成",
         icon: "success",
         className: "border border-[#2c4a3f]/18 bg-[#edf5f0] text-[#2c4a3f]",
         effectClassName: "",
@@ -46,15 +46,15 @@ export function getTopologyAgentStatusBadgePresentation(
     case "failed":
       return {
         label: reviewAgent
-          ? (isFinalLoopFailedReviewer ? "审查不通过，最后一次" : "审查不通过")
+          ? (isFinalLoopFailedReviewer ? "继续处理，最后一次" : "继续处理")
           : "执行失败",
         icon: "failed",
         className: "border border-[#d66b63]/45 bg-[#fff1ef] text-[#a33f38]",
         effectClassName: "",
       };
-    case "action_required":
+    case "continue":
       return {
-        label: "审查不通过",
+        label: "继续处理",
         icon: "failed",
         className: "border border-[#d66b63]/45 bg-[#fff1ef] text-[#a33f38]",
         effectClassName: "",
@@ -99,7 +99,7 @@ export function getTopologyLoopLimitFailedReviewerName(
 
 export function getTopologyEdgeTriggerAppearance(triggerOn: TopologyEdge["triggerOn"]) {
   switch (triggerOn) {
-    case "handoff":
+    case "transfer":
       return {
         color: "#2C4A3F",
         strokeWidth: 2,
@@ -107,7 +107,7 @@ export function getTopologyEdgeTriggerAppearance(triggerOn: TopologyEdge["trigge
         zIndex: 1,
         animated: false,
       };
-    case "approved":
+    case "complete":
       return {
         color: "#2F5E9E",
         strokeWidth: 2,
@@ -115,7 +115,7 @@ export function getTopologyEdgeTriggerAppearance(triggerOn: TopologyEdge["trigge
         zIndex: 1,
         animated: false,
       };
-    case "action_required":
+    case "continue":
       return {
         color: "#A95C42",
         strokeWidth: 2,

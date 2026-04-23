@@ -6,7 +6,7 @@ import {
   type TopologyRecord,
 } from "@shared/types";
 
-type DownstreamMode = "spawn" | "handoff" | "approved" | "action_required";
+type DownstreamMode = "spawn" | "transfer" | "complete" | "continue";
 
 function getNodeRecords(topology: TopologyRecord): TopologyNodeRecord[] {
   if (topology.nodeRecords && topology.nodeRecords.length > 0) {
@@ -66,7 +66,7 @@ function buildSpawnRuleFromReachable(topology: TopologyRecord, sourceNodeId: str
     edges: targetTemplates.slice(0, -1).map((item, index) => ({
       sourceRole: index === 0 ? "entry" : item.nodeId,
       targetRole: targetTemplates[index + 1]?.nodeId ?? "entry",
-      triggerOn: "handoff" as const,
+      triggerOn: "transfer" as const,
       messageMode: "last" as const,
     })),
     exitWhen: "one_side_agrees",
@@ -145,7 +145,7 @@ export function setSpawnEnabledForDownstream(input: {
         .concat({
           source: input.sourceNodeId,
           target: input.targetNodeId,
-          triggerOn: "handoff" as const,
+          triggerOn: "transfer" as const,
           messageMode: "last" as const,
         })
         .map((edge) => ({ ...edge }))

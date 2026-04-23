@@ -675,7 +675,7 @@ export class Orchestrator {
       return;
     }
 
-    if (latestTask.status === "action_required") {
+    if (latestTask.status === "continue") {
       return;
     }
 
@@ -1010,13 +1010,13 @@ export class Orchestrator {
       return opinion;
     }
 
-    if (parsedReview.decision === "action_required") {
+    if (parsedReview.decision === "continue") {
       return "（该 Agent 已给出需要响应的结论，但未返回可展示的结果正文。）";
     }
     if (parsedReview.decision === "invalid") {
       return parsedReview.validationError ?? "（该 Agent 返回了无效的审查结果。）";
     }
-    if (parsedReview.decision === "approved") {
+    if (parsedReview.decision === "complete") {
       return "通过";
     }
     return "（该 Agent 未返回可展示的结果正文。）";
@@ -1304,9 +1304,9 @@ export class Orchestrator {
     const edges = topology.edges
       .filter(
         (edge) =>
-          normalizeTopologyEdgeTrigger(edge.triggerOn) === "handoff" ||
-          normalizeTopologyEdgeTrigger(edge.triggerOn) === "approved" ||
-          normalizeTopologyEdgeTrigger(edge.triggerOn) === "action_required",
+          normalizeTopologyEdgeTrigger(edge.triggerOn) === "transfer" ||
+          normalizeTopologyEdgeTrigger(edge.triggerOn) === "complete" ||
+          normalizeTopologyEdgeTrigger(edge.triggerOn) === "continue",
       )
       .filter((edge) => validTopologyNames.has(edge.source) && validTopologyNames.has(edge.target))
       .filter((edge) => {
@@ -1330,7 +1330,7 @@ export class Orchestrator {
         target: edge.target,
         triggerOn: normalizeTopologyEdgeTrigger(edge.triggerOn),
         messageMode: edge.messageMode,
-        ...(normalizeTopologyEdgeTrigger(edge.triggerOn) === "action_required"
+        ...(normalizeTopologyEdgeTrigger(edge.triggerOn) === "continue"
           ? {
               maxRevisionRounds: normalizeActionRequiredMaxRounds(edge.maxRevisionRounds),
             }
@@ -1454,7 +1454,7 @@ export class Orchestrator {
     const topology = this.store.getTopology(cwd);
     const batchSize = batch.jobs.length;
 
-    if (batch.jobs.every((job) => job.kind === "handoff" || job.kind === "approved")) {
+    if (batch.jobs.every((job) => job.kind === "transfer" || job.kind === "complete")) {
       const sourceAgentId = batch.sourceAgentId ?? "System";
       if (!this.shouldSuppressDuplicateDispatchMessage(cwd, taskId, sourceAgentId, batch.triggerTargets)) {
         const triggerMessage: MessageRecord = {
@@ -1503,7 +1503,7 @@ export class Orchestrator {
               buildEffectiveTopology(state),
               batch.sourceAgentId,
               job.agentName,
-              job.kind === "raw" ? "handoff" : job.kind,
+              job.kind === "raw" ? "transfer" : job.kind,
             ),
           },
         )
@@ -1515,9 +1515,9 @@ export class Orchestrator {
           from: "User",
           content: batch.sourceContent ?? "",
           allowDirectFallbackWhenNoBatch:
-            this.getOutgoingEdges(topology, job.agentName, "action_required").length > 0,
+            this.getOutgoingEdges(topology, job.agentName, "continue").length > 0,
         };
-      } else if (job.kind === "action_required_request") {
+      } else if (job.kind === "continue_request") {
         const revisionContent =
           batch.sourceContent?.trim()
           || "请直接回应当前内容，给出你的判断、补充、澄清、反驳或修改方案。";
@@ -1541,7 +1541,7 @@ export class Orchestrator {
             revisionContent,
             [job.agentName],
           ),
-          kind: "action-required-request",
+          kind: "continue-request",
           targetAgentIds: [job.agentName],
           ...withOptionalString(
             {},
@@ -1681,19 +1681,19 @@ export class Orchestrator {
       this.store.insertMessage(cwd, taskMessage);
 
       const actionRequiredTargets =
-        parsedReview.decision === "action_required"
-          ? this.getOutgoingEdges(topology, runtimeAgentName, "action_required")
+        parsedReview.decision === "continue"
+          ? this.getOutgoingEdges(topology, runtimeAgentName, "continue")
           : [];
       const agentStatus = resolveAgentStatusFromReview({
         reviewDecision: parsedReview.decision,
         reviewAgent,
       });
       this.store.updateTaskAgentStatus(task.cwd, task.id, runtimeAgentName, agentStatus);
-      if (parsedReview.decision === "action_required" && actionRequiredTargets.length > 0) {
+      if (parsedReview.decision === "continue" && actionRequiredTargets.length > 0) {
         this.updateTaskStatusIfActive(
           task.cwd,
           task.id,
-          concurrentBatchSize > 1 ? "running" : "action_required",
+          concurrentBatchSize > 1 ? "running" : "continue",
           null,
         );
       } else if (agentStatus === "failed") {
@@ -1863,7 +1863,7 @@ export class Orchestrator {
   private getOutgoingEdges(
     topology: TopologyRecord,
     sourceAgentId: string,
-    triggerOn: "handoff" | "approved" | "action_required",
+    triggerOn: "transfer" | "complete" | "continue",
   ) {
     return topology.edges.filter(
       (edge) => edge.source === sourceAgentId && edge.triggerOn === triggerOn,
@@ -1874,9 +1874,9 @@ export class Orchestrator {
     topology: TopologyRecord,
     sourceAgentId: string,
     targetAgentId: string,
-    triggerOn: "handoff" | "approved" | "action_required_request",
+    triggerOn: "transfer" | "complete" | "continue_request",
   ) {
-    const normalizedTriggerOn = triggerOn === "action_required_request" ? "action_required" : triggerOn;
+    const normalizedTriggerOn = triggerOn === "continue_request" ? "continue" : triggerOn;
     const edge = topology.edges.find(
       (item) =>
         item.source === sourceAgentId

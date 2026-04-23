@@ -63,7 +63,7 @@ export interface CompiledTeamDsl {
 const GraphDslLinkSchema: z.ZodType<GraphDslLink> = z.object({
   from: z.string(),
   to: z.string(),
-  trigger_type: z.enum(["handoff", "approved", "action_required"]),
+  trigger_type: z.enum(["transfer", "complete", "continue"]),
   message_type: z.enum(["none", "last", "all"]),
 }).strict();
 
@@ -116,7 +116,7 @@ function normalizeComparableTopology(topology: TopologyRecord): TopologyRecord {
         target: edge.target,
         triggerOn: edge.triggerOn,
         messageMode: edge.messageMode,
-        ...(edge.triggerOn === "action_required"
+        ...(edge.triggerOn === "continue"
           ? {
               maxRevisionRounds: normalizeActionRequiredMaxRounds(edge.maxRevisionRounds),
             }

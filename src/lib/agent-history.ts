@@ -65,27 +65,27 @@ function getFinalItemPresentation(input: {
 }) {
   if (input.status === "final_failed_review") {
     return {
-      label: "审视不通过，最后一次",
+      label: "继续处理，最后一次",
       tone: "failure" as const,
     };
   }
 
-  if (input.status === "action_required") {
+  if (input.status === "continue") {
     return {
-      label: "审视不通过",
+      label: "继续处理",
       tone: "failure" as const,
     };
   }
 
   if (input.status === "failed") {
     return {
-      label: input.reviewAgent ? "审视不通过" : "执行失败",
+      label: input.reviewAgent ? "继续处理" : "执行失败",
       tone: "failure" as const,
     };
   }
 
   return {
-    label: input.reviewAgent ? "审视通过" : "已完成",
+    label: input.reviewAgent ? "已完成判定" : "已完成",
     tone: "success" as const,
   };
 }
@@ -105,8 +105,8 @@ function buildFinalHistoryItems(input: {
     )
     .map((message) => {
       const status =
-        message.reviewDecision === "action_required"
-          ? "action_required"
+        message.reviewDecision === "continue"
+          ? "continue"
           : reviewAgent && message.status === "error" && finalLoopReviewerName === input.agentId
             ? "final_failed_review"
             : message.status;

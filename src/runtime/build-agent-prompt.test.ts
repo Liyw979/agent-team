@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { buildAgentSystemPrompt } from "./agent-system-prompt";
 import { buildSubmitMessageBody } from "./opencode-request-body";
 import {
-  REVIEW_APPROVED_LABEL,
+  REVIEW_COMPLETE_LABEL,
   REVIEW_CONTINUE_LABEL,
 } from "../shared/review-response";
 
@@ -29,7 +29,7 @@ test("Review agents keep the response contract in the system prompt", () => {
   );
   assert.match(
     prompt,
-    new RegExp(REVIEW_APPROVED_LABEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    new RegExp(REVIEW_COMPLETE_LABEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
   );
 });
 
@@ -71,6 +71,6 @@ test("Review agent request body keeps system", () => {
   );
   assert.match(
     String(body["system"]),
-    new RegExp(REVIEW_APPROVED_LABEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    new RegExp(REVIEW_COMPLETE_LABEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
   );
 });

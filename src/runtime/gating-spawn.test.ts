@@ -18,7 +18,7 @@ function createSpawnTopology(): TopologyRecord {
       { id: "Summary模板", kind: "agent", templateName: "Summary模板" },
     ],
     edges: [
-      { source: "初筛", target: "漏洞疑点辩论", triggerOn: "handoff", messageMode: "last" },
+      { source: "初筛", target: "漏洞疑点辩论", triggerOn: "transfer", messageMode: "last" },
     ],
     spawnRules: [
       {
@@ -33,10 +33,10 @@ function createSpawnTopology(): TopologyRecord {
           { role: "summary", templateName: "Summary模板" },
         ],
         edges: [
-          { sourceRole: "pro", targetRole: "con", triggerOn: "action_required", messageMode: "last" },
-          { sourceRole: "con", targetRole: "pro", triggerOn: "action_required", messageMode: "last" },
-          { sourceRole: "pro", targetRole: "summary", triggerOn: "approved", messageMode: "last" },
-          { sourceRole: "con", targetRole: "summary", triggerOn: "approved", messageMode: "last" },
+          { sourceRole: "pro", targetRole: "con", triggerOn: "continue", messageMode: "last" },
+          { sourceRole: "con", targetRole: "pro", triggerOn: "continue", messageMode: "last" },
+          { sourceRole: "pro", targetRole: "summary", triggerOn: "complete", messageMode: "last" },
+          { sourceRole: "con", targetRole: "summary", triggerOn: "complete", messageMode: "last" },
         ],
         exitWhen: "one_side_agrees",
         reportToTemplateName: "初筛",

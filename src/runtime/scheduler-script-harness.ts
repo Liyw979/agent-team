@@ -117,7 +117,7 @@ interface AgentRefResolver {
   resolve(name: string): string;
   isKnown(agentName: string): boolean;
   getHandoffTargets(agentName: string): string[];
-  getTriggeredTargets(agentName: string, triggerOn: "action_required" | "approved"): string[];
+  getTriggeredTargets(agentName: string, triggerOn: "continue" | "complete"): string[];
   hasAnyOutgoingTargets(agentName: string): boolean;
   hasOutgoingTarget(sourceAgentName: string, targetAgentName: string): boolean;
   getReviewFailLoopLimit(sourceAgentName: string, targetAgentName: string): number;
@@ -130,7 +130,7 @@ interface AgentRefResolver {
     sourceAgentName: string,
     actualTargets: string[],
     canonicalTargets: string[],
-    triggerOn: "handoff" | "action_required" | "approved",
+    triggerOn: "transfer" | "continue" | "complete",
   ): string[] | null;
 }
 
@@ -252,7 +252,7 @@ export async function assertSchedulerScript(
             sourceState.expectedNextAction = null;
             continue;
           }
-          const escalationTargets = parsed.resolver.getTriggeredTargets(firstFailed.agent, "approved");
+          const escalationTargets = parsed.resolver.getTriggeredTargets(firstFailed.agent, "complete");
           assert.ok(
             escalationTargets.length > 0,
             `${firstFailed.agent} -> ${current.source} 连续回流已超过 ${parsed.resolver.getReviewFailLoopLimit(firstFailed.agent, current.source)} 轮上限`,
@@ -321,7 +321,7 @@ export async function assertSchedulerScript(
         const expectedRepairTarget = expectedAction?.kind === "repair"
           ? expectedAction.reviewerAgentId
           : expectedTargets.length === 1 ? expectedTargets[0] ?? "" : "";
-        const approvedTargets = parsed.resolver.getTriggeredTargets(agentName, "approved");
+        const approvedTargets = parsed.resolver.getTriggeredTargets(agentName, "complete");
         const expectedEscalation = expectedRepairTarget
           && approvedTargets.length > 0
           && (actionRequiredLoopCountByEdge.get(buildReviewFailLoopEdgeKey(agentName, expectedRepairTarget)) ?? 0)
@@ -332,7 +332,7 @@ export async function assertSchedulerScript(
               agentName,
               normalizedReplyTargets,
               approvedTargets,
-              "approved",
+              "complete",
             ),
           );
         if (!expectedEscalation) {
@@ -343,18 +343,18 @@ export async function assertSchedulerScript(
           );
         }
       } else if (normalizedReplyTargets.length > 0) {
-        const directReviewFailTargets = parsed.resolver.getTriggeredTargets(agentName, "action_required");
+        const directReviewFailTargets = parsed.resolver.getTriggeredTargets(agentName, "continue");
         const matchesHandoffTargets = parsed.resolver.matchCanonicalTargets(
           agentName,
           normalizedReplyTargets,
           sourceState.defaultTargets,
-          "handoff",
+          "transfer",
         );
         const matchesDirectReviewFailTargets = parsed.resolver.matchCanonicalTargets(
           agentName,
           normalizedReplyTargets,
           directReviewFailTargets,
-          "action_required",
+          "continue",
         );
         assert.equal(
           Boolean(matchesHandoffTargets || matchesDirectReviewFailTargets),
@@ -387,20 +387,20 @@ export async function assertSchedulerScript(
         );
       }
 
-      const directReviewFailTargets = parsed.resolver.getTriggeredTargets(agentName, "action_required");
+      const directReviewFailTargets = parsed.resolver.getTriggeredTargets(agentName, "continue");
       const canonicalTargets = expectedNextAction
         ? expectedNextAction.targets
         : parsed.resolver.matchCanonicalTargets(
           agentName,
           normalizedReplyTargets,
           sourceState.defaultTargets,
-          "handoff",
+          "transfer",
         )
         ?? parsed.resolver.matchCanonicalTargets(
           agentName,
           normalizedReplyTargets,
           directReviewFailTargets,
-          "action_required",
+          "continue",
         )
         ?? normalizedReplyTargets;
 
@@ -425,8 +425,8 @@ export async function assertSchedulerScript(
     }
 
     const currentSource = currentBatch.source;
-    const failTargets = parsed.resolver.getTriggeredTargets(agentName, "action_required");
-    const approvedTargets = parsed.resolver.getTriggeredTargets(agentName, "approved");
+    const failTargets = parsed.resolver.getTriggeredTargets(agentName, "continue");
+    const approvedTargets = parsed.resolver.getTriggeredTargets(agentName, "complete");
     const loopEdgeKey = buildReviewFailLoopEdgeKey(agentName, currentSource);
     const currentLoopCount = actionRequiredLoopCountByEdge.get(loopEdgeKey) ?? 0;
     const actionRequiredLoopLimit = parsed.resolver.getReviewFailLoopLimit(agentName, currentSource);
@@ -443,7 +443,7 @@ export async function assertSchedulerScript(
           agentName,
           normalizedReplyTargets,
           approvedTargets,
-          "approved",
+          "complete",
         ),
       );
 
@@ -651,21 +651,21 @@ function createAgentRefResolver(topology: TopologyRecord): AgentRefResolver {
   const staticTriggeredTargets = new Map<string, string[]>();
   const staticOutgoingTargets = new Map<string, Set<string>>();
   const actionRequiredLoopLimitByEdge = new Map<string, number>();
-  const normalizeStoredTrigger = (triggerOn: unknown): TopologyEdgeTrigger | "handoff" | null => {
-    if (triggerOn === "handoff") {
-      return "handoff";
+  const normalizeStoredTrigger = (triggerOn: unknown): TopologyEdgeTrigger | "transfer" | null => {
+    if (triggerOn === "transfer") {
+      return "transfer";
     }
-    if (triggerOn === "approved") {
-      return "approved";
+    if (triggerOn === "complete") {
+      return "complete";
     }
-    if (triggerOn === "action_required") {
-      return "action_required";
+    if (triggerOn === "continue") {
+      return "continue";
     }
     return null;
   };
   for (const edge of topology.edges) {
     const normalizedEdgeTrigger = normalizeStoredTrigger(edge.triggerOn);
-    if (normalizedEdgeTrigger === "handoff") {
+    if (normalizedEdgeTrigger === "transfer") {
       const current = staticHandoffTargets.get(edge.source) ?? [];
       if (!current.includes(edge.target)) {
         current.push(edge.target);
@@ -673,7 +673,7 @@ function createAgentRefResolver(topology: TopologyRecord): AgentRefResolver {
       staticHandoffTargets.set(edge.source, current);
     }
 
-    if (normalizedEdgeTrigger === "approved" || normalizedEdgeTrigger === "action_required") {
+    if (normalizedEdgeTrigger === "complete" || normalizedEdgeTrigger === "continue") {
       const triggerKey = `${edge.source}::${normalizedEdgeTrigger}`;
       const current = staticTriggeredTargets.get(triggerKey) ?? [];
       if (!current.includes(edge.target)) {
@@ -682,7 +682,7 @@ function createAgentRefResolver(topology: TopologyRecord): AgentRefResolver {
       staticTriggeredTargets.set(triggerKey, current);
     }
 
-    if (normalizedEdgeTrigger === "action_required") {
+    if (normalizedEdgeTrigger === "continue") {
       actionRequiredLoopLimitByEdge.set(
         buildReviewFailLoopEdgeKey(edge.source, edge.target),
         typeof edge.maxRevisionRounds === "number" && Number.isFinite(edge.maxRevisionRounds)
@@ -715,7 +715,7 @@ function createAgentRefResolver(topology: TopologyRecord): AgentRefResolver {
       spawnNodeName,
       sourceTemplateName: rule.sourceTemplateName ?? null,
       reportToTemplateName: rule.reportToTemplateName ?? null,
-      reportToTriggerOn: rule.reportToTriggerOn ?? "approved",
+      reportToTriggerOn: rule.reportToTriggerOn ?? "complete",
       entryRole: rule.entryRole,
       entryTemplateName: roleToTemplate.get(rule.entryRole) ?? null,
       roleToTemplate,
@@ -851,8 +851,8 @@ function createAgentRefResolver(topology: TopologyRecord): AgentRefResolver {
   const isKnown = (agentName: string): boolean => staticAgents.has(agentName) || dynamicRefsByKey.has(agentName);
 
   const normalizeTrigger = (
-    triggerOn: "handoff" | "action_required" | "approved" | TopologyEdgeTrigger,
-  ): TopologyEdgeTrigger | "handoff" => triggerOn;
+    triggerOn: "transfer" | "continue" | "complete" | TopologyEdgeTrigger,
+  ): TopologyEdgeTrigger | "transfer" => triggerOn;
 
   const getDynamicRef = (agentName: string): DynamicSpawnAgentRef | null => dynamicRefsByKey.get(agentName) ?? null;
 
@@ -865,7 +865,7 @@ function createAgentRefResolver(topology: TopologyRecord): AgentRefResolver {
 
   const getTriggeredTargets = (
     agentName: string,
-    triggerOn: "action_required" | "approved",
+    triggerOn: "continue" | "complete",
   ): string[] => {
     const dynamicRef = getDynamicRef(agentName);
     const normalizedTrigger = normalizeTrigger(triggerOn);
@@ -980,7 +980,7 @@ function createAgentRefResolver(topology: TopologyRecord): AgentRefResolver {
     for (const edge of topology.edges) {
       const normalizedEdgeTrigger = normalizeStoredTrigger(edge.triggerOn);
       if (
-        normalizedEdgeTrigger === "action_required"
+        normalizedEdgeTrigger === "continue"
         && edge.target === repairTargetAgentId
         && edge.source !== excludeReviewerAgentId
         && pendingSet.has(edge.source)
@@ -995,12 +995,12 @@ function createAgentRefResolver(topology: TopologyRecord): AgentRefResolver {
     sourceAgentName: string,
     actualTargetName: string,
     canonicalTargetName: string,
-    triggerOn: "handoff" | "action_required" | "approved",
+    triggerOn: "transfer" | "continue" | "complete",
   ): boolean => {
     if (actualTargetName === canonicalTargetName) {
       return true;
     }
-    if (triggerOn !== "handoff") {
+    if (triggerOn !== "transfer") {
       return false;
     }
     const dynamicRef = getDynamicRef(actualTargetName);
@@ -1019,7 +1019,7 @@ function createAgentRefResolver(topology: TopologyRecord): AgentRefResolver {
     sourceAgentName: string,
     actualTargets: string[],
     canonicalTargets: string[],
-    triggerOn: "handoff" | "action_required" | "approved",
+    triggerOn: "transfer" | "continue" | "complete",
   ): string[] | null => {
     if (actualTargets.length !== canonicalTargets.length) {
       return null;

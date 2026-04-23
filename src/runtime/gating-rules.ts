@@ -31,15 +31,15 @@ export function shouldStopTaskForUnhandledActionRequiredRequest(input: {
 }
 
 export function resolveAgentStatusFromReview(input: {
-  reviewDecision: "approved" | "action_required" | "invalid";
+  reviewDecision: "complete" | "continue" | "invalid";
   reviewAgent: boolean;
 }): AgentStatus {
   if (input.reviewDecision === "invalid") {
     return "failed";
   }
 
-  if (input.reviewDecision === "action_required") {
-    return input.reviewAgent ? "action_required" : "failed";
+  if (input.reviewDecision === "continue") {
+    return input.reviewAgent ? "continue" : "failed";
   }
 
   return "completed";

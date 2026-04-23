@@ -8,7 +8,7 @@ import type {
 
 export interface GatingAgentState {
   name: string;
-  status: "idle" | "running" | "completed" | "failed" | "action_required";
+  status: "idle" | "running" | "completed" | "failed" | "continue";
 }
 
 export interface GatingDispatchPlan {
@@ -48,8 +48,8 @@ export class GatingScheduler {
   ) {}
 
   invalidateDownstreamTriggerSignatures(agentName: string) {
-    const downstreamTargets = this.getOutgoingEdges(agentName, "handoff")
-      .concat(this.getOutgoingEdges(agentName, "approved"))
+    const downstreamTargets = this.getOutgoingEdges(agentName, "transfer")
+      .concat(this.getOutgoingEdges(agentName, "complete"))
       .map((edge) => edge.target);
 
     for (const targetName of downstreamTargets) {
@@ -76,7 +76,7 @@ export class GatingScheduler {
       advanceSourceRevision?: boolean;
     } = {},
   ): GatingDispatchPlan | null {
-    const outgoing = this.getOutgoingEdges(sourceAgentId, "handoff");
+    const outgoing = this.getOutgoingEdges(sourceAgentId, "transfer");
     const excludeTargets = options.excludeTargets ?? new Set<string>();
     const restrictTargets = options.restrictTargets;
     const advanceSourceRevision = options.advanceSourceRevision ?? true;
@@ -136,7 +136,7 @@ export class GatingScheduler {
     sourceContent: string,
     agentStates: GatingAgentState[],
   ): GatingDispatchPlan | null {
-    const outgoing = this.getOutgoingEdges(sourceAgentId, "approved");
+    const outgoing = this.getOutgoingEdges(sourceAgentId, "complete");
     const completed = new Set(this.runtime.completedEdges);
 
     for (const edge of outgoing) {
@@ -148,7 +148,7 @@ export class GatingScheduler {
 
     const readyTargets: string[] = [];
     for (const edge of outgoing) {
-      if (this.canScheduleTarget(completed, edge.target, agentStates, "approved")) {
+      if (this.canScheduleTarget(completed, edge.target, agentStates, "complete")) {
         readyTargets.push(edge.target);
         this.runtime.lastSignatureByAgent.set(
           edge.target,
@@ -171,7 +171,7 @@ export class GatingScheduler {
 
   recordHandoffBatchResponse(
     responderAgentId: string,
-    outcome: "approved" | "fail",
+    outcome: "complete" | "fail",
     _agentStates: GatingAgentState[],
   ): GatingBatchContinuation | null {
     for (const [sourceAgentId, batch] of this.runtime.activeHandoffBatchBySource.entries()) {
@@ -180,7 +180,7 @@ export class GatingScheduler {
       }
 
       const sourceState = this.getOrCreateSourceRevisionState(sourceAgentId);
-      if (outcome === "approved") {
+      if (outcome === "complete") {
         sourceState.reviewerPassRevision.set(responderAgentId, batch.sourceRevision);
       } else if (!batch.failedTargets.includes(responderAgentId)) {
         batch.failedTargets.push(responderAgentId);
@@ -241,14 +241,14 @@ export class GatingScheduler {
   }
 
   hasSatisfiedIncomingHandoff(agentName: string): boolean {
-    const incomingEdges = this.getIncomingEdges(agentName, "handoff")
-      .concat(this.getIncomingEdges(agentName, "approved"));
+    const incomingEdges = this.getIncomingEdges(agentName, "transfer")
+      .concat(this.getIncomingEdges(agentName, "complete"));
     return incomingEdges.every((edge) => this.runtime.completedEdges.has(getTopologyEdgeId(edge)));
   }
 
   hasSatisfiedOutgoingHandoff(agentName: string): boolean {
-    const outgoingEdges = this.getOutgoingEdges(agentName, "handoff")
-      .concat(this.getOutgoingEdges(agentName, "approved"));
+    const outgoingEdges = this.getOutgoingEdges(agentName, "transfer")
+      .concat(this.getOutgoingEdges(agentName, "complete"));
     return outgoingEdges.every((edge) => this.runtime.completedEdges.has(getTopologyEdgeId(edge)));
   }
 
@@ -264,7 +264,7 @@ export class GatingScheduler {
     const queuedTargets: string[] = [];
 
     for (const targetName of batch.targets) {
-      if (!this.canScheduleTarget(completedEdges, targetName, agentStates, "handoff")) {
+      if (!this.canScheduleTarget(completedEdges, targetName, agentStates, "transfer")) {
         continue;
       }
 
@@ -302,7 +302,7 @@ export class GatingScheduler {
   }
 
   private getHandoffTargets(sourceAgentId: string): string[] {
-    return this.uniqueTargetNames(this.getOutgoingEdges(sourceAgentId, "handoff"));
+    return this.uniqueTargetNames(this.getOutgoingEdges(sourceAgentId, "transfer"));
   }
 
   private getHandoffTargetsForBatch(
@@ -335,27 +335,27 @@ export class GatingScheduler {
     completedEdges: Set<string>,
     targetName: string,
     agentStates: GatingAgentState[],
-    triggerKind: "handoff" | "approved",
+    triggerKind: "transfer" | "complete",
   ): boolean {
     const agent = agentStates.find((item) => item.name === targetName);
     if (!agent) {
       return false;
     }
 
-    const incomingHandoffEdges = this.getIncomingEdges(targetName, "handoff");
+    const incomingHandoffEdges = this.getIncomingEdges(targetName, "transfer");
     if (incomingHandoffEdges.some((edge) => !completedEdges.has(getTopologyEdgeId(edge)))) {
       return false;
     }
 
-    const incomingApprovedEdges = this.getIncomingEdges(targetName, "approved");
+    const incomingApprovedEdges = this.getIncomingEdges(targetName, "complete");
     if (
-      triggerKind === "handoff"
+      triggerKind === "transfer"
       && incomingApprovedEdges.some((edge) => !completedEdges.has(getTopologyEdgeId(edge)))
     ) {
       return false;
     }
     if (
-      triggerKind === "approved"
+      triggerKind === "complete"
       && incomingApprovedEdges.length > 0
       && !incomingApprovedEdges.some((edge) => completedEdges.has(getTopologyEdgeId(edge)))
     ) {
@@ -366,7 +366,7 @@ export class GatingScheduler {
     if (
       this.runtime.lastSignatureByAgent.get(targetName) === signature &&
       agent.status !== "failed" &&
-      agent.status !== "action_required"
+      agent.status !== "continue"
     ) {
       return false;
     }
@@ -379,7 +379,7 @@ export class GatingScheduler {
       .filter(
         (edge) =>
           edge.target === targetName &&
-          (edge.triggerOn === "handoff" || edge.triggerOn === "approved") &&
+          (edge.triggerOn === "transfer" || edge.triggerOn === "complete") &&
           completedEdges.has(getTopologyEdgeId(edge)),
       )
       .map((edge) => {

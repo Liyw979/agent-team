@@ -174,8 +174,8 @@ function resolveAgentStatusFromFinalMessage(message: MessageRecord): TaskAgentRe
   if (!isAgentFinalMessageRecord(message)) {
     return "completed";
   }
-  if (message.reviewDecision === "action_required") {
-    return "action_required";
+  if (message.reviewDecision === "continue") {
+    return "continue";
   }
   if (message.status === "error") {
     return "failed";

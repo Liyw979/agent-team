@@ -120,7 +120,7 @@ function MessageBubble({
   const hasAgentDispatch = message.kinds.includes("agent-dispatch");
   const hasTaskCreated = message.kinds.includes("task-created");
   const hasTaskCompleted = message.kinds.includes("task-completed");
-  const hasActionRequiredRequest = message.kinds.includes("action-required-request");
+  const hasActionRequiredRequest = message.kinds.includes("continue-request");
   const hasTopologyBlocked = message.kinds.includes("topology-blocked");
   const agentColor = isAgent ? getAgentColorToken(message.sender) : null;
   const senderLabel = isUser ? null : getChatSenderLabel(message.sender);

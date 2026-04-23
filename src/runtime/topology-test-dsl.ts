@@ -96,7 +96,7 @@ function buildEdges(input: CreateTopologyDslInput): TopologyEdge[] {
       edges.push({
         source,
         target,
-        triggerOn: mode === "spawn" ? "handoff" : normalizeTopologyEdgeTrigger(mode),
+        triggerOn: mode === "spawn" ? "transfer" : normalizeTopologyEdgeTrigger(mode),
         messageMode: "last",
       });
     }

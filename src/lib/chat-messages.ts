@@ -170,8 +170,8 @@ function shouldMergeActionRequiredRequest(previous: ChatMessageItem, current: Me
     previous.kinds.at(-1) === "agent-final" &&
     !!previousLastMessage &&
     isAgentFinalMessageRecord(previousLastMessage) &&
-    previousLastMessage.reviewDecision === "action_required" &&
-    current.kind === "action-required-request"
+    previousLastMessage.reviewDecision === "continue" &&
+    current.kind === "continue-request"
   );
 }
 
@@ -179,7 +179,7 @@ function findActionRequiredRequestMergeTargetIndex(
   merged: ChatMessageItem[],
   current: MessageRecord,
 ): number {
-  if (current.kind !== "action-required-request" || !isNonSystemAgent(current.sender)) {
+  if (current.kind !== "continue-request" || !isNonSystemAgent(current.sender)) {
     return -1;
   }
 
@@ -189,14 +189,14 @@ function findActionRequiredRequestMergeTargetIndex(
     if (!candidate || candidate.sender !== current.sender) {
       continue;
     }
-    if (candidate.kinds.includes("action-required-request")) {
+    if (candidate.kinds.includes("continue-request")) {
       continue;
     }
     if (
       candidate.kinds.at(-1) === "agent-final" &&
       !!candidateLastMessage &&
       isAgentFinalMessageRecord(candidateLastMessage) &&
-      candidateLastMessage.reviewDecision === "action_required"
+      candidateLastMessage.reviewDecision === "continue"
     ) {
       return index;
     }
@@ -228,7 +228,7 @@ function getDisplayContent(message: MessageRecord): string {
       parseTargetAgentIds(message.targetAgentIds),
     );
   }
-  if (message.kind === "action-required-request") {
+  if (message.kind === "continue-request") {
     return formatActionRequiredRequestContent(
       getActionRequiredRequestDisplayBody(message),
       message.targetAgentIds,
@@ -248,7 +248,7 @@ export function mergeTaskChatMessages(messages: MessageRecord[]): ChatMessageIte
       last.id = `${last.id}:${message.id}`;
       last.timestamp = message.timestamp;
       last.content =
-        message.kind === "action-required-request"
+        message.kind === "continue-request"
           ? buildMergedActionRequiredRequestContent(last, message)
           : message.kind === "agent-dispatch" && last.kinds.at(-1) === "agent-final"
             ? buildMergedAgentFinalTriggerContent(last, message)

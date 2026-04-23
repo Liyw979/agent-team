@@ -3,7 +3,7 @@ export type AgentStatus =
   | "running"
   | "completed"
   | "failed"
-  | "action_required";
+  | "continue";
 
 export type TaskStatus =
   | "pending"
@@ -11,7 +11,7 @@ export type TaskStatus =
   | "waiting"
   | "finished"
   | "failed"
-  | "action_required";
+  | "continue";
 
 export type PermissionMode = "allow" | "ask" | "deny";
 
@@ -109,7 +109,7 @@ export interface TaskAgentRecord {
   runCount: number;
 }
 
-export type TopologyEdgeTrigger = | "handoff" | "approved" | "action_required";
+export type TopologyEdgeTrigger = | "transfer" | "complete" | "continue";
 export type TopologyEdgeMessageMode = "none" | "last" | "all";
 
 export const DEFAULT_ACTION_REQUIRED_MAX_ROUNDS = 4;
@@ -211,7 +211,7 @@ export function getActionRequiredEdgeLoopLimit(
     (item) =>
       item.source === sourceAgentId
       && item.target === targetAgentId
-      && normalizeTopologyEdgeTrigger(item.triggerOn) === "action_required",
+      && normalizeTopologyEdgeTrigger(item.triggerOn) === "continue",
   );
   return normalizeActionRequiredMaxRounds(edge?.maxRevisionRounds);
 }
@@ -244,7 +244,7 @@ export interface TaskCreatedMessageRecord extends BaseMessageRecord {
 
 export interface AgentFinalMessageRecord extends BaseMessageRecord {
   kind: "agent-final";
-  reviewDecision: "approved" | "action_required" | "invalid";
+  reviewDecision: "complete" | "continue" | "invalid";
   reviewOpinion: string;
   rawResponse: string;
   status: "completed" | "error";
@@ -259,7 +259,7 @@ export interface AgentDispatchMessageRecord extends BaseMessageRecord {
 }
 
 export interface ActionRequiredRequestMessageRecord extends BaseMessageRecord {
-  kind: "action-required-request";
+  kind: "continue-request";
   targetAgentIds: string[];
   senderDisplayName?: string;
 }
@@ -298,7 +298,7 @@ export function isAgentDispatchMessageRecord(message: MessageRecord): message is
 }
 
 export function isActionRequiredRequestMessageRecord(message: MessageRecord): message is ActionRequiredRequestMessageRecord {
-  return message.kind === "action-required-request";
+  return message.kind === "continue-request";
 }
 
 export function isTaskCompletedMessageRecord(message: MessageRecord): message is TaskCompletedMessageRecord {
@@ -309,7 +309,7 @@ export function getMessageTargetAgentIds(message: MessageRecord): string[] {
   switch (message.kind) {
     case "user":
     case "agent-dispatch":
-    case "action-required-request":
+    case "continue-request":
       return message.targetAgentIds;
     default:
       return [];
@@ -320,7 +320,7 @@ export function getMessageSenderDisplayName(message: MessageRecord): string | un
   switch (message.kind) {
     case "agent-final":
     case "agent-dispatch":
-    case "action-required-request":
+    case "continue-request":
       return message.senderDisplayName;
     default:
       return undefined;
@@ -430,11 +430,11 @@ export interface AgentTeamEvent {
   payload: unknown;
 }
 
-export function normalizeTopologyEdgeTrigger(value: unknown): "handoff" | "approved" | "action_required" {
-  if (value === "approved" || value === "action_required") {
+export function normalizeTopologyEdgeTrigger(value: unknown): "transfer" | "complete" | "continue" {
+  if (value === "complete" || value === "continue") {
     return value;
   }
-  return "handoff";
+  return "transfer";
 }
 
 export function getTopologyEdgeId(edge: Pick<TopologyEdge, "source" | "target" | "triggerOn">): string {
@@ -450,7 +450,7 @@ export function isReviewAgentInTopology(
       edge.source === agentName &&
       (() => {
         const triggerOn = normalizeTopologyEdgeTrigger(edge.triggerOn);
-        return triggerOn === "approved" || triggerOn === "action_required";
+        return triggerOn === "complete" || triggerOn === "continue";
       })(),
   );
 }
@@ -542,7 +542,7 @@ export function createDefaultTopology(
       target,
       triggerOn,
       messageMode: DEFAULT_TOPOLOGY_EDGE_MESSAGE_MODE,
-      ...(triggerOn === "action_required"
+      ...(triggerOn === "continue"
         ? {
             maxRevisionRounds: DEFAULT_ACTION_REQUIRED_MAX_ROUNDS,
           }
@@ -550,7 +550,7 @@ export function createDefaultTopology(
     });
   };
 
-  push(startAgent?.name, nextAgent?.name, "handoff");
+  push(startAgent?.name, nextAgent?.name, "transfer");
 
   return {
     nodes,

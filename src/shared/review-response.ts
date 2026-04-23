@@ -1,11 +1,11 @@
 export const REVIEW_CONTINUE_LABEL = "<continue>";
 export const REVIEW_CONTINUE_END_LABEL = "</continue>";
-export const REVIEW_APPROVED_LABEL = "<approved>";
-export const REVIEW_APPROVED_END_LABEL = "</approved>";
+export const REVIEW_COMPLETE_LABEL = "<complete>";
+export const REVIEW_COMPLETE_END_LABEL = "</complete>";
 
-type ReviewSignalKind = "action_required" | "approved";
+type ReviewSignalKind = "continue" | "complete";
 
-const REVIEW_SIGNAL_TAG_PATTERN = /<\/?(?:continue|approved)>/gu;
+const REVIEW_SIGNAL_TAG_PATTERN = /<\/?(?:continue|complete)>/gu;
 
 export function stripLeadingReviewResponseLabel(content: string): string {
   return content.replace(REVIEW_SIGNAL_TAG_PATTERN, "").trim();
@@ -22,7 +22,7 @@ export function extractTrailingReviewSignalBlock(content: string): {
   kind: ReviewSignalKind;
 } | null {
   const trimmed = content.trim();
-  const pattern = /<(continue|approved)>([\s\S]*?)<\/\1>/gu;
+  const pattern = /<(continue|complete)>([\s\S]*?)<\/\1>/gu;
   let lastMatch: RegExpExecArray | null = null;
   let match: RegExpExecArray | null = pattern.exec(trimmed);
 
@@ -32,7 +32,7 @@ export function extractTrailingReviewSignalBlock(content: string): {
   }
 
   if (lastMatch && typeof lastMatch.index === "number") {
-    const kind = lastMatch[1] === "approved" ? "approved" : "action_required";
+    const kind = lastMatch[1] === "complete" ? "complete" : "continue";
     const rawBlock = lastMatch[0].trim();
     const response = (lastMatch[2] ?? "").trim();
     const markerIndex = lastMatch.index;
@@ -82,8 +82,8 @@ function findLastSignalStart(content: string): { index: number; kind: ReviewSign
   let last: { index: number; kind: ReviewSignalKind } | null = null;
 
   const tokens: Array<{ kind: ReviewSignalKind; start: string }> = [
-    { kind: "action_required", start: REVIEW_CONTINUE_LABEL },
-    { kind: "approved", start: REVIEW_APPROVED_LABEL },
+    { kind: "continue", start: REVIEW_CONTINUE_LABEL },
+    { kind: "complete", start: REVIEW_COMPLETE_LABEL },
   ];
 
   for (const token of tokens) {

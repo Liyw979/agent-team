@@ -9,7 +9,7 @@ function createAgentFinalMessage(input: {
   sender: string;
   timestamp: string;
   content: string;
-  reviewDecision?: "approved" | "action_required" | "invalid";
+  reviewDecision?: "complete" | "continue" | "invalid";
   status?: "completed" | "error";
 }): MessageRecord {
   return {
@@ -20,7 +20,7 @@ function createAgentFinalMessage(input: {
     content: input.content,
     kind: "agent-final",
     status: input.status ?? "completed",
-    reviewDecision: input.reviewDecision ?? "approved",
+    reviewDecision: input.reviewDecision ?? "complete",
     reviewOpinion: "",
     rawResponse: input.content,
   };
@@ -89,7 +89,7 @@ test("task-completed 与更晚的 agent-final 必须纠正滞后的 task/agent �
       id: "message-1",
       sender: "CodeReview",
       timestamp: "2026-04-21T03:48:00.819Z",
-      content: "<approved>通过</approved>",
+      content: "<complete>通过</complete>",
     }),
     createTaskCompletedMessage({
       id: "message-2",

@@ -8,9 +8,9 @@ interface TopologyIndex {
 
 export function compileTopology(topology: TopologyRecord): TopologyIndex {
   return {
-    handoffTargetsBySource: buildTargets(topology, "handoff"),
-    approvedTargetsBySource: buildTargets(topology, "approved"),
-    actionRequiredTargetsBySource: buildTargets(topology, "action_required"),
+    handoffTargetsBySource: buildTargets(topology, "transfer"),
+    approvedTargetsBySource: buildTargets(topology, "complete"),
+    actionRequiredTargetsBySource: buildTargets(topology, "continue"),
   };
 }
 

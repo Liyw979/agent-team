@@ -35,7 +35,7 @@ import { extractSpawnItemsFromContent } from "./spawn-items";
 export interface GraphDispatchJob {
   agentName: string;
   sourceAgentId: string | null;
-  kind: "raw" | "handoff" | "approved" | "action_required_request";
+  kind: "raw" | "transfer" | "complete" | "continue_request";
 }
 
 export interface GraphDispatchBatch {
@@ -67,7 +67,7 @@ export interface GraphAgentResult {
   agentName: string;
   status: "completed" | "failed";
   reviewAgent: boolean;
-  reviewDecision: "approved" | "action_required" | "invalid";
+  reviewDecision: "complete" | "continue" | "invalid";
   agentStatus: AgentStatus;
   agentContextContent: string;
   opinion: string | null;
@@ -113,7 +113,7 @@ export function createUserDispatchDecision(
           jobs: entryTargets.map((agentName) => ({
             agentName,
             sourceAgentId: input.targetAgentName,
-            kind: "handoff" as const,
+            kind: "transfer" as const,
           })),
         },
       };
@@ -171,12 +171,12 @@ export function applyAgentResultToGraphState(
   const scheduler = new GatingScheduler(buildEffectiveTopology(nextState), runtime);
   const batchContinuation = scheduler.recordHandoffBatchResponse(
     result.agentName,
-    result.reviewDecision === "action_required" ? "fail" : "approved",
+    result.reviewDecision === "continue" ? "fail" : "complete",
     buildGatingAgentStates(nextState),
   );
   applySchedulerRuntimeToGraphState(nextState, runtime);
 
-  if (result.reviewDecision === "action_required") {
+  if (result.reviewDecision === "continue") {
     return {
       state: nextState,
       decision: handleActionRequired(nextState, result, batchContinuation),
@@ -296,7 +296,7 @@ function handleActionRequired(
     if (!storedReview) {
       return {
         type: "waiting",
-        waitingReason: "missing_action_required_request",
+        waitingReason: "missing_continue_request",
       };
     }
     state.pendingHandoffRepairTargetsBySource[repairTargetAgentId] = [
@@ -321,7 +321,7 @@ function handleActionRequired(
       state.taskStatus = "failed";
       return {
         type: "failed",
-        errorMessage: `${result.agentName} 给出了 action_required，但没有可继续推进的 action_required 链路`,
+        errorMessage: `${result.agentName} 给出了 continue，但没有可继续推进的 continue 链路`,
       };
     }
     const loopLimitDecision = enforceActionRequiredLoopLimit(
@@ -353,7 +353,7 @@ function handleActionRequired(
     state.taskStatus = "failed";
     return {
       type: "failed",
-      errorMessage: `${result.agentName} 给出了 action_required，但没有可继续推进的 action_required 链路`,
+      errorMessage: `${result.agentName} 给出了 continue，但没有可继续推进的 continue 链路`,
     };
   }
 
@@ -390,7 +390,7 @@ function continueAfterHandoffBatchResponse(
     if (!storedReview) {
       return {
         type: "waiting",
-        waitingReason: "missing_action_required_request",
+        waitingReason: "missing_continue_request",
       };
     }
     state.pendingHandoffRepairTargetsBySource[continuation.sourceAgentId] = [
@@ -443,7 +443,7 @@ function triggerActionRequiredRequestDownstream(
   if (targets.length === 0) {
     return {
       type: "failed",
-      errorMessage: `${sourceAgentId} 没有可用的 action_required 下游`,
+      errorMessage: `${sourceAgentId} 没有可用的 continue 下游`,
     };
   }
 
@@ -460,7 +460,7 @@ function triggerActionRequiredRequestDownstream(
       jobs: targets.map((targetName) => ({
         agentName: targetName,
         sourceAgentId,
-        kind: "action_required_request",
+        kind: "continue_request",
       })),
     },
   };
@@ -515,9 +515,9 @@ function triggerHandoffDownstream(
     };
   }
   if (nextPlan) {
-    return planToDecision(nextPlan, "handoff");
+    return planToDecision(nextPlan, "transfer");
   }
-  return planToDecision(plan, "handoff");
+  return planToDecision(plan, "transfer");
 }
 
 function triggerApprovedDownstream(
@@ -544,9 +544,9 @@ function triggerApprovedDownstream(
     };
   }
   if (nextPlan) {
-    return planToDecision(nextPlan, "approved", displayContent);
+    return planToDecision(nextPlan, "complete", displayContent);
   }
-  return planToDecision(plan, "approved", displayContent);
+  return planToDecision(plan, "complete", displayContent);
 }
 
 function planToDecision(
@@ -995,7 +995,7 @@ function findNextPendingRepairReviewer(
   const effectiveTopology = buildEffectiveTopology(state);
   for (const edge of effectiveTopology.edges) {
     if (
-      edge.triggerOn === "action_required"
+      edge.triggerOn === "continue"
       && edge.target === repairTargetAgentId
       && edge.source !== excludeReviewerAgentId
       && state.pendingActionRequiredRequestsByAgent[edge.source]
