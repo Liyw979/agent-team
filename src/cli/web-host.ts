@@ -43,7 +43,7 @@ function text(response: http.ServerResponse, statusCode: number, body: string, e
 async function readJsonBody(request: http.IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
-    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+    chunks.push(chunk);
   }
   if (chunks.length === 0) {
     return {};

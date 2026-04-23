@@ -13,3 +13,4 @@ src/cli/generated-embedded-assets.ts
 
 .idea
 tsconfig.web.tsbuildinfo
+tsconfig.node.tsbuildinfo

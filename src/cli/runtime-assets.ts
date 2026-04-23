@@ -15,6 +15,10 @@ const WEB_SOURCE_WATCH_PATHS = [
   "vite.config.ts",
 ] as const;
 
+const EXCLUDED_RUNTIME_WEB_SOURCE_PATHS = new Set([
+  "src/cli/generated-embedded-assets.ts",
+]);
+
 interface ResolvedRuntimeAssets {
   webRoot: string | null;
 }
@@ -123,8 +127,39 @@ function getLatestMtimeMs(targetPath: string): number | null {
 
   let latest = stat.mtimeMs;
   for (const entry of fs.readdirSync(targetPath, { withFileTypes: true })) {
-    const childLatest = getLatestMtimeMs(path.join(targetPath, entry.name));
+    const childPath = path.join(targetPath, entry.name);
+    const childLatest = getLatestMtimeMs(childPath);
     if (typeof childLatest === "number" && childLatest > latest) {
+      latest = childLatest;
+    }
+  }
+  return latest;
+}
+
+export function isRuntimeWebSourcePath(relativePath: string): boolean {
+  const normalized = relativePath.replace(/\\/g, "/");
+  return !EXCLUDED_RUNTIME_WEB_SOURCE_PATHS.has(normalized);
+}
+
+function getLatestSourceAwareMtimeMs(targetPath: string): number | null {
+  if (!fs.existsSync(targetPath)) {
+    return null;
+  }
+
+  const stat = fs.statSync(targetPath);
+  if (stat.isFile()) {
+    const relativePath = path.relative(REPO_ROOT, targetPath).replace(/\\/g, "/");
+    return isRuntimeWebSourcePath(relativePath) ? stat.mtimeMs : null;
+  }
+
+  if (!stat.isDirectory()) {
+    return null;
+  }
+
+  let latest: number | null = null;
+  for (const entry of fs.readdirSync(targetPath, { withFileTypes: true })) {
+    const childLatest = getLatestSourceAwareMtimeMs(path.join(targetPath, entry.name));
+    if (typeof childLatest === "number" && (latest === null || childLatest > latest)) {
       latest = childLatest;
     }
   }
@@ -135,7 +170,7 @@ function getLatestRepoWebSourceUpdatedAtMs() {
   let latest: number | null = null;
 
   for (const relativePath of WEB_SOURCE_WATCH_PATHS) {
-    const candidate = getLatestMtimeMs(path.join(REPO_ROOT, relativePath));
+    const candidate = getLatestSourceAwareMtimeMs(path.join(REPO_ROOT, relativePath));
     if (typeof candidate === "number" && (latest === null || candidate > latest)) {
       latest = candidate;
     }

@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   isCompiledRuntimeExecutable,
   isCompiledRuntimeDir,
+  isRuntimeWebSourcePath,
   resolveCompiledEmbeddedWebRoot,
   resolveRuntimeWebRoot,
   resolveSourceAssetFallback,
@@ -52,6 +53,11 @@ test("source-mode task ui reuses fresh dist/web", () => {
     }),
     true,
   );
+});
+
+test("source-mode task ui 不能把 build 生成的 embedded-assets 文件当成前端源码变更", () => {
+  assert.equal(isRuntimeWebSourcePath("src/cli/generated-embedded-assets.ts"), false);
+  assert.equal(isRuntimeWebSourcePath("src/App.tsx"), true);
 });
 
 test("fallback resolution returns null without a web root", () => {
