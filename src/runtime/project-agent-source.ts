@@ -71,14 +71,14 @@ export function buildInjectedConfigFromAgents(agents: AgentRecord[]): string | n
       if (agent.name.trim().toLowerCase() === "build" || agent.isWritable === true) {
         return [];
       }
-      return [[
-        toOpenCodeAgentName(agent.name),
-        {
-          mode: "primary",
-          prompt: agent.prompt ?? "",
-          permission: buildReadonlyAgentPermissionConfig(),
-        },
-      ]];
+        return [[
+          toOpenCodeAgentName(agent.name),
+          {
+            mode: "primary",
+            prompt: agent.prompt,
+            permission: buildReadonlyAgentPermissionConfig(),
+          },
+        ]];
     }),
   );
 

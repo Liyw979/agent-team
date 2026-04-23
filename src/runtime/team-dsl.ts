@@ -50,7 +50,7 @@ export type TeamDslDefinition = GraphDslGraph;
 
 export interface CompiledTeamDslAgent {
   name: string;
-  prompt: string | null;
+  prompt: string;
   templateName: string | null;
   isWritable: boolean;
 }
@@ -95,13 +95,13 @@ const GraphDslGraphSchema: z.ZodType<GraphDslGraph> = z.lazy(() =>
 
 function normalizeComparableAgents(agents: Array<{
   name: string;
-  prompt: string | null | undefined;
+  prompt: string;
   isWritable?: boolean;
 }>) {
   return [...agents]
     .map((agent) => ({
       name: agent.name,
-      prompt: agent.prompt ?? "",
+      prompt: agent.prompt,
       isWritable: agent.isWritable === true,
     }))
     .sort((left, right) => left.name.localeCompare(right.name));
@@ -210,7 +210,7 @@ function compileAgentDefinition(agent: TeamDslAgentRecord): CompiledTeamDslAgent
 
   return {
     name,
-    prompt: prompt || null,
+    prompt,
     templateName: templateName || null,
     isWritable: agent.writable,
   };
@@ -509,7 +509,7 @@ export function matchesAppliedTeamDsl(
 export function toAgentRecord(agent: CompiledTeamDslAgent): AgentRecord {
   return {
     name: agent.name,
-    prompt: agent.prompt ?? "",
+    prompt: agent.prompt,
     isWritable: agent.isWritable,
   };
 }

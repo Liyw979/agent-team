@@ -6,9 +6,9 @@ export interface AgentPromptDialogState {
 
 export function buildAgentPromptDialogState(input: {
   agentName: string;
-  prompt: string | null | undefined;
+  prompt: string;
 }): AgentPromptDialogState {
-  const normalizedPrompt = (input.prompt ?? "").trim();
+  const normalizedPrompt = input.prompt.trim();
 
   if (normalizedPrompt) {
     return {

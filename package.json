@@ -7,9 +7,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "bun run build:web && bun run build:embedded-assets && tsc --noEmit",
+    "build": "bun run build:embedded-assets && tsc --noEmit",
     "build:web": "vite build",
-    "build:embedded-assets": "node src/cli/generate-embedded-assets.mjs",
+    "build:embedded-assets": "bun run build:web && node src/cli/generate-embedded-assets.mjs",
     "knip": "bun run build:embedded-assets && knip",
     "test": "bun run build:embedded-assets && tsx --test",
     "preview": "vite preview",

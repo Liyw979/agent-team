@@ -62,7 +62,8 @@ function App() {
 
   const workspace = uiSnapshot?.workspace ?? null;
   const task = uiSnapshot?.task ?? null;
-  const uiSnapshotPollingIntervalMs = getUiSnapshotPollingIntervalMs(launchParams.taskId);
+  const launchTaskId = launchParams.taskId ?? "";
+  const uiSnapshotPollingIntervalMs = getUiSnapshotPollingIntervalMs(launchTaskId);
   const panelVisibility = resolveAppPanelVisibility(panelMode);
 
   function applyUiSnapshotRefreshResult(nextUiSnapshot: UiSnapshotPayload, requestId: number) {
@@ -93,12 +94,12 @@ function App() {
     const requestId = nextUiSnapshotRequestIdRef.current + 1;
     nextUiSnapshotRequestIdRef.current = requestId;
 
-    if (!launchParams.taskId) {
+    if (!launchTaskId) {
       applyUiSnapshotRefreshResult({
         workspace: null,
         task: null,
         launchCwd: null,
-        launchTaskId: launchParams.taskId || null,
+        launchTaskId: launchParams.taskId,
         taskLogFilePath: null,
         taskUrl: null,
       }, requestId);
@@ -106,7 +107,7 @@ function App() {
     }
 
     const next = await fetchUiSnapshot({
-      taskId: launchParams.taskId,
+      taskId: launchTaskId,
     });
     applyUiSnapshotRefreshResult(next, requestId);
   }
@@ -127,7 +128,7 @@ function App() {
     return () => {
       clearInterval(timer);
     };
-  }, [uiSnapshotPollingIntervalMs]);
+  }, [launchTaskId, uiSnapshotPollingIntervalMs]);
 
   useEffect(() => {
     latestUiSnapshotRef.current = uiSnapshot;

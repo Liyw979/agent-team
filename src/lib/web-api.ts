@@ -7,6 +7,7 @@ import type {
   TaskSnapshot,
   UiSnapshotPayload,
 } from "@shared/types";
+import { normalizeOptionalString } from "@shared/object-utils";
 
 function buildQuery(params: Record<string, string>) {
   return new URLSearchParams(params).toString();
@@ -21,10 +22,14 @@ async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit): Promi
   return response.json() as Promise<T>;
 }
 
+export function readLaunchTaskIdFromSearch(search: string): string | null {
+  const params = new URLSearchParams(search);
+  return normalizeOptionalString(params.get("taskId")) ?? null;
+}
+
 export function readLaunchParams() {
-  const params = new URLSearchParams(window.location.search);
   return {
-    taskId: params.get("taskId")?.trim() ?? "",
+    taskId: readLaunchTaskIdFromSearch(window.location.search),
   };
 }
 

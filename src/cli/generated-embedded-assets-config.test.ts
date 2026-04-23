@@ -8,17 +8,27 @@ const PACKAGE_JSON = JSON.parse(
   scripts?: Record<string, string>;
 };
 
-test("build:embedded-assets 会改为调用 cli 目录下的生成脚本", () => {
+function scriptBuildsWebBeforeGeneratingEmbeddedAssets(script: string | undefined): boolean {
+  if (!script) {
+    return false;
+  }
+  const segments = script.split("&&").map((segment) => segment.trim());
+  const buildWebIndex = segments.indexOf("bun run build:web");
+  const generateEmbeddedAssetsIndex = segments.indexOf("node src/cli/generate-embedded-assets.mjs");
+  return buildWebIndex !== -1 && generateEmbeddedAssetsIndex !== -1 && buildWebIndex < generateEmbeddedAssetsIndex;
+}
+
+test("build:embedded-assets 会先构建 web，再调用 cli 目录下的生成脚本", () => {
   assert.equal(
     PACKAGE_JSON.scripts?.["build:embedded-assets"],
-    "node src/cli/generate-embedded-assets.mjs",
+    "bun run build:web && node src/cli/generate-embedded-assets.mjs",
   );
 });
 
 test("build 和 test 会先生成 generated-embedded-assets.ts", () => {
   assert.equal(
     PACKAGE_JSON.scripts?.["build"],
-    "bun run build:web && bun run build:embedded-assets && tsc --noEmit",
+    "bun run build:embedded-assets && tsc --noEmit",
   );
   assert.equal(
     PACKAGE_JSON.scripts?.["knip"],
@@ -27,6 +37,13 @@ test("build 和 test 会先生成 generated-embedded-assets.ts", () => {
   assert.equal(
     PACKAGE_JSON.scripts?.["test"],
     "bun run build:embedded-assets && tsx --test",
+  );
+});
+
+test("生成嵌入资源前会先构建 web 产物", () => {
+  assert.equal(
+    scriptBuildsWebBeforeGeneratingEmbeddedAssets(PACKAGE_JSON.scripts?.["build:embedded-assets"]),
+    true,
   );
 });
 

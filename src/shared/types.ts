@@ -375,8 +375,8 @@ export interface UiSnapshotPayload {
 
 export interface SubmitTaskPayload {
   cwd?: string;
-  taskId?: string | null;
-  newTaskId?: string | null;
+  taskId?: string;
+  newTaskId?: string;
   content: string;
   mentionAgent?: string;
 }
@@ -388,7 +388,7 @@ export interface CopyToClipboardPayload {
 export interface InitializeTaskPayload {
   cwd: string;
   title?: string;
-  taskId?: string | null;
+  taskId?: string;
 }
 
 export interface UpdateTopologyPayload {

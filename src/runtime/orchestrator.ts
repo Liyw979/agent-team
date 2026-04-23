@@ -279,7 +279,7 @@ export class Orchestrator {
     const normalized = this.normalizeTopology(
       payload.compiled.agents.map((agent) => ({
         name: agent.name,
-        prompt: agent.prompt ?? "",
+        prompt: agent.prompt,
         isWritable: agent.isWritable,
       })),
       payload.compiled.topology,

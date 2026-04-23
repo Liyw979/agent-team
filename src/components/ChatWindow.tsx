@@ -23,11 +23,11 @@ import {
 import { formatChatTranscript, getChatSenderLabel } from "@/lib/chat-transcript";
 
 interface ChatWindowProps {
-  workspace: WorkspaceSnapshot | undefined;
-  task: TaskSnapshot | undefined;
+  workspace: WorkspaceSnapshot;
+  task: TaskSnapshot;
   availableAgents: string[];
-  taskLogFilePath?: string | null;
-  taskUrl?: string | null;
+  taskLogFilePath: string | null;
+  taskUrl: string | null;
   isMaximized?: boolean;
   onToggleMaximize?: () => void;
   onSubmit: (payload: { content: string; mentionAgent?: string }) => Promise<void>;
@@ -102,8 +102,8 @@ function getCaretCoordinates(textarea: HTMLTextAreaElement, position: number) {
 }
 
 function getDefaultAgentName(
-  workspace: WorkspaceSnapshot | undefined,
-  task: TaskSnapshot | undefined,
+  workspace: WorkspaceSnapshot,
+  task: TaskSnapshot,
 ): string | undefined {
   const topology = task?.topology ?? workspace?.topology;
   return topology ? (resolvePrimaryTopologyStartTarget(topology) ?? undefined) : undefined;
@@ -366,7 +366,7 @@ export function ChatWindow({
 
   async function handleSubmit() {
     const content = draft.trim();
-    if (!content || !workspace || submitting) {
+    if (!content || submitting) {
       return;
     }
     const resolution = resolveTaskSubmissionTarget({

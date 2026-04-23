@@ -32,8 +32,8 @@ import type {
 } from "@shared/types";
 
 interface TopologyGraphProps {
-  workspace: WorkspaceSnapshot | undefined;
-  task: TaskSnapshot | undefined;
+  workspace: WorkspaceSnapshot;
+  task: TaskSnapshot;
   selectedAgentId: string | null;
   onSelectAgent: (agentId: string) => void;
   isMaximized?: boolean;

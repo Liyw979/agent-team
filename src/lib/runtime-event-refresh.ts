@@ -1,10 +1,10 @@
 import type { RuntimeUpdatedEventPayload } from "@shared/types";
 
 export function shouldRefreshForRuntimeEvent(input: {
-  currentTaskId: string | null | undefined;
+  currentTaskId: string;
   payload: RuntimeUpdatedEventPayload;
 }): boolean {
-  const currentTaskId = input.currentTaskId?.trim() ?? "";
+  const currentTaskId = input.currentTaskId.trim();
   if (!currentTaskId) {
     return false;
   }

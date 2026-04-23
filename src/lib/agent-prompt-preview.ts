@@ -1,8 +1,8 @@
 export function buildAgentPromptPreviewText(input: {
   agentName: string;
-  prompt: string | null | undefined;
+  prompt: string;
 }): string {
-  const normalizedPrompt = (input.prompt ?? "").trim();
+  const normalizedPrompt = input.prompt.trim();
   if (normalizedPrompt) {
     return normalizedPrompt;
   }

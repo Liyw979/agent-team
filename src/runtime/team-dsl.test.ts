@@ -89,7 +89,7 @@ test("compileTeamDsl 支持把递归式图 DSL 编译成 agents + topology", () 
       isWritable: agent.isWritable,
     })),
     [
-      { name: "Build", prompt: null, templateName: "Build", isWritable: true },
+      { name: "Build", prompt: "", templateName: "Build", isWritable: true },
       { name: "BA", prompt: BA_PROMPT, templateName: null, isWritable: false },
       { name: "SecurityResearcher", prompt: "你负责漏洞挖掘。", templateName: null, isWritable: false },
     ],
@@ -104,6 +104,7 @@ test("compileTeamDsl 支持把递归式图 DSL 编译成 agents + topology", () 
       id: "Build",
       kind: "agent",
       templateName: "Build",
+      prompt: "",
       writable: true,
     },
     {
