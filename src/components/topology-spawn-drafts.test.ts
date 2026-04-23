@@ -65,8 +65,7 @@ test("getTopologyDisplayNodeIds 会用 runtime 实例替换已展开的静态模
     edges: [],
     spawnRules: [
       {
-        id: "spawn-rule:疑点辩论",
-        name: "疑点辩论",
+        id: "疑点辩论",
         spawnNodeName: "疑点辩论",
         sourceTemplateName: "初筛",
         entryRole: "正方",

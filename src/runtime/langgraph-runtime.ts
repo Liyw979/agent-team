@@ -166,7 +166,7 @@ export class LangGraphRuntime {
     let currentState = graphState;
     let currentDecision: GraphRoutingDecision | null = state.pendingInput
       ? createUserDispatchDecision(currentState, {
-        targetAgentName: state.pendingInput.targetAgentName,
+        targetAgentId: state.pendingInput.targetAgentId,
         content: state.pendingInput.content,
       })
       : state.lastDecision;

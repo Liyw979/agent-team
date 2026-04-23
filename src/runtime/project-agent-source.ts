@@ -3,7 +3,7 @@ import {
   type PermissionMode,
   type TopologyRecord,
 } from "@shared/types";
-import { toOpenCodeAgentName } from "./opencode-agent-name";
+import { toOpenCodeAgentId } from "./opencode-agent-id";
 
 export function resolveProjectAgents(input: {
   dslAgents: AgentRecord[] | null;
@@ -47,13 +47,13 @@ export function extractDslAgentsFromTopology(
 
   const dslAgents = nodeRecords
     .map((node) => ({
-      name: node.templateName,
+      id: node.templateName,
       prompt: typeof (node as { prompt?: unknown }).prompt === "string" ? (node as { prompt: string }).prompt : "",
       isWritable: typeof (node as { writable?: unknown }).writable === "boolean"
         ? (node as { writable: boolean }).writable
         : undefined,
     }))
-    .filter((agent) => topology.nodes.includes(agent.name));
+    .filter((agent) => topology.nodes.includes(agent.id));
 
   if (dslAgents.length === 0) {
     return null;
@@ -68,11 +68,11 @@ export function extractDslAgentsFromTopology(
 export function buildInjectedConfigFromAgents(agents: AgentRecord[]): string | null {
   const injectedAgents = Object.fromEntries(
     agents.flatMap((agent) => {
-      if (agent.name.trim().toLowerCase() === "build" || agent.isWritable === true) {
+      if (agent.id.trim().toLowerCase() === "build" || agent.isWritable === true) {
         return [];
       }
         return [[
-          toOpenCodeAgentName(agent.name),
+          toOpenCodeAgentId(agent.id),
           {
             mode: "primary",
             prompt: agent.prompt,

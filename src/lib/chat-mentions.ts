@@ -5,7 +5,7 @@ export interface MentionContext {
 }
 
 interface MentionOptionItem {
-  agentName: string;
+  agentId: string;
   displayName: string;
   mentionLabel: string;
 }
@@ -39,9 +39,9 @@ export function getMentionOptions(availableAgents: string[], query: string): str
 }
 
 export function getMentionOptionItems(availableAgents: string[], query: string): MentionOptionItem[] {
-  return getMentionOptions(availableAgents, query).map((agentName) => ({
-    agentName,
-    displayName: agentName,
-    mentionLabel: `@${agentName}`,
+  return getMentionOptions(availableAgents, query).map((agentId) => ({
+    agentId,
+    displayName: agentId,
+    mentionLabel: `@${agentId}`,
   }));
 }

@@ -18,7 +18,7 @@
   "nodes": [
     {
       "type": "agent",
-      "name": "BA",
+      "id": "BA",
       "prompt": "你是 BA。负责把需求整理清楚。",
       "writable": false
     }
@@ -30,7 +30,7 @@
 根级字段含义：
 
 - `entry`
-  当前图的入口节点名。任务未显式 `@Agent` 时，会从这个节点开始执行；该值必须能在同一层 `nodes` 中找到。
+  当前图的入口节点 ID。任务未显式 `@Agent` 时，会从这个节点开始执行；该值必须能在同一层 `nodes` 中找到。
 - `nodes`
   当前图声明的节点数组。每个元素必须是一个对象，且必须通过 `type` 明确声明为 `agent` 或 `spawn`。
 - `links`
@@ -50,7 +50,7 @@
 ```json
 {
   "type": "agent",
-  "name": "Build",
+  "id": "Build",
   "prompt": "",
   "writable": true
 }
@@ -60,8 +60,8 @@
 
 - `type`
   节点判别字段。`agent` 表示这是一个执行型 Agent 节点，会被编译成可运行的 Agent。
-- `name`
-  Agent 名称，也是拓扑里的节点名；必须全局唯一，父图和子图里也不能重名。
+- `id`
+  Agent ID，也是拓扑里的节点 ID；必须全局唯一，父图和子图里也不能重复。
 - `prompt`
   Agent 的职责说明。必须显式提供；普通自定义 Agent 不能为空；`Build` 使用 OpenCode 内置 prompt，因此这里必须写空字符串 `""`，不能覆盖。
 - `writable`
@@ -80,19 +80,19 @@
 ```json
 {
   "type": "spawn",
-  "name": "疑点辩论",
+  "id": "疑点辩论",
   "graph": {
     "entry": "正方",
     "nodes": [
       {
         "type": "agent",
-        "name": "正方",
+        "id": "正方",
         "prompt": "你是正方。",
         "writable": false
       },
       {
         "type": "agent",
-        "name": "反方",
+        "id": "反方",
         "prompt": "你是反方。",
         "writable": false
       }
@@ -113,17 +113,17 @@
 
 - `type`
   节点判别字段。`spawn` 表示这是一个展开型调度节点，不是实际执行 Agent。
-- `name`
-  spawn 节点名；必须全局唯一，父图和子图里也不能重名。
+- `id`
+  spawn 节点 ID；必须全局唯一，父图和子图里也不能重复。
 - `graph`
   spawn 展开后要实例化的子图定义。子图自己也必须使用同一套 `entry + nodes + links` DSL。
 
 `graph` 内部字段含义：
 
 - `graph.entry`
-  子图入口节点名。每个展开出来的实例都会从这个子图入口 Agent 开始执行。
+  子图入口节点 ID。每个展开出来的实例都会从这个子图入口 Agent 开始执行。
 - `graph.nodes`
-  子图节点数组，只能包含 `agent` 或嵌套 `spawn` 节点，并且节点名仍然必须全局唯一。
+  子图节点数组，只能包含 `agent` 或嵌套 `spawn` 节点，并且节点 ID 仍然必须全局唯一。
 - `graph.links`
   子图内部边数组，格式与根图 `links` 完全一致。
 
@@ -159,9 +159,9 @@
 字段说明：
 
 - `from`
-  边的起点节点名；必须能在当前层 `nodes` 中找到。
+  边的起点节点 ID；必须能在当前层 `nodes` 中找到。
 - `to`
-  边的终点节点名；必须能在当前层 `nodes` 中找到。
+  边的终点节点 ID；必须能在当前层 `nodes` 中找到。
 - `trigger_type`
   触发条件，决定这条边什么时候会被调度。
 - `message_type`
@@ -256,11 +256,11 @@
 {
   "entry": "BA",
   "nodes": [
-    { "type": "agent", "name": "BA", "prompt": "...", "writable": false },
-    { "type": "agent", "name": "Build", "prompt": "", "writable": true },
-    { "type": "agent", "name": "CodeReview", "prompt": "...", "writable": false },
-    { "type": "agent", "name": "UnitTest", "prompt": "...", "writable": false },
-    { "type": "agent", "name": "TaskReview", "prompt": "...", "writable": false }
+    { "type": "agent", "id": "BA", "prompt": "...", "writable": false },
+    { "type": "agent", "id": "Build", "prompt": "", "writable": true },
+    { "type": "agent", "id": "CodeReview", "prompt": "...", "writable": false },
+    { "type": "agent", "id": "UnitTest", "prompt": "...", "writable": false },
+    { "type": "agent", "id": "TaskReview", "prompt": "...", "writable": false }
   ],
   "links": [
     { "from": "BA", "to": "Build", "trigger_type": "transfer", "message_type": "last" },
@@ -293,7 +293,7 @@
 - 节点 `type` 是判别字段，只允许 `agent` 或 `spawn`
 - 当 `type = "agent"` 时，节点按执行型结构解析：使用 `prompt` / `writable`，不使用 `graph`
 - 当 `type = "spawn"` 时，节点按展开型结构解析：使用 `graph`，不使用 `prompt`
-- 节点名必须全局唯一，不能在父子图里重名
+- 节点 ID 必须全局唯一，不能在父子图里重复
 - `graph.entry` 必须指向本层真实存在的节点
 - `links` 必须使用对象格式，并显式写出 `from` / `to` / `trigger_type` / `message_type`
 - `links` 里的 `from` / `to` 必须都能在当前层 `nodes` 中找到

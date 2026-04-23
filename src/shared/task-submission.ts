@@ -1,7 +1,7 @@
 type TaskSubmissionResolution =
   | {
       ok: true;
-      targetAgent: string;
+      targetAgentId: string;
     }
   | {
       ok: false;
@@ -11,16 +11,16 @@ type TaskSubmissionResolution =
 
 export function resolveTaskSubmissionTarget(input: {
   content: string;
-  mentionAgent?: string;
+  mentionAgentId?: string;
   availableAgents: string[];
-  defaultTargetAgent?: string;
+  defaultTargetAgentId?: string;
 }): TaskSubmissionResolution {
-  const explicitMention = normalizeAgentName(input.mentionAgent) ?? extractMention(input.content);
+  const explicitMention = normalizeAgentId(input.mentionAgentId) ?? extractMention(input.content);
   if (explicitMention) {
     if (input.availableAgents.includes(explicitMention)) {
       return {
         ok: true,
-        targetAgent: explicitMention,
+        targetAgentId: explicitMention,
       };
     }
 
@@ -34,11 +34,11 @@ export function resolveTaskSubmissionTarget(input: {
     };
   }
 
-  const defaultTargetAgent = normalizeAgentName(input.defaultTargetAgent);
-  if (defaultTargetAgent && input.availableAgents.includes(defaultTargetAgent)) {
+  const defaultTargetAgentId = normalizeAgentId(input.defaultTargetAgentId);
+  if (defaultTargetAgentId && input.availableAgents.includes(defaultTargetAgentId)) {
     return {
       ok: true,
-      targetAgent: defaultTargetAgent,
+      targetAgentId: defaultTargetAgentId,
     };
   }
 
@@ -59,10 +59,10 @@ export function resolveTaskSubmissionTarget(input: {
 
 function extractMention(content: string): string | undefined {
   const match = content.match(/@([^\s]+)/u);
-  return normalizeAgentName(match?.[1]);
+  return normalizeAgentId(match?.[1]);
 }
 
-function normalizeAgentName(value: string | undefined): string | undefined {
+function normalizeAgentId(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
 }

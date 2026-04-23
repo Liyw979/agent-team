@@ -140,7 +140,7 @@ export class StoreService {
   listTaskAgents(cwd: string, taskId: string): TaskAgentRecord[] {
     return [...this.readWorkspaceState(cwd).taskAgents]
       .filter((agent) => agent.taskId === taskId)
-      .sort((left, right) => left.name.localeCompare(right.name));
+      .sort((left, right) => left.id.localeCompare(right.id));
   }
 
   insertTaskAgent(cwd: string, record: TaskAgentRecord) {
@@ -150,11 +150,11 @@ export class StoreService {
     }));
   }
 
-  updateTaskAgentRun(cwd: string, taskId: string, agentName: string, status: TaskAgentRecord["status"]) {
+  updateTaskAgentRun(cwd: string, taskId: string, agentId: string, status: TaskAgentRecord["status"]) {
     this.updateWorkspaceState(cwd, (state) => ({
       ...state,
       taskAgents: state.taskAgents.map((agent) =>
-        agent.taskId === taskId && agent.name === agentName
+        agent.taskId === taskId && agent.id === agentId
           ? {
               ...agent,
               status,
@@ -165,11 +165,11 @@ export class StoreService {
     }));
   }
 
-  updateTaskAgentStatus(cwd: string, taskId: string, agentName: string, status: TaskAgentRecord["status"]) {
+  updateTaskAgentStatus(cwd: string, taskId: string, agentId: string, status: TaskAgentRecord["status"]) {
     this.updateWorkspaceState(cwd, (state) => ({
       ...state,
       taskAgents: state.taskAgents.map((agent) =>
-        agent.taskId === taskId && agent.name === agentName
+        agent.taskId === taskId && agent.id === agentId
           ? {
               ...agent,
               status,

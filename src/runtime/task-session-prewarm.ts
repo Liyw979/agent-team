@@ -1,18 +1,18 @@
 import type { TaskAgentRecord, TopologyRecord } from "@shared/types";
 
-export function resolveTaskAgentNamesToPrewarm(
+export function resolveTaskAgentIdsToPrewarm(
   topology: Pick<TopologyRecord, "edges" | "langgraph" | "spawnRules">,
-  taskAgents: ReadonlyArray<Pick<TaskAgentRecord, "name">>,
+  taskAgents: ReadonlyArray<Pick<TaskAgentRecord, "id">>,
 ): string[] {
-  const parentReachableAgentNames = new Set<string>([
+  const parentReachableAgentIds = new Set<string>([
     ...(topology.langgraph?.start.targets ?? []),
     ...topology.edges.flatMap((edge) => [edge.source, edge.target]),
   ]);
-  const spawnTemplateAgentNames = new Set(
+  const spawnTemplateAgentIds = new Set(
     topology.spawnRules?.flatMap((rule) => rule.spawnedAgents.map((agent) => agent.templateName)) ?? [],
   );
 
   return taskAgents
-    .map((agent) => agent.name)
-    .filter((agentName) => !spawnTemplateAgentNames.has(agentName) || parentReachableAgentNames.has(agentName));
+    .map((agent) => agent.id)
+    .filter((agentId) => !spawnTemplateAgentIds.has(agentId) || parentReachableAgentIds.has(agentId));
 }

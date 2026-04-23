@@ -3,13 +3,13 @@ import type { GraphTaskState } from "./gating-state";
 
 export interface LangGraphInputEvent {
   type: "user_message";
-  targetAgentName: string;
+  targetAgentId: string;
   content: string;
 }
 
 export interface LangGraphBatchRunner {
   id: string;
-  agentName: string;
+  agentId: string;
   promise: Promise<GraphAgentResult>;
 }
 

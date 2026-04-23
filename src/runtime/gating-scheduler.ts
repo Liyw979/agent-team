@@ -7,7 +7,7 @@ import type {
 } from "./gating-state";
 
 export interface GatingAgentState {
-  name: string;
+  id: string;
   status: "idle" | "running" | "completed" | "failed" | "continue";
 }
 
@@ -47,9 +47,9 @@ export class GatingScheduler {
     private readonly runtime: GatingSchedulerRuntimeState,
   ) {}
 
-  invalidateDownstreamTriggerSignatures(agentName: string) {
-    const downstreamTargets = this.getOutgoingEdges(agentName, "transfer")
-      .concat(this.getOutgoingEdges(agentName, "complete"))
+  invalidateDownstreamTriggerSignatures(agentId: string) {
+    const downstreamTargets = this.getOutgoingEdges(agentId, "transfer")
+      .concat(this.getOutgoingEdges(agentId, "complete"))
       .map((edge) => edge.target);
 
     for (const targetName of downstreamTargets) {
@@ -57,13 +57,13 @@ export class GatingScheduler {
     }
   }
 
-  markAgentRunning(agentName: string) {
-    this.runtime.runningAgents.add(agentName);
+  markAgentRunning(agentId: string) {
+    this.runtime.runningAgents.add(agentId);
   }
 
-  markAgentSettled(agentName: string) {
-    this.runtime.runningAgents.delete(agentName);
-    this.runtime.queuedAgents.delete(agentName);
+  markAgentSettled(agentId: string) {
+    this.runtime.runningAgents.delete(agentId);
+    this.runtime.queuedAgents.delete(agentId);
   }
 
   planHandoffDispatch(
@@ -239,15 +239,15 @@ export class GatingScheduler {
     return null;
   }
 
-  hasSatisfiedIncomingHandoff(agentName: string): boolean {
-    const incomingEdges = this.getIncomingEdges(agentName, "transfer")
-      .concat(this.getIncomingEdges(agentName, "complete"));
+  hasSatisfiedIncomingHandoff(agentId: string): boolean {
+    const incomingEdges = this.getIncomingEdges(agentId, "transfer")
+      .concat(this.getIncomingEdges(agentId, "complete"));
     return incomingEdges.every((edge) => this.runtime.completedEdges.has(getTopologyEdgeId(edge)));
   }
 
-  hasSatisfiedOutgoingHandoff(agentName: string): boolean {
-    const outgoingEdges = this.getOutgoingEdges(agentName, "transfer")
-      .concat(this.getOutgoingEdges(agentName, "complete"));
+  hasSatisfiedOutgoingHandoff(agentId: string): boolean {
+    const outgoingEdges = this.getOutgoingEdges(agentId, "transfer")
+      .concat(this.getOutgoingEdges(agentId, "complete"));
     return outgoingEdges.every((edge) => this.runtime.completedEdges.has(getTopologyEdgeId(edge)));
   }
 
@@ -336,7 +336,7 @@ export class GatingScheduler {
     agentStates: GatingAgentState[],
     triggerKind: "transfer" | "complete",
   ): boolean {
-    const agent = agentStates.find((item) => item.name === targetName);
+    const agent = agentStates.find((item) => item.id === targetName);
     if (!agent) {
       return false;
     }

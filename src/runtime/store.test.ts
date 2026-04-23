@@ -49,9 +49,8 @@ test("StoreService 会在内存里保存 topology / tasks / taskAgents / message
     initializedAt: null,
   });
   store.insertTaskAgent(cwd, {
-    id: "task-1:Build",
-    taskId: "task-1",
-    name: "Build",
+          taskId: "task-1",
+    id: "Build",
     opencodeSessionId: "agent-session",
     opencodeAttachBaseUrl: "http://127.0.0.1:4999",
     status: "running",

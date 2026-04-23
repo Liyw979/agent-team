@@ -24,10 +24,10 @@ function createTopology(): TopologyRecord {
 
 function createAgentStates() {
   return [
-    { name: "Build", status: "completed" as const },
-    { name: "UnitTest", status: "idle" as const },
-    { name: "TaskReview", status: "idle" as const },
-    { name: "CodeReview", status: "idle" as const },
+    { id: "Build", status: "completed" as const },
+    { id: "UnitTest", status: "idle" as const },
+    { id: "TaskReview", status: "idle" as const },
+    { id: "CodeReview", status: "idle" as const },
   ];
 }
 
@@ -171,9 +171,9 @@ test("approved 多入边命中任意一条时，就可以继续派发目标节�
     "正方",
     "正方同意进入裁决",
     [
-      { name: "正方", status: "completed" as const },
-      { name: "反方", status: "idle" as const },
-      { name: "裁决总结", status: "idle" as const },
+      { id: "正方", status: "completed" as const },
+      { id: "反方", status: "idle" as const },
+      { id: "裁决总结", status: "idle" as const },
     ],
   );
 

@@ -5,16 +5,16 @@ import { buildEffectiveTopology } from "./runtime-topology-graph";
 
 export function resolveExecutionReviewAgent(input: {
   state: GraphTaskState | null;
-  topology: Pick<TopologyRecord, "edges">;
-  runtimeAgentName: string;
-  executableAgentName: string;
+  topology: Pick<TopologyRecord, "edges"> & Partial<Pick<TopologyRecord, "langgraph">>;
+  runtimeAgentId: string;
+  executableAgentId: string;
 }): boolean {
   const effectiveTopology = input.state ? buildEffectiveTopology(input.state) : input.topology;
 
   return (
-    isReviewAgentInTopology(effectiveTopology, input.runtimeAgentName)
-    || isReviewAgentInTopology(effectiveTopology, input.executableAgentName)
-    || isReviewAgentInTopology(input.topology, input.runtimeAgentName)
-    || isReviewAgentInTopology(input.topology, input.executableAgentName)
+    isReviewAgentInTopology(effectiveTopology, input.runtimeAgentId)
+    || isReviewAgentInTopology(effectiveTopology, input.executableAgentId)
+    || isReviewAgentInTopology(input.topology, input.runtimeAgentId)
+    || isReviewAgentInTopology(input.topology, input.executableAgentId)
   );
 }

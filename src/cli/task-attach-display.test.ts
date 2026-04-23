@@ -9,7 +9,7 @@ import {
 test("renderTaskAttachCommands 在 CLI 里只展示底层 opencode attach 命令", () => {
   const output = renderTaskAttachCommands([
     {
-      agentName: "Build",
+      agentId: "Build",
       opencodeAttachCommand: "opencode attach 'http://127.0.0.1:43127' --session 'session-1'",
     },
   ]);
@@ -24,37 +24,37 @@ test("renderTaskAttachCommands 在 CLI 里只展示底层 opencode attach 命令
 test("collectNewTaskAttachCommandEntries 会找出 spawn 后新出现的 attach 命令", () => {
   const previous = [
     {
-      agentName: "初筛",
+      agentId: "初筛",
       opencodeAttachCommand: "opencode attach 'http://127.0.0.1:4096' --session 'ses-initial'",
     },
     {
-      agentName: "正方-1",
+      agentId: "正方-1",
       opencodeAttachCommand: null,
     },
   ];
 
   const next = [
     {
-      agentName: "初筛",
+      agentId: "初筛",
       opencodeAttachCommand: "opencode attach 'http://127.0.0.1:4096' --session 'ses-initial'",
     },
     {
-      agentName: "正方-1",
+      agentId: "正方-1",
       opencodeAttachCommand: "opencode attach 'http://127.0.0.1:4096' --session 'ses-pro-1'",
     },
     {
-      agentName: "裁决总结-1",
+      agentId: "裁决总结-1",
       opencodeAttachCommand: "opencode attach 'http://127.0.0.1:4096' --session 'ses-summary-1'",
     },
   ];
 
   assert.deepEqual(collectNewTaskAttachCommandEntries(previous, next), [
     {
-      agentName: "正方-1",
+      agentId: "正方-1",
       opencodeAttachCommand: "opencode attach 'http://127.0.0.1:4096' --session 'ses-pro-1'",
     },
     {
-      agentName: "裁决总结-1",
+      agentId: "裁决总结-1",
       opencodeAttachCommand: "opencode attach 'http://127.0.0.1:4096' --session 'ses-summary-1'",
     },
   ]);
@@ -63,11 +63,11 @@ test("collectNewTaskAttachCommandEntries 会找出 spawn 后新出现的 attach 
 test("renderTaskAttachCommands 不会展示没有 session 的占位 agent", () => {
   const output = renderTaskAttachCommands([
     {
-      agentName: "初筛",
+      agentId: "初筛",
       opencodeAttachCommand: "opencode attach 'http://127.0.0.1:4096' --session 'ses-initial'",
     },
     {
-      agentName: "正方",
+      agentId: "正方",
       opencodeAttachCommand: null,
     },
   ]);

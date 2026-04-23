@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { withOptionalString, withOptionalValue } from "@shared/object-utils";
 import { buildSubmitMessageBody } from "./opencode-request-body";
-import { toOpenCodeAgentName } from "./opencode-agent-name";
+import { toOpenCodeAgentId } from "./opencode-agent-id";
 import { appendAppLog } from "./app-log";
 import { extractOpenCodeServeBaseUrl } from "./opencode-serve-launch";
 import { resolveOpenCodeRequestTimeoutMs } from "./opencode-request-timeout";
@@ -252,7 +252,7 @@ export class OpenCodeClient {
     payload: SubmitMessagePayload,
   ): Promise<OpenCodeNormalizedMessage> {
     const normalized = this.normalizeTarget(target);
-    const opencodeAgent = toOpenCodeAgentName(payload.agent);
+    const opencodeAgent = toOpenCodeAgentId(payload.agent);
 
     const body = buildSubmitMessageBody(withOptionalString({
       agent: opencodeAgent,
@@ -1387,6 +1387,9 @@ export class OpenCodeClient {
     if (typeof toolRecord["name"] === "string" && toolRecord["name"].trim()) {
       return toolRecord["name"].trim();
     }
+    if (typeof toolRecord["id"] === "string" && toolRecord["id"].trim()) {
+      return toolRecord["id"].trim();
+    }
 
     const callRecord = this.asRecord(part["call"]);
     if (typeof callRecord["tool"] === "string" && callRecord["tool"].trim()) {
@@ -1394,6 +1397,9 @@ export class OpenCodeClient {
     }
     if (typeof callRecord["name"] === "string" && callRecord["name"].trim()) {
       return callRecord["name"].trim();
+    }
+    if (typeof callRecord["id"] === "string" && callRecord["id"].trim()) {
+      return callRecord["id"].trim();
     }
 
     return null;

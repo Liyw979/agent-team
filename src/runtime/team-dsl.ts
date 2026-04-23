@@ -14,21 +14,21 @@ import {
 import { z } from "zod";
 
 export interface TeamDslAgentRecord {
-  name: string;
+  id: string;
   prompt: string;
   writable: boolean;
 }
 
 interface GraphDslAgentNode {
   type: "agent";
-  name: string;
+  id: string;
   prompt: string;
   writable: boolean;
 }
 
 interface GraphDslSpawnNode {
   type: "spawn";
-  name: string;
+  id: string;
   graph: GraphDslGraph;
 }
 
@@ -50,7 +50,7 @@ export interface GraphDslGraph {
 export type TeamDslDefinition = GraphDslGraph;
 
 export interface CompiledTeamDslAgent {
-  name: string;
+  id: string;
   prompt: string;
   templateName: string | null;
   isWritable: boolean;
@@ -70,7 +70,7 @@ const GraphDslLinkSchema: z.ZodType<GraphDslLink> = z.object({
 
 const GraphDslAgentNodeSchema: z.ZodType<GraphDslAgentNode> = z.object({
   type: z.literal("agent"),
-  name: z.string(),
+  id: z.string(),
   prompt: z.string(),
   writable: z.boolean(),
 }).strict();
@@ -80,7 +80,7 @@ const GraphDslNodeSchema: z.ZodType<GraphDslNode> = z.lazy(() =>
     GraphDslAgentNodeSchema,
     z.object({
       type: z.literal("spawn"),
-      name: z.string(),
+      id: z.string(),
       graph: GraphDslGraphSchema,
     }).strict(),
   ]),
@@ -95,17 +95,17 @@ const GraphDslGraphSchema: z.ZodType<GraphDslGraph> = z.lazy(() =>
 );
 
 function normalizeComparableAgents(agents: Array<{
-  name: string;
+  id: string;
   prompt: string;
   isWritable?: boolean;
 }>) {
   return [...agents]
     .map((agent) => ({
-      name: agent.name,
+      id: agent.id,
       prompt: agent.prompt,
       isWritable: agent.isWritable === true,
     }))
-    .sort((left, right) => left.name.localeCompare(right.name));
+    .sort((left, right) => left.id.localeCompare(right.id));
 }
 
 function normalizeComparableTopology(topology: TopologyRecord): TopologyRecord {
@@ -175,7 +175,7 @@ export function matchesAppliedTeamDslAgents(
   const comparableCurrentAgents = normalizeComparableAgents(currentAgents);
   const comparableCompiledAgents = normalizeComparableAgents(
     compiled.agents.map((agent) => ({
-      name: agent.name,
+      id: agent.id,
       prompt: agent.prompt,
       isWritable: agent.isWritable,
     })),
@@ -200,10 +200,10 @@ function isBuiltinTemplateName(name: string): boolean {
 
 function compileAgentDefinition(agent: TeamDslAgentRecord): CompiledTeamDslAgent {
   if (!agent || typeof agent !== "object" || Array.isArray(agent)) {
-    throw new Error("DSL agent 定义必须使用对象格式，例如 { name: \"Build\" }。");
+    throw new Error("DSL agent 定义必须使用对象格式，例如 { id: \"Build\" }。");
   }
 
-  const name = agent.name.trim();
+  const name = agent.id.trim();
   if (!name) {
     throw new Error("DSL Agent 名称不能为空。");
   }
@@ -219,7 +219,7 @@ function compileAgentDefinition(agent: TeamDslAgentRecord): CompiledTeamDslAgent
   }
 
   return {
-    name,
+    id: name,
     prompt,
     templateName: templateName || null,
     isWritable: agent.writable,
@@ -238,7 +238,7 @@ function assertTopologyAgentsDeclared(
   topology: TopologyRecord,
 ): void {
   const known = new Set([
-    ...compiledAgents.map((agent) => agent.name),
+    ...compiledAgents.map((agent) => agent.id),
     ...(topology.nodeRecords?.filter((node) => node.kind === "spawn").map((node) => node.id) ?? []),
   ]);
   const allNodes = new Set<string>([
@@ -383,10 +383,10 @@ function collectGraphDslNodeDefinitions(
 ): void {
   const localNames = new Set<string>();
   for (const node of graph.nodes) {
-    if (localNames.has(node.name)) {
-      throw new Error(`同一层 graph 中存在重复节点名：${node.name}`);
+    if (localNames.has(node.id)) {
+      throw new Error(`同一层 graph 中存在重复节点名：${node.id}`);
     }
-    localNames.add(node.name);
+    localNames.add(node.id);
   }
   if (!localNames.has(graph.entry)) {
     throw new Error(`graph.entry 指向了不存在的节点：${graph.entry}`);
@@ -402,31 +402,31 @@ function collectGraphDslNodeDefinitions(
   }
 
   for (const node of graph.nodes) {
-    if (context.nodeRecords.has(node.name)) {
-      throw new Error(`DSL 节点名必须全局唯一：${node.name}`);
+    if (context.nodeRecords.has(node.id)) {
+      throw new Error(`DSL 节点名必须全局唯一：${node.id}`);
     }
 
     if (node.type === "agent") {
-      context.agentDefinitions.set(node.name, {
-        name: node.name,
+      context.agentDefinitions.set(node.id, {
+        id: node.id,
         prompt: node.prompt,
         writable: node.writable,
       });
-      context.nodeRecords.set(node.name, {
-        id: node.name,
+      context.nodeRecords.set(node.id, {
+        id: node.id,
         kind: "agent",
-        templateName: node.name,
+        templateName: node.id,
       });
       continue;
     }
 
-    const spawnRuleId = `spawn-rule:${node.name}`;
-    const reportTarget = resolveSpawnReportTo(graph, node.name);
-    const sourceTemplateName = resolveSpawnSourceTemplateName(graph, node.name);
-    context.nodeRecords.set(node.name, {
-      id: node.name,
+    const spawnRuleId = `spawn-rule:${node.id}`;
+    const reportTarget = resolveSpawnReportTo(graph, node.id);
+    const sourceTemplateName = resolveSpawnSourceTemplateName(graph, node.id);
+    context.nodeRecords.set(node.id, {
+      id: node.id,
       kind: "spawn",
-      templateName: node.name,
+      templateName: node.id,
       spawnEnabled: true,
       spawnRuleId,
     });
@@ -436,13 +436,12 @@ function collectGraphDslNodeDefinitions(
     });
     context.spawnRules.set(spawnRuleId, {
       id: spawnRuleId,
-      name: node.name,
-      spawnNodeName: node.name,
+      spawnNodeName: node.id,
       ...(sourceTemplateName ? { sourceTemplateName } : {}),
       entryRole: node.graph.entry,
       spawnedAgents: node.graph.nodes.map((childNode) => ({
-        role: childNode.name,
-        templateName: childNode.name,
+        role: childNode.id,
+        templateName: childNode.id,
       })),
       edges: node.graph.links.map((link) => ({
         sourceRole: link.from,
@@ -482,7 +481,7 @@ function compileGraphDsl(input: GraphDslGraph): CompiledTeamDsl {
   const compiledAgents = normalizeCompiledWritableAgents(
     [...agentDefinitions.values()].map((agent) => compileAgentDefinition(agent)),
   );
-  const compiledAgentsByName = new Map(compiledAgents.map((agent) => [agent.name, agent]));
+  const compiledAgentsByName = new Map(compiledAgents.map((agent) => [agent.id, agent]));
   const compiledNodeRecords = [...nodeRecords.values()].map((node) => {
     if (node.kind !== "agent") {
       return { ...node };
@@ -500,7 +499,7 @@ function compileGraphDsl(input: GraphDslGraph): CompiledTeamDsl {
   const endLinks = collectGraphDslEndLinks(input);
 
   const topology: TopologyRecord = {
-    nodes: input.nodes.map((node) => node.name),
+    nodes: input.nodes.map((node) => node.id),
     edges: nonEndLinks.map((link) => ({
       source: link.from,
       target: link.to,
@@ -508,7 +507,7 @@ function compileGraphDsl(input: GraphDslGraph): CompiledTeamDsl {
       messageMode: link.message_type,
     })),
     langgraph: createTopologyLangGraphRecord({
-      nodes: input.nodes.map((node) => node.name),
+      nodes: input.nodes.map((node) => node.id),
       edges: nonEndLinks.map((link) => ({
         source: link.from,
         target: link.to,
@@ -545,4 +544,12 @@ export function matchesAppliedTeamDsl(
     return false;
   }
   return matchesAppliedTeamDslTopology(currentTopology, compiled);
+}
+
+export function toAgentRecord(agent: CompiledTeamDslAgent): AgentRecord {
+  return {
+    id: agent.id,
+    prompt: agent.prompt,
+    isWritable: agent.isWritable,
+  };
 }

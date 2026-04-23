@@ -1,25 +1,25 @@
 export interface AgentPromptDialogState {
-  agentName: string;
+  agentId: string;
   promptSourceLabel: string;
   content: string;
 }
 
 export function buildAgentPromptDialogState(input: {
-  agentName: string;
+  agentId: string;
   prompt: string;
 }): AgentPromptDialogState {
   const normalizedPrompt = input.prompt.trim();
 
   if (normalizedPrompt) {
     return {
-      agentName: input.agentName,
+      agentId: input.agentId,
       promptSourceLabel: "System Prompt",
       content: normalizedPrompt,
     };
   }
 
   return {
-    agentName: input.agentName,
+    agentId: input.agentId,
     promptSourceLabel: "OpenCode 加载",
     content: "Prompt为空或者由opencode加载",
   };

@@ -171,7 +171,7 @@ function validateTaskUiCommand(
 
 function buildTaskAttachEntries(task: TaskSnapshot): TaskAttachCommandEntry[] {
   return task.agents.map((agent) => ({
-    agentName: agent.name,
+    agentId: agent.id,
     opencodeAttachCommand:
       agent.opencodeAttachBaseUrl && agent.opencodeSessionId
         ? buildCliOpencodeAttachCommand(

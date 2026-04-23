@@ -204,12 +204,12 @@ export function TopologyGraph({
   const [selectedHistoryItem, setSelectedHistoryItem] = useState<SelectedHistoryItemState | null>(null);
   const topology = task?.topology ?? workspace?.topology;
   const taskAgents = useMemo(
-    () => new Map(task?.agents.map((agent) => [agent.name, agent]) ?? []),
+    () => new Map(task?.agents.map((agent) => [agent.id, agent]) ?? []),
     [task?.agents],
   );
   const visibleTopologyCandidateNodeIds = useMemo(
     () => Array.from(new Set([
-      ...(task?.agents.map((agent) => agent.name) ?? []),
+      ...(task?.agents.map((agent) => agent.id) ?? []),
       ...Object.keys(runtimeSnapshots),
     ])),
     [runtimeSnapshots, task?.agents],
@@ -287,13 +287,13 @@ export function TopologyGraph({
     }
 
     return new Map(
-      visibleNodeIds.map((agentName) => [
-        agentName,
+      visibleNodeIds.map((agentId) => [
+        agentId,
         buildAgentHistoryItems(withOptionalValue({
-          agentId: agentName,
+          agentId: agentId,
           messages: task.messages,
           topology,
-        }, "runtimeSnapshot", runtimeSnapshots[agentName])).slice(-HISTORY_VISIBLE_ITEMS),
+        }, "runtimeSnapshot", runtimeSnapshots[agentId])).slice(-HISTORY_VISIBLE_ITEMS),
       ]),
     );
   }, [runtimeSnapshots, task, topology, visibleNodeIds]);

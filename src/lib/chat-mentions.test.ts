@@ -35,7 +35,7 @@ test("getMentionOptionItems returns the labels needed by the mention menu", () =
 
   assert.deepEqual(items, [
     {
-      agentName: "CodeReview",
+      agentId: "CodeReview",
       displayName: "CodeReview",
       mentionLabel: "@CodeReview",
     },

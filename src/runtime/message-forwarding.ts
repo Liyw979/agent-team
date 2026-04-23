@@ -25,18 +25,18 @@ export function buildUserHistoryContent(content: string, targetAgentId: string):
   return `@${targetAgentId} ${trimmed}`;
 }
 
-export function buildSourceAgentMessageSectionLabel(sourceAgentName: string): string {
-  const displayName = sourceAgentName.trim() || "来源 Agent";
+export function buildSourceAgentMessageSectionLabel(sourceAgentId: string): string {
+  const displayName = sourceAgentId.trim() || "来源 Agent";
   return `[From ${displayName} Agent]`;
 }
 
-export function stripTargetMention(content: string, targetAgentName: string): string {
-  const trimmed = stripLeadingTargetMention(content, targetAgentName);
+export function stripTargetMention(content: string, targetAgentId: string): string {
+  const trimmed = stripLeadingTargetMention(content, targetAgentId);
   if (!trimmed) {
     return "";
   }
 
-  const mentionToken = `@${targetAgentName}`;
+  const mentionToken = `@${targetAgentId}`;
   const trailingPattern = new RegExp(`(?:^|\\s)${escapeRegExp(mentionToken)}\\s*$`, "u");
   const strippedTrailing = trimmed.replace(trailingPattern, "").trimEnd();
   return strippedTrailing || trimmed;
@@ -62,11 +62,11 @@ export function getInitialUserMessageContent(messages: MinimalMessage[]): string
       continue;
     }
     const rawContent = message.content.trim();
-    const targetAgentName = getMessageTargetAgentIds(message)[0]?.trim();
-    if (!targetAgentName) {
+    const targetAgentId = getMessageTargetAgentIds(message)[0]?.trim();
+    if (!targetAgentId) {
       return rawContent;
     }
-    return stripTargetMention(rawContent, targetAgentName);
+    return stripTargetMention(rawContent, targetAgentId);
   }
   return "";
 }
@@ -129,9 +129,9 @@ function isForwardableMessage(message: MinimalMessage): boolean {
 
 function formatForwardableMessage(message: MinimalMessage): string {
   const sender = message.sender.trim() || "Unknown";
-  const targetAgentName = getMessageTargetAgentIds(message)[0]?.trim();
-  const content = sender === "user" && targetAgentName
-    ? stripTargetMention(message.content, targetAgentName)
+  const targetAgentId = getMessageTargetAgentIds(message)[0]?.trim();
+  const content = sender === "user" && targetAgentId
+    ? stripTargetMention(message.content, targetAgentId)
     : message.content.trim();
 
   if (!content) {
@@ -141,13 +141,13 @@ function formatForwardableMessage(message: MinimalMessage): string {
   return `[${sender}] ${content}`;
 }
 
-function stripLeadingTargetMention(content: string, targetAgentName: string): string {
+function stripLeadingTargetMention(content: string, targetAgentId: string): string {
   const trimmed = content.trim();
   if (!trimmed) {
     return "";
   }
 
-  const mentionToken = `@${targetAgentName}`;
+  const mentionToken = `@${targetAgentId}`;
   if (!trimmed.startsWith(mentionToken)) {
     return trimmed;
   }

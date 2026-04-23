@@ -28,7 +28,7 @@ import {
   PANEL_SURFACE_CLASS,
 } from "./lib/panel-header";
 import {
-  buildAvailableAgentNamesForFrontend,
+  buildAvailableAgentIdsForFrontend,
   orderAgentsForFrontend,
   resolveDefaultSelectedAgentIdForFrontend,
 } from "./lib/frontend-agent-order";
@@ -202,7 +202,7 @@ function App() {
   }, [task?.task.id]);
 
   const availableAgents = useMemo(
-    () => buildAvailableAgentNamesForFrontend(
+    () => buildAvailableAgentIdsForFrontend(
       workspace?.agents ?? [],
       task?.topology ?? workspace?.topology ?? null,
     ),
@@ -213,15 +213,15 @@ function App() {
       return [];
     }
 
-    const taskAgents = new Map(task.agents.map((agent) => [agent.name, agent]));
+    const taskAgents = new Map(task.agents.map((agent) => [agent.id, agent]));
     return orderAgentsForFrontend(workspace.agents, task.topology ?? workspace.topology).map((agent) => {
-      const taskAgent = taskAgents.get(agent.name);
+      const taskAgent = taskAgents.get(agent.id);
       const promptPreview = buildAgentPromptPreviewText({
-        agentName: agent.name,
+        agentId: agent.id,
         prompt: agent.prompt,
       });
       return {
-        name: agent.name,
+        id: agent.id,
         prompt: agent.prompt,
         promptPreview,
         status: taskAgent?.status ?? "idle",
@@ -277,36 +277,36 @@ function App() {
     };
   }, [agentCards.length, agentTerminalActionError]);
 
-  async function handleOpenAgentTerminal(agentName: string) {
-    if (!workspace || !task || openingAgentTerminalId === agentName) {
+  async function handleOpenAgentTerminal(agentId: string) {
+    if (!workspace || !task || openingAgentTerminalId === agentId) {
       return;
     }
 
-    setOpeningAgentTerminalId(agentName);
+    setOpeningAgentTerminalId(agentId);
     setAgentTerminalActionError(null);
     try {
       await openAgentTerminal({
         cwd: workspace.cwd,
         taskId: task.task.id,
-        agentName,
+        agentId,
       });
     } catch (error) {
       setAgentTerminalActionError(
-        error instanceof Error ? error.message : `打开 ${agentName} 对应终端失败，请稍后重试。`,
+        error instanceof Error ? error.message : `打开 ${agentId} 对应终端失败，请稍后重试。`,
       );
     } finally {
-      setOpeningAgentTerminalId((current) => (current === agentName ? null : current));
+      setOpeningAgentTerminalId((current) => (current === agentId ? null : current));
     }
   }
 
   function handleOpenAgentPromptDialog(agent: {
-    name: string;
+    id: string;
     prompt: string;
   }) {
-    setSelectedAgentId(agent.name);
+    setSelectedAgentId(agent.id);
     setSelectedAgentPromptDialog(
       buildAgentPromptDialogState({
-        agentName: agent.name,
+        agentId: agent.id,
         prompt: agent.prompt,
       }),
     );
@@ -341,8 +341,8 @@ function App() {
                 setPanelMode((current) => (current === "topology-only" ? "default" : "topology-only"));
               }}
               openingAgentTerminalId={openingAgentTerminalId}
-              onOpenAgentTerminal={(agentName) => {
-                void handleOpenAgentTerminal(agentName);
+              onOpenAgentTerminal={(agentId) => {
+                void handleOpenAgentTerminal(agentId);
               }}
               runtimeSnapshots={runtimeSnapshots}
             />
@@ -359,12 +359,12 @@ function App() {
               onToggleMaximize={() => {
                 setPanelMode((current) => (current === "chat-only" ? "default" : "chat-only"));
               }}
-              onSubmit={async ({ content, mentionAgent }) => {
+              onSubmit={async ({ content, mentionAgentId }) => {
                 await submitTask(withOptionalString({
                   cwd: workspace.cwd,
                   taskId: task.task.id,
                   content,
-                }, "mentionAgent", mentionAgent));
+                }, "mentionAgentId", mentionAgentId));
               }}
             />
           </div>
@@ -383,8 +383,8 @@ function App() {
                 setPanelMode((current) => (current === "topology-only" ? "default" : "topology-only"));
               }}
               openingAgentTerminalId={openingAgentTerminalId}
-              onOpenAgentTerminal={(agentName) => {
-                void handleOpenAgentTerminal(agentName);
+              onOpenAgentTerminal={(agentId) => {
+                void handleOpenAgentTerminal(agentId);
               }}
               runtimeSnapshots={runtimeSnapshots}
             />
@@ -407,12 +407,12 @@ function App() {
                   onToggleMaximize={() => {
                     setPanelMode((current) => (current === "chat-only" ? "default" : "chat-only"));
                   }}
-                  onSubmit={async ({ content, mentionAgent }) => {
+                  onSubmit={async ({ content, mentionAgentId }) => {
                     await submitTask(withOptionalString({
                       cwd: workspace.cwd,
                       taskId: task.task.id,
                       content,
-                    }, "mentionAgent", mentionAgent));
+                    }, "mentionAgentId", mentionAgentId));
                   }}
                 />
               </div>
@@ -436,11 +436,11 @@ function App() {
 
                   <div className="flex flex-col" style={{ gap: `${agentCardGapPx}px` }}>
                     {agentCards.map((agent) => {
-                      const color = getAgentColorToken(agent.name);
+                      const color = getAgentColorToken(agent.id);
                       const promptPreviewLine = agent.promptPreview.replace(/\s+/gu, "");
                       return (
                         <div
-                          key={agent.name}
+                          key={agent.id}
                           role="button"
                           tabIndex={0}
                           onClick={() => {
@@ -468,7 +468,7 @@ function App() {
                                   color: color.badgeText,
                                 }}
                               >
-                                {agent.name}
+                                {agent.id}
                               </span>
                             </div>
                           </div>
@@ -511,18 +511,18 @@ function App() {
           <div
             role="dialog"
             aria-modal="true"
-            aria-label={`${selectedAgentPromptDialog.agentName} Prompt 详情`}
+            aria-label={`${selectedAgentPromptDialog.agentId} Prompt 详情`}
             className="flex max-h-[min(82vh,720px)] w-full max-w-[720px] flex-col overflow-hidden rounded-[14px] border bg-background shadow-[0_24px_80px_rgba(23,32,25,0.22)]"
             style={{
-              borderColor: getAgentColorToken(selectedAgentPromptDialog.agentName).border,
+              borderColor: getAgentColorToken(selectedAgentPromptDialog.agentId).border,
             }}
             onClick={(event) => event.stopPropagation()}
           >
             <div
               className="flex items-center justify-between gap-3 border-b px-5 py-3"
               style={{
-                background: getAgentColorToken(selectedAgentPromptDialog.agentName).soft,
-                borderColor: getAgentColorToken(selectedAgentPromptDialog.agentName).border,
+                background: getAgentColorToken(selectedAgentPromptDialog.agentId).soft,
+                borderColor: getAgentColorToken(selectedAgentPromptDialog.agentId).border,
               }}
             >
               <div className="min-w-0">
@@ -530,11 +530,11 @@ function App() {
                   <span
                     className="inline-flex max-w-full shrink-0 rounded-[8px] px-2 py-px text-center text-[14px] font-semibold leading-[1.2] tracking-[0.02em]"
                     style={{
-                      background: getAgentColorToken(selectedAgentPromptDialog.agentName).solid,
-                      color: getAgentColorToken(selectedAgentPromptDialog.agentName).badgeText,
+                      background: getAgentColorToken(selectedAgentPromptDialog.agentId).solid,
+                      color: getAgentColorToken(selectedAgentPromptDialog.agentId).badgeText,
                     }}
                   >
-                    {selectedAgentPromptDialog.agentName}
+                    {selectedAgentPromptDialog.agentId}
                   </span>
                 </div>
                 <p className="mt-1 text-xs text-foreground/60">

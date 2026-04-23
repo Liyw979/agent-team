@@ -458,7 +458,7 @@ test("buildRuntimeSnapshot 会保留同一条消息内 thinking 和 tool 的原�
         },
         {
           type: "tool-call",
-          tool: { name: "glob" },
+          tool: { id: "glob" },
           input: {
             pattern: "**/*",
             path: "/Users/liyw/code/empty",

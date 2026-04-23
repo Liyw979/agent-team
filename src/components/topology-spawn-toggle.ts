@@ -55,7 +55,6 @@ function buildSpawnRuleFromReachable(topology: TopologyRecord, sourceNodeId: str
 
   return {
     id: `spawn-rule:${targetNodeId}`,
-    name: targetNodeId,
     spawnNodeName: targetNodeId,
     sourceTemplateName: sourceNodeId,
     entryRole: "entry",

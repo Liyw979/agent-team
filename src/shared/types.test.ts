@@ -19,14 +19,13 @@ const TOPOLOGY_RECORD_BLOCK = TYPES_SOURCE.match(/export interface TopologyRecor
 
 test("默认拓扑只生成首节点到次节点的 transfer 边", () => {
   const agents: TopologyAgentSeed[] = [
-    { name: "BA" },
-    { name: "Build" },
-    { name: "TaskReview" },
+    { id: "BA" },
+    { id: "Build" },
+    { id: "TaskReview" },
   ];
 
   const topology = createDefaultTopology(agents);
 
-  assert.equal(Object.prototype.hasOwnProperty.call(topology, "startAgentId"), false);
   assert.deepEqual(topology.nodes, ["Build", "BA", "TaskReview"]);
   assert.equal(topology.edges.length, 1);
   assert.deepEqual(topology.edges[0], {
@@ -50,13 +49,12 @@ test("默认拓扑只生成首节点到次节点的 transfer 边", () => {
 
 test("默认拓扑在缺少 Build 时不会偷偷把首个 Agent 当起点", () => {
   const agents: TopologyAgentSeed[] = [
-    { name: "BA" },
-    { name: "TaskReview" },
+    { id: "BA" },
+    { id: "TaskReview" },
   ];
 
   const topology = createDefaultTopology(agents);
 
-  assert.equal(Object.prototype.hasOwnProperty.call(topology, "startAgentId"), false);
   assert.deepEqual(topology.nodes, ["BA", "TaskReview"]);
   assert.deepEqual(topology.edges, []);
   assert.deepEqual(topology.langgraph, {
@@ -159,8 +157,7 @@ test("getSpawnRules 保留显式声明的 messageMode，不再依赖默认补值
     ],
     spawnRules: [
       {
-        id: "spawn-rule:疑点辩论",
-        name: "疑点辩论",
+        id: "疑点辩论",
         spawnNodeName: "疑点辩论",
         sourceTemplateName: "初筛",
         entryRole: "pro",

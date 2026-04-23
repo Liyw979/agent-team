@@ -15,10 +15,10 @@ export type TaskStatus =
 
 export type PermissionMode = "allow" | "ask" | "deny";
 
-export const BUILD_AGENT_NAME = "Build";
+export const BUILD_AGENT_ID = "Build";
 
-export function usesOpenCodeBuiltinPrompt(agentName: string): boolean {
-  return agentName.trim().toLowerCase() === BUILD_AGENT_NAME.toLowerCase();
+export function usesOpenCodeBuiltinPrompt(agentId: string): boolean {
+  return agentId.trim().toLowerCase() === BUILD_AGENT_ID.toLowerCase();
 }
 
 export type AgentRole =
@@ -52,13 +52,13 @@ export interface TaskRecord {
 }
 
 export interface AgentRecord {
-  name: string;
+  id: string;
   prompt: string;
   isWritable?: boolean;
 }
 
 export interface TopologyAgentSeed {
-  name: string;
+  id: string;
 }
 
 export type TopologyNodeKind = "agent" | "spawn";
@@ -72,7 +72,6 @@ export interface SpawnedAgentTemplate {
 
 export interface SpawnRule {
   id: string;
-  name: string;
   spawnNodeName?: string;
   sourceTemplateName?: string;
   entryRole: SpawnedAgentRole;
@@ -102,7 +101,6 @@ export interface TopologyNodeRecord {
 export interface TaskAgentRecord {
   id: string;
   taskId: string;
-  name: string;
   opencodeSessionId: string | null;
   opencodeAttachBaseUrl: string | null;
   status: AgentStatus;
@@ -383,7 +381,7 @@ export interface SubmitTaskPayload {
   taskId?: string;
   newTaskId?: string;
   content: string;
-  mentionAgent?: string;
+  mentionAgentId?: string;
 }
 
 export interface CopyToClipboardPayload {
@@ -409,7 +407,7 @@ export interface GetTaskRuntimePayload {
 export interface OpenAgentTerminalPayload {
   cwd: string;
   taskId: string;
-  agentName: string;
+  agentId: string;
 }
 
 export interface DeleteTaskPayload {
@@ -448,11 +446,11 @@ export function getTopologyEdgeId(edge: Pick<TopologyEdge, "source" | "target" |
 
 export function isReviewAgentInTopology(
   topology: Pick<TopologyRecord, "edges"> & Partial<Pick<TopologyRecord, "langgraph">>,
-  agentName: string,
+  agentId: string,
 ): boolean {
   const hasReviewEdge = topology.edges.some(
     (edge) =>
-      edge.source === agentName &&
+      edge.source === agentId &&
       (() => {
         const triggerOn = normalizeTopologyEdgeTrigger(edge.triggerOn);
         return triggerOn === "complete" || triggerOn === "continue";
@@ -464,7 +462,7 @@ export function isReviewAgentInTopology(
 
   return topology.langgraph?.end?.incoming?.some(
     (edge) =>
-      edge.source === agentName &&
+      edge.source === agentId &&
       edge.triggerOn &&
       (() => {
         const triggerOn = normalizeTopologyEdgeTrigger(edge.triggerOn);
@@ -473,13 +471,13 @@ export function isReviewAgentInTopology(
   ) === true;
 }
 
-export function resolveBuildAgentName(
-  agents: ReadonlyArray<Pick<TopologyAgentSeed, "name"> | string>,
+export function resolveBuildAgentId(
+  agents: ReadonlyArray<Pick<TopologyAgentSeed, "id"> | string>,
 ): string | null {
   for (const agent of agents) {
-    const agentName = typeof agent === "string" ? agent : agent.name;
-    if (usesOpenCodeBuiltinPrompt(agentName)) {
-      return agentName;
+    const agentId = typeof agent === "string" ? agent : agent.id;
+    if (usesOpenCodeBuiltinPrompt(agentId)) {
+      return agentId;
     }
   }
   return null;
@@ -496,17 +494,17 @@ export function resolvePrimaryTopologyStartTarget(
 }
 
 export function resolveTopologyStartAgent(
-  agents: Array<Pick<TopologyAgentSeed, "name">>,
+  agents: Array<Pick<TopologyAgentSeed, "id">>,
 ): string | null {
-  return resolveBuildAgentName(agents);
+  return resolveBuildAgentId(agents);
 }
 
 export function resolveTopologyAgentOrder(
-  agents: Array<Pick<TopologyAgentSeed, "name">>,
+  agents: Array<Pick<TopologyAgentSeed, "id">>,
   preferredOrderIds?: string[] | null,
 ): string[] {
-  const availableAgentNames = agents.map((agent) => agent.name);
-  const availableAgentSet = new Set(availableAgentNames);
+  const availableAgentIds = agents.map((agent) => agent.id);
+  const availableAgentSet = new Set(availableAgentIds);
   const order: string[] = [];
   const push = (name: string | null | undefined) => {
     if (!name || !availableAgentSet.has(name) || order.includes(name)) {
@@ -519,13 +517,13 @@ export function resolveTopologyAgentOrder(
     push(name);
   }
 
-  if (order.length === availableAgentNames.length) {
+  if (order.length === availableAgentIds.length) {
     return order;
   }
 
   push(resolveTopologyStartAgent(agents));
-  for (const agentName of availableAgentNames) {
-    push(agentName);
+  for (const agentId of availableAgentIds) {
+    push(agentId);
   }
 
   return order;
@@ -538,11 +536,11 @@ export function createDefaultTopology(
   const names = new Set(nodes);
   const edges: TopologyEdge[] = [];
 
-  const startAgentName = resolveTopologyStartAgent(agents);
+  const startAgentId = resolveTopologyStartAgent(agents);
   const startAgent =
-    agents.find((agent) => agent.name === startAgentName) ?? null;
+    agents.find((agent) => agent.id === startAgentId) ?? null;
   const nextAgent =
-    agents.find((agent) => agent.name !== startAgent?.name) ?? null;
+    agents.find((agent) => agent.id !== startAgent?.id) ?? null;
 
   const push = (
     source: string | null | undefined,
@@ -568,7 +566,7 @@ export function createDefaultTopology(
     });
   };
 
-  push(startAgent?.name, nextAgent?.name, "transfer");
+  push(startAgent?.id, nextAgent?.id, "transfer");
 
   return {
     nodes,
@@ -576,7 +574,7 @@ export function createDefaultTopology(
     langgraph: createTopologyLangGraphRecord({
       nodes,
       edges,
-      startTargets: [startAgent?.name ?? nodes[0] ?? ""],
+      startTargets: [startAgent?.id ?? nodes[0] ?? ""],
       endSources: null,
     }),
     nodeRecords: nodes.map((name) => ({
@@ -616,7 +614,7 @@ export function getSpawnRules(topology: TopologyRecord): SpawnRule[] {
   );
   return (topology.spawnRules ?? []).map((rule) => ({
     ...rule,
-    spawnNodeName: rule.spawnNodeName ?? spawnNodeNameByRuleId.get(rule.id) ?? rule.name,
+    spawnNodeName: rule.spawnNodeName ?? spawnNodeNameByRuleId.get(rule.id) ?? rule.id,
     spawnedAgents: rule.spawnedAgents.map((agent) => ({ ...agent })),
     edges: rule.edges.map((edge) => ({
       ...edge,

@@ -143,7 +143,6 @@ export function upsertDebateSpawnDraft(
 
   const spawnRule: SpawnRule = {
     id: spawnRuleId,
-    name: teamName,
     spawnNodeName: spawnNodeId,
     sourceTemplateName: input.sourceTemplateName,
     entryRole: "pro",

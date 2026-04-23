@@ -170,7 +170,7 @@ const AGENT_COLOR_TOKENS: AgentColorToken[] = [
   },
 ];
 
-function hashAgentName(name: string) {
+function hashAgentId(name: string) {
   let hash = 0;
   for (const char of name) {
     hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
@@ -178,9 +178,9 @@ function hashAgentName(name: string) {
   return hash;
 }
 
-export function getAgentColorToken(agentName: string): AgentColorToken {
-  const normalized = agentName.trim().toLowerCase();
-  const index = hashAgentName(normalized) % AGENT_COLOR_TOKENS.length;
+export function getAgentColorToken(agentId: string): AgentColorToken {
+  const normalized = agentId.trim().toLowerCase();
+  const index = hashAgentId(normalized) % AGENT_COLOR_TOKENS.length;
   const token = AGENT_COLOR_TOKENS[index] ?? AGENT_COLOR_TOKENS[0];
   if (!token) {
     throw new Error("Agent color tokens must contain at least one entry.");

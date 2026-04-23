@@ -30,7 +30,7 @@ interface ChatWindowProps {
   taskUrl: string | null;
   isMaximized?: boolean;
   onToggleMaximize?: () => void;
-  onSubmit: (payload: { content: string; mentionAgent?: string }) => Promise<void>;
+  onSubmit: (payload: { content: string; mentionAgentId?: string }) => Promise<void>;
 }
 
 const MENTION_MENU_WIDTH = 224;
@@ -101,7 +101,7 @@ function getCaretCoordinates(textarea: HTMLTextAreaElement, position: number) {
   return result;
 }
 
-function getDefaultAgentName(
+function getDefaultAgentId(
   workspace: WorkspaceSnapshot,
   task: TaskSnapshot,
 ): string | undefined {
@@ -218,7 +218,7 @@ export function ChatWindow({
   onToggleMaximize,
   onSubmit,
 }: ChatWindowProps) {
-  const defaultAgentName = getDefaultAgentName(workspace, task);
+  const defaultAgentId = getDefaultAgentId(workspace, task);
   const hasAvailableAgents = availableAgents.length > 0;
   const [draft, setDraft] = useState("");
   const [mentionContext, setMentionContext] = useState<MentionContext | null>(null);
@@ -260,11 +260,11 @@ export function ChatWindow({
   }, [availableAgents, mentionQuery]);
 
   useEffect(() => {
-    const defaultIndex = defaultAgentName
-      ? mentionOptions.findIndex((option) => option.agentName === defaultAgentName)
+    const defaultIndex = defaultAgentId
+      ? mentionOptions.findIndex((option) => option.agentId === defaultAgentId)
       : -1;
     setActiveIndex(defaultIndex >= 0 ? defaultIndex : 0);
-  }, [defaultAgentName, mentionOptions]);
+  }, [defaultAgentId, mentionOptions]);
 
   useEffect(() => {
     return () => {
@@ -347,13 +347,13 @@ export function ChatWindow({
     }
   }
 
-  function applyMention(agentName: string) {
+  function applyMention(agentId: string) {
     if (!mentionContext) {
       return;
     }
 
-    const nextDraft = `${draft.slice(0, mentionContext.start)}@${agentName} ${draft.slice(mentionContext.end)}`;
-    const nextCaret = mentionContext.start + agentName.length + 2;
+    const nextDraft = `${draft.slice(0, mentionContext.start)}@${agentId} ${draft.slice(mentionContext.end)}`;
+    const nextCaret = mentionContext.start + agentId.length + 2;
     setDraft(nextDraft);
     setMentionContext(null);
 
@@ -372,7 +372,7 @@ export function ChatWindow({
     const resolution = resolveTaskSubmissionTarget({
       content,
       availableAgents,
-      ...withOptionalString({}, "defaultTargetAgent", defaultAgentName),
+      ...withOptionalString({}, "defaultTargetAgentId", defaultAgentId),
     });
     if (!resolution.ok) {
       setSubmitError(resolution.message);
@@ -380,7 +380,7 @@ export function ChatWindow({
     }
 
     const submitted = draft;
-    const mentionAgent = resolution.targetAgent;
+    const mentionAgentId = resolution.targetAgentId;
 
     setSubmitting(true);
     setSubmitError(null);
@@ -390,7 +390,7 @@ export function ChatWindow({
     try {
       await onSubmit(withOptionalString({
         content,
-      }, "mentionAgent", mentionAgent));
+      }, "mentionAgentId", mentionAgentId));
     } catch (error) {
       setDraft(submitted);
       setSubmitError(error instanceof Error ? error.message : "发送失败，请稍后重试。");
@@ -549,14 +549,14 @@ export function ChatWindow({
                   if (event.key === "Tab") {
                     event.preventDefault();
                     applyMention(
-                      mentionOptions[activeIndex]?.agentName ?? mentionOptions[0]?.agentName ?? "",
+                      mentionOptions[activeIndex]?.agentId ?? mentionOptions[0]?.agentId ?? "",
                     );
                     return;
                   }
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
                     applyMention(
-                      mentionOptions[activeIndex]?.agentName ?? mentionOptions[0]?.agentName ?? "",
+                      mentionOptions[activeIndex]?.agentId ?? mentionOptions[0]?.agentId ?? "",
                     );
                     return;
                   }
@@ -578,8 +578,8 @@ export function ChatWindow({
               }}
               placeholder={
                 hasAvailableAgents
-                  ? defaultAgentName
-                    ? `默认从 ${defaultAgentName} 开始，使用@指定Agent`
+                  ? defaultAgentId
+                    ? `默认从 ${defaultAgentId} 开始，使用@指定Agent`
                     : "当前拓扑缺少 start node，请使用@指定Agent发送消息"
                   : "当前还没有可用 Agent，请先配置团队成员"
               }
@@ -604,11 +604,11 @@ export function ChatWindow({
                 <div className="space-y-1">
                   {mentionOptions.map((option, index) => (
                     <button
-                      key={option.agentName}
+                      key={option.agentId}
                       type="button"
                       onMouseDown={(event) => {
                         event.preventDefault();
-                        applyMention(option.agentName);
+                        applyMention(option.agentId);
                       }}
                       className={cn(
                         "no-drag w-full rounded-[6px] px-3 py-2 text-left text-sm transition",

@@ -34,7 +34,7 @@ import { compileTopology } from "./topology-compiler";
 import { spawnRuntimeAgentsForItems } from "./gating-spawn";
 import { extractSpawnItemsFromContent } from "./spawn-items";
 export interface GraphDispatchJob {
-  agentName: string;
+  agentId: string;
   sourceAgentId: string | null;
   kind: "raw" | "transfer" | "complete" | "continue_request";
 }
@@ -65,7 +65,7 @@ export type GraphRoutingDecision =
     };
 
 export interface GraphAgentResult {
-  agentName: string;
+  agentId: string;
   status: "completed" | "failed";
   reviewAgent: boolean;
   reviewDecision: "complete" | "continue" | "invalid";
@@ -92,28 +92,28 @@ export function createGraphTaskState(input: {
 export function createUserDispatchDecision(
   state: GraphTaskState,
   input: {
-    targetAgentName: string;
+    targetAgentId: string;
     content: string;
   },
 ): GraphRoutingDecision {
-  if (isSpawnNode(state, input.targetAgentName)) {
+  if (isSpawnNode(state, input.targetAgentId)) {
     try {
-      const entryTargets = materializeSpawnNodeTargets(state, input.targetAgentName, input.content, true);
+      const entryTargets = materializeSpawnNodeTargets(state, input.targetAgentId, input.content, true);
       if (entryTargets.length === 0) {
         return {
           type: "failed",
-          errorMessage: `${input.targetAgentName} 未生成可执行的入口实例`,
+          errorMessage: `${input.targetAgentId} 未生成可执行的入口实例`,
         };
       }
       return {
         type: "execute_batch",
         batch: {
-          sourceAgentId: input.targetAgentName,
+          sourceAgentId: input.targetAgentId,
           sourceContent: input.content,
           triggerTargets: [...entryTargets],
-          jobs: entryTargets.map((agentName) => ({
-            agentName,
-            sourceAgentId: input.targetAgentName,
+          jobs: entryTargets.map((agentId) => ({
+            agentId,
+            sourceAgentId: input.targetAgentId,
             kind: "transfer" as const,
           })),
         },
@@ -121,7 +121,7 @@ export function createUserDispatchDecision(
     } catch (error) {
       return {
         type: "failed",
-        errorMessage: error instanceof Error ? error.message : `${input.targetAgentName} 展开失败`,
+        errorMessage: error instanceof Error ? error.message : `${input.targetAgentId} 展开失败`,
       };
     }
   }
@@ -131,10 +131,10 @@ export function createUserDispatchDecision(
     batch: {
       sourceAgentId: null,
       sourceContent: input.content,
-      triggerTargets: [input.targetAgentName],
+      triggerTargets: [input.targetAgentId],
       jobs: [
         {
-          agentName: input.targetAgentName,
+          agentId: input.targetAgentId,
           sourceAgentId: null,
           kind: "raw",
         },
@@ -152,8 +152,8 @@ export function applyAgentResultToGraphState(
 } {
   const nextState = cloneGraphTaskState(state);
   ensureRuntimeAgentStatuses(nextState);
-  nextState.agentStatusesByName[result.agentName] = result.agentStatus;
-  nextState.agentContextByName[result.agentName] = result.agentContextContent;
+  nextState.agentStatusesByName[result.agentId] = result.agentStatus;
+  nextState.agentContextByName[result.agentId] = result.agentContextContent;
   nextState.taskStatus = "running";
   nextState.waitingReason = null;
 
@@ -163,7 +163,7 @@ export function applyAgentResultToGraphState(
       state: nextState,
       decision: {
         type: "failed",
-        errorMessage: result.errorMessage ?? `${result.agentName} 执行失败`,
+        errorMessage: result.errorMessage ?? `${result.agentId} 执行失败`,
       },
     };
   }
@@ -171,7 +171,7 @@ export function applyAgentResultToGraphState(
   const runtime = graphStateToSchedulerRuntime(nextState);
   const scheduler = new GatingScheduler(buildEffectiveTopology(nextState), runtime);
   const batchContinuation = scheduler.recordHandoffBatchResponse(
-    result.agentName,
+    result.agentId,
     result.reviewDecision === "continue" ? "fail" : "complete",
   );
   applySchedulerRuntimeToGraphState(nextState, runtime);
@@ -194,7 +194,7 @@ export function applyAgentResultToGraphState(
     };
   }
 
-  clearActionRequiredLoopCountsForReviewer(nextState, result.agentName);
+  clearActionRequiredLoopCountsForReviewer(nextState, result.agentId);
 
   if (result.reviewDecision === "invalid") {
     nextState.taskStatus = "failed";
@@ -202,16 +202,16 @@ export function applyAgentResultToGraphState(
       state: nextState,
       decision: {
         type: "failed",
-        errorMessage: `${result.agentName} 返回了无效审查结果`,
+        errorMessage: `${result.agentId} 返回了无效审查结果`,
       },
     };
   }
 
   const primaryDecision = result.reviewAgent
-    ? triggerApprovedDownstream(nextState, result.agentName, result.agentContextContent)
-    : triggerHandoffDownstream(nextState, result.agentName, result.agentContextContent);
+    ? triggerApprovedDownstream(nextState, result.agentId, result.agentContextContent)
+    : triggerHandoffDownstream(nextState, result.agentId, result.agentContextContent);
   if (primaryDecision.type === "execute_batch") {
-    markCompletedSpawnActivationAsDispatchedIfReady(nextState, result.agentName);
+    markCompletedSpawnActivationAsDispatchedIfReady(nextState, result.agentId);
     return { state: nextState, decision: primaryDecision };
   }
 
@@ -220,11 +220,11 @@ export function applyAgentResultToGraphState(
     batchContinuation,
   );
   if (continuationDecision.type === "execute_batch") {
-    markCompletedSpawnActivationAsDispatchedIfReady(nextState, result.agentName);
+    markCompletedSpawnActivationAsDispatchedIfReady(nextState, result.agentId);
     return { state: nextState, decision: continuationDecision };
   }
 
-  const spawnCompletionDecision = continueCompletedSpawnActivations(nextState, result.agentName);
+  const spawnCompletionDecision = continueCompletedSpawnActivations(nextState, result.agentId);
   if (spawnCompletionDecision.type === "execute_batch") {
     return { state: nextState, decision: spawnCompletionDecision };
   }
@@ -261,7 +261,7 @@ function handleActionRequired(
   continuation: GatingBatchContinuation | null,
 ): GraphRoutingDecision {
   const topologyIndex = compileTopology(buildEffectiveTopology(state));
-  const actionRequiredTargets = topologyIndex.actionRequiredTargetsBySource[result.agentName] ?? [];
+  const actionRequiredTargets = topologyIndex.actionRequiredTargetsBySource[result.agentId] ?? [];
   const continuationAction = resolveActionRequiredRequestContinuationAction({
     continuation,
     fallbackActionWhenNoBatch:
@@ -270,7 +270,7 @@ function handleActionRequired(
         : "ignore",
   });
   if (actionRequiredTargets.length > 0 && continuationAction !== "ignore") {
-    state.pendingActionRequiredRequestsByAgent[result.agentName] = {
+    state.pendingActionRequiredRequestsByAgent[result.agentId] = {
       opinion: result.opinion,
       agentContextContent: result.agentContextContent,
     } satisfies GraphActionRequiredRequest;
@@ -287,18 +287,18 @@ function handleActionRequired(
   if (continuationAction === "trigger_repair_review" && continuation?.repairReviewerAgentId) {
     const repairTargetAgentId = resolveRepairTargetAgentId(
       state,
-      result.agentName,
+      result.agentId,
       continuation.sourceAgentId,
     );
     const loopLimitDecision = enforceActionRequiredLoopLimit(
       state,
-      result.agentName,
+      result.agentId,
       repairTargetAgentId,
     );
     if (loopLimitDecision) {
       return continueAfterReviewerLoopLimit(
         state,
-        result.agentName,
+        result.agentId,
         repairTargetAgentId,
         loopLimitDecision,
       );
@@ -326,32 +326,32 @@ function handleActionRequired(
   }
 
   if (continuationAction === "trigger_fallback_review") {
-    const actionRequiredTargets = topologyIndex.actionRequiredTargetsBySource[result.agentName] ?? [];
+    const actionRequiredTargets = topologyIndex.actionRequiredTargetsBySource[result.agentId] ?? [];
     const fallbackTarget = actionRequiredTargets[0];
     if (!fallbackTarget) {
       state.taskStatus = "failed";
       return {
         type: "failed",
-        errorMessage: `${result.agentName} 给出了 continue，但没有可继续推进的 continue 链路`,
+        errorMessage: `${result.agentId} 给出了 continue，但没有可继续推进的 continue 链路`,
       };
     }
     const loopLimitDecision = enforceActionRequiredLoopLimit(
       state,
-      result.agentName,
+      result.agentId,
       fallbackTarget,
     );
     if (loopLimitDecision) {
       return continueAfterReviewerLoopLimit(
         state,
-        result.agentName,
+        result.agentId,
         fallbackTarget,
         loopLimitDecision,
       );
     }
-    const storedReview = state.pendingActionRequiredRequestsByAgent[result.agentName];
+    const storedReview = state.pendingActionRequiredRequestsByAgent[result.agentId];
     return triggerActionRequiredRequestDownstream(
       state,
-      result.agentName,
+      result.agentId,
       storedReview?.opinion?.trim()
       || storedReview?.agentContextContent
       || result.opinion?.trim()
@@ -364,7 +364,7 @@ function handleActionRequired(
     if (actionRequiredTargets.length > 0) {
       return triggerActionRequiredRequestDownstream(
         state,
-        result.agentName,
+        result.agentId,
         result.opinion?.trim()
         || result.agentContextContent
         || "请直接回应当前内容，给出你的判断、补充、澄清、反驳或修改方案。",
@@ -373,7 +373,7 @@ function handleActionRequired(
     state.taskStatus = "failed";
     return {
       type: "failed",
-      errorMessage: `${result.agentName} 给出了 continue，但没有可继续推进的 continue 链路`,
+      errorMessage: `${result.agentId} 给出了 continue，但没有可继续推进的 continue 链路`,
     };
   }
 
@@ -491,7 +491,7 @@ function triggerActionRequiredRequestDownstream(
       sourceContent,
       triggerTargets: [...dispatchTargets],
       jobs: dispatchTargets.map((targetName) => ({
-        agentName: targetName,
+        agentId: targetName,
         sourceAgentId,
         kind: "continue_request",
       })),
@@ -603,7 +603,7 @@ function planToDecision(
       ...(displayContent ? { displayContent } : {}),
       triggerTargets: [...plan.triggerTargets],
       jobs: dispatchTargets.map((targetName) => ({
-        agentName: targetName,
+        agentId: targetName,
         sourceAgentId: plan.sourceAgentId,
         kind,
       })),
@@ -796,10 +796,10 @@ function tryExtractSpawnItemsFromContent(
 
 function continueCompletedSpawnActivations(
   state: GraphTaskState,
-  completedAgentName: string,
+  completedAgentId: string,
 ): GraphRoutingDecision {
   const bundle = state.spawnBundles.find((candidate) =>
-    candidate.nodes.some((node) => node.id === completedAgentName),
+    candidate.nodes.some((node) => node.id === completedAgentId),
   );
   if (!bundle) {
     return {
@@ -862,10 +862,10 @@ function buildSpawnActivationContent(
 
 function markCompletedSpawnActivationAsDispatchedIfReady(
   state: GraphTaskState,
-  completedAgentName: string,
+  completedAgentId: string,
 ): void {
   const bundle = state.spawnBundles.find((candidate) =>
-    candidate.nodes.some((node) => node.id === completedAgentName),
+    candidate.nodes.some((node) => node.id === completedAgentId),
   );
   if (!bundle) {
     return;
@@ -906,9 +906,9 @@ function findBundleTerminalNodeIds(bundle: GraphTaskState["spawnBundles"][number
 }
 
 function buildGatingAgentStates(state: GraphTaskState): GatingAgentState[] {
-  return buildEffectiveTopology(state).nodes.map((name) => ({
-    name,
-    status: state.agentStatusesByName[name] ?? "idle",
+  return buildEffectiveTopology(state).nodes.map((id) => ({
+    id,
+    status: state.agentStatusesByName[id] ?? "idle",
   }));
 }
 
@@ -1092,14 +1092,14 @@ function shouldFinishGraphTask(state: GraphTaskState): boolean {
 
 function shouldFinishGraphTaskFromEndEdge(
   state: GraphTaskState,
-  result: Pick<GraphAgentResult, "agentName" | "signalDone" | "reviewAgent" | "reviewDecision">,
+  result: Pick<GraphAgentResult, "agentId" | "signalDone" | "reviewAgent" | "reviewDecision">,
 ): boolean {
   const endNode = state.topology.langgraph?.end;
   const endSources = endNode?.sources ?? [];
-  if (!endSources.includes(result.agentName)) {
+  if (!endSources.includes(result.agentId)) {
     return false;
   }
-  const incoming = endNode?.incoming?.filter((edge) => edge.source === result.agentName) ?? [];
+  const incoming = endNode?.incoming?.filter((edge) => edge.source === result.agentId) ?? [];
   if (incoming.length > 0) {
     if (!incoming.some((edge) => endTriggerMatchesResult(edge.triggerOn, result))) {
       return false;

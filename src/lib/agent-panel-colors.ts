@@ -41,22 +41,22 @@ const FALLBACK_AGENT_PANEL_COLOR_TOKENS: AgentPanelColorToken[] = [
   },
 ];
 
-function normalizeAgentName(agentName: string) {
-  return agentName.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+function normalizeAgentId(agentId: string) {
+  return agentId.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function hashAgentName(agentName: string) {
-  return [...normalizeAgentName(agentName)].reduce((acc, char) => acc + char.charCodeAt(0), 0);
+function hashAgentId(agentId: string) {
+  return [...normalizeAgentId(agentId)].reduce((acc, char) => acc + char.charCodeAt(0), 0);
 }
 
-export function getAgentPanelColorToken(agentName: string): AgentPanelColorToken {
-  const normalized = normalizeAgentName(agentName);
+export function getAgentPanelColorToken(agentId: string): AgentPanelColorToken {
+  const normalized = normalizeAgentId(agentId);
   const matched = AGENT_PANEL_COLOR_TOKENS[normalized];
   if (matched) {
     return matched;
   }
 
   return FALLBACK_AGENT_PANEL_COLOR_TOKENS[
-    hashAgentName(agentName) % FALLBACK_AGENT_PANEL_COLOR_TOKENS.length
+    hashAgentId(agentId) % FALLBACK_AGENT_PANEL_COLOR_TOKENS.length
   ]!;
 }

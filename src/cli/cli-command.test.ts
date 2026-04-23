@@ -138,13 +138,13 @@ test("Commander help 只包含 task headless/task ui 命令", () => {
   assert.match(CLI_SOURCE, /task headless --file <topology-json> --message <message>/);
   assert.match(CLI_SOURCE, /task ui --file <topology-json> --message <message> \[--cwd <path>\]/);
   assert.doesNotMatch(CLI_SOURCE, /task ui <taskId> \[--cwd <path>\]/);
-  assert.doesNotMatch(CLI_SOURCE, /task attach <taskId> <agentName>/);
+  assert.doesNotMatch(CLI_SOURCE, /task attach <taskId> <agentId>/);
   assert.doesNotMatch(CLI_SOURCE, /task run --file <topology-json> --message <message>/);
   assert.doesNotMatch(CLI_SOURCE, /task show <taskId>/);
   assert.doesNotMatch(CLI_SOURCE, /task chat --file <topology-json> --message <message>/);
   assert.doesNotMatch(CLI_SOURCE, /task chat --task <taskId>/);
   assert.doesNotMatch(CLI_SOURCE, /--ui/);
-  assert.doesNotMatch(CLI_SOURCE, /task attach-agent <taskId> <agentName>/);
+  assert.doesNotMatch(CLI_SOURCE, /task attach-agent <taskId> <agentId>/);
   assert.doesNotMatch(CLI_SOURCE, /dsl run --file <dsl-file>/);
-  assert.doesNotMatch(CLI_SOURCE, /agent attach <agentName>/);
+  assert.doesNotMatch(CLI_SOURCE, /agent attach <agentId>/);
 });

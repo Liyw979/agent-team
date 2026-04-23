@@ -39,14 +39,14 @@ test("团队成员卡片里的 prompt 只显示单行缩略，悬停时展示完
   assert.match(APP_SOURCE, /className="mt-1 min-w-0 text-\[13px\] leading-5"/);
   assert.doesNotMatch(APP_SOURCE, /className="min-w-0 truncate text-\[0\.9rem\] leading-5 text-foreground\/78"/);
   assert.doesNotMatch(APP_SOURCE, /className="min-w-0 overflow-hidden break-all text-\[0\.9rem\] leading-\[18px\] text-foreground\/78"/);
-  assert.doesNotMatch(APP_SOURCE, /className="min-w-0 overflow-hidden break-all text-\[0\.9rem\] leading-\[18px\]"/);
-  assert.doesNotMatch(APP_SOURCE, /className="mt-1 min-w-0 text-\[0\.9rem\] leading-5"/);
+  assert.doesNotMatch(APP_SOURCE, /className="min-w-0 overflow-hidden break-all text-\[0\.9rem] leading-\[18px]"/);
+  assert.doesNotMatch(APP_SOURCE, /className="mt-1 min-w-0 text-\[0\.9rem] leading-5"/);
 });
 
 test("点击团队成员卡片会打开 Prompt 详情弹窗", () => {
   assert.match(APP_SOURCE, /buildAgentPromptDialogState/);
   assert.match(APP_SOURCE, /setSelectedAgentPromptDialog/);
-  assert.match(APP_SOURCE, /aria-label=\{`\$\{selectedAgentPromptDialog\.agentName\} Prompt 详情`\}/);
+  assert.match(APP_SOURCE, /aria-label=\{`\$\{selectedAgentPromptDialog\.agentId} Prompt 详情`}/);
   assert.match(APP_SOURCE, /aria-label="关闭 Prompt 详情"/);
   assert.match(APP_SOURCE, /<MarkdownMessage/);
   assert.match(APP_SOURCE, /handleOpenAgentPromptDialog\(agent\)/);

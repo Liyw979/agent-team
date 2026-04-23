@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 
 import type { TaskAgentRecord, TopologyRecord } from "@shared/types";
 
-import { resolveTaskAgentNamesToPrewarm } from "./task-session-prewarm";
+import { resolveTaskAgentIdsToPrewarm } from "./task-session-prewarm";
 
-test("resolveTaskAgentNamesToPrewarm 不会为仅作为 spawn 模板存在的静态 agent 预建 session", () => {
+test("resolveTaskAgentIdsToPrewarm 不会为仅作为 spawn 模板存在的静态 agent 预建 session", () => {
   const topology: TopologyRecord = {
     nodes: ["初筛", "正方", "反方", "裁决总结", "疑点辩论"],
     edges: [
@@ -21,8 +21,7 @@ test("resolveTaskAgentNamesToPrewarm 不会为仅作为 spawn 模板存在的静
     },
     spawnRules: [
       {
-        id: "spawn-rule:疑点辩论",
-        name: "疑点辩论",
+        id: "疑点辩论",
         spawnNodeName: "疑点辩论",
         sourceTemplateName: "初筛",
         entryRole: "正方",
@@ -45,36 +44,32 @@ test("resolveTaskAgentNamesToPrewarm 不会为仅作为 spawn 模板存在的静
   };
   const taskAgents: TaskAgentRecord[] = [
     {
-      id: "1",
       taskId: "task-1",
-      name: "初筛",
+      id: "初筛",
       opencodeSessionId: null,
       opencodeAttachBaseUrl: null,
       status: "idle",
       runCount: 0,
     },
     {
-      id: "2",
       taskId: "task-1",
-      name: "正方",
+      id: "正方",
       opencodeSessionId: null,
       opencodeAttachBaseUrl: null,
       status: "idle",
       runCount: 0,
     },
     {
-      id: "3",
       taskId: "task-1",
-      name: "反方",
+      id: "反方",
       opencodeSessionId: null,
       opencodeAttachBaseUrl: null,
       status: "idle",
       runCount: 0,
     },
     {
-      id: "4",
       taskId: "task-1",
-      name: "裁决总结",
+      id: "裁决总结",
       opencodeSessionId: null,
       opencodeAttachBaseUrl: null,
       status: "idle",
@@ -82,5 +77,5 @@ test("resolveTaskAgentNamesToPrewarm 不会为仅作为 spawn 模板存在的静
     },
   ];
 
-  assert.deepEqual(resolveTaskAgentNamesToPrewarm(topology, taskAgents), ["初筛"]);
+  assert.deepEqual(resolveTaskAgentIdsToPrewarm(topology, taskAgents), ["初筛"]);
 });

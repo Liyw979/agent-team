@@ -11,14 +11,14 @@ import {
 test("resolveProjectAgents 在存在 DSL agents 时直接返回 DSL prompt", () => {
   const resolved = resolveProjectAgents({
     dslAgents: [
-      { name: "BA", prompt: "DSL BA prompt", isWritable: false },
-      { name: "Build", prompt: "", isWritable: true },
+      { id: "BA", prompt: "DSL BA prompt", isWritable: false },
+      { id: "Build", prompt: "", isWritable: true },
     ],
   });
 
   assert.deepEqual(resolved, [
-    { name: "BA", prompt: "DSL BA prompt", isWritable: false },
-    { name: "Build", prompt: "", isWritable: true },
+    { id: "BA", prompt: "DSL BA prompt", isWritable: false },
+    { id: "Build", prompt: "", isWritable: true },
   ]);
 });
 
@@ -45,16 +45,16 @@ test("extractDslAgentsFromTopology 不会把未显式配置 writable 的 Build �
   });
 
   assert.deepEqual(resolved, [
-    { name: "Build", prompt: "", isWritable: false },
-    { name: "BA", prompt: "你是 BA。", isWritable: false },
+    { id: "Build", prompt: "", isWritable: false },
+    { id: "BA", prompt: "你是 BA。", isWritable: false },
   ]);
 });
 
 test("单指定一个自定义 Agent 可写时，注入的 readonly 配置里不会包含这个 Agent", () => {
   const injected = buildInjectedConfigFromAgents([
-    { name: "Build", prompt: "", isWritable: true },
-    { name: "BA", prompt: "你是 BA。", isWritable: true },
-    { name: "QA", prompt: "你是 QA。", isWritable: false },
+    { id: "Build", prompt: "", isWritable: true },
+    { id: "BA", prompt: "你是 BA。", isWritable: true },
+    { id: "QA", prompt: "你是 QA。", isWritable: false },
   ]);
 
   assert.notEqual(injected, null);
@@ -75,7 +75,7 @@ test("单指定一个自定义 Agent 可写时，注入的 readonly 配置里不
 
 test("不可写 Agent 只拒绝写入相关 OpenCode 工具权限", () => {
   const injected = buildInjectedConfigFromAgents([
-    { name: "QA", prompt: "你是 QA。", isWritable: false },
+    { id: "QA", prompt: "你是 QA。", isWritable: false },
   ]);
 
   assert.notEqual(injected, null);
@@ -95,7 +95,7 @@ test("不可写 Agent 只拒绝写入相关 OpenCode 工具权限", () => {
 
 test("可写 Agent 不注入 OpenCode agent 配置", () => {
   const injected = buildInjectedConfigFromAgents([
-    { name: "BA", prompt: "你是 BA。", isWritable: true },
+    { id: "BA", prompt: "你是 BA。", isWritable: true },
   ]);
 
   assert.equal(injected, null);

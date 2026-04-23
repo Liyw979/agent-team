@@ -23,17 +23,17 @@ export function getTopologyNodeHeaderActionOrder(input: {
 
 export function getTopologyAgentStatusBadgePresentation(
   topology: Pick<TopologyRecord, "edges">,
-  agentName: string,
+  agentId: string,
   agentState: string,
   options?: {
     finalLoopReviewerName?: string | null;
   },
 ): TopologyAgentStatusBadgePresentation {
-  const reviewAgent = isReviewAgentInTopology(topology, agentName);
+  const reviewAgent = isReviewAgentInTopology(topology, agentId);
   const isFinalLoopFailedReviewer =
     reviewAgent
     && agentState === "failed"
-    && options?.finalLoopReviewerName === agentName;
+    && options?.finalLoopReviewerName === agentId;
 
   switch (agentState) {
     case "completed":
@@ -79,10 +79,10 @@ export function getTopologyAgentStatusBadgePresentation(
 
 export function getTopologyAgentStatusLabel(
   topology: Pick<TopologyRecord, "edges">,
-  agentName: string,
+  agentId: string,
   agentState: string,
 ) {
-  return getTopologyAgentStatusBadgePresentation(topology, agentName, agentState).label;
+  return getTopologyAgentStatusBadgePresentation(topology, agentId, agentState).label;
 }
 
 export function getTopologyLoopLimitFailedReviewerName(

@@ -1,6 +1,6 @@
 import type { AgentRecord, TaskAgentRecord, TopologyRecord } from "@shared/types";
 
-export function orderAgentsForFrontend<T extends { name: string }>(
+export function orderAgentsForFrontend<T extends { id: string }>(
   agents: T[],
   topology: Pick<TopologyRecord, "nodes"> | null | undefined,
 ): T[] {
@@ -9,7 +9,7 @@ export function orderAgentsForFrontend<T extends { name: string }>(
     return [...agents];
   }
 
-  const agentByName = new Map(agents.map((agent) => [agent.name, agent]));
+  const agentByName = new Map(agents.map((agent) => [agent.id, agent]));
   const consumed = new Set<string>();
   const ordered: T[] = [];
 
@@ -23,21 +23,21 @@ export function orderAgentsForFrontend<T extends { name: string }>(
   }
 
   for (const agent of agents) {
-    if (consumed.has(agent.name)) {
+    if (consumed.has(agent.id)) {
       continue;
     }
     ordered.push(agent);
-    consumed.add(agent.name);
+    consumed.add(agent.id);
   }
 
   return ordered;
 }
 
-export function buildAvailableAgentNamesForFrontend(
+export function buildAvailableAgentIdsForFrontend(
   agents: AgentRecord[],
   topology: Pick<TopologyRecord, "nodes"> | null | undefined,
 ): string[] {
-  return orderAgentsForFrontend(agents, topology).map((agent) => agent.name);
+  return orderAgentsForFrontend(agents, topology).map((agent) => agent.id);
 }
 
 export function resolveDefaultSelectedAgentIdForFrontend(input: {
@@ -46,10 +46,10 @@ export function resolveDefaultSelectedAgentIdForFrontend(input: {
   taskAgents: TaskAgentRecord[];
   topology: Pick<TopologyRecord, "nodes"> | null | undefined;
 }): string | null {
-  const preserved = input.taskAgents.find((agent) => agent.name === input.selectedAgentId)?.name;
+  const preserved = input.taskAgents.find((agent) => agent.id === input.selectedAgentId)?.id;
   if (preserved) {
     return preserved;
   }
 
-  return orderAgentsForFrontend(input.workspaceAgents, input.topology)[0]?.name ?? null;
+  return orderAgentsForFrontend(input.workspaceAgents, input.topology)[0]?.id ?? null;
 }

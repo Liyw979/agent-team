@@ -21,7 +21,7 @@ function createVulnTopology(): TopologyRecord {
     spawnRules: [
       {
         id: "finding-debate",
-        name: "漏洞疑点辩论",
+        spawnNodeName: "疑点辩论工厂",
         sourceTemplateName: "初筛",
         entryRole: "pro",
         spawnedAgents: [

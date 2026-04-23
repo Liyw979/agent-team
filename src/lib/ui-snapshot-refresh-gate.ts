@@ -62,11 +62,11 @@ function isSemanticallyOlderUiSnapshot(
     return true;
   }
 
-  const baselineAgents = new Map(baselineTask.agents.map((agent) => [agent.name, agent]));
-  const candidateAgents = new Map(candidateTask.agents.map((agent) => [agent.name, agent]));
+  const baselineAgents = new Map(baselineTask.agents.map((agent) => [agent.id, agent]));
+  const candidateAgents = new Map(candidateTask.agents.map((agent) => [agent.id, agent]));
 
-  for (const [agentName, baselineAgent] of baselineAgents) {
-    const candidateAgent = candidateAgents.get(agentName);
+  for (const [agentId, baselineAgent] of baselineAgents) {
+    const candidateAgent = candidateAgents.get(agentId);
     if (!candidateAgent) {
       return true;
     }

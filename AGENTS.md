@@ -88,9 +88,9 @@
 - 当某个 Agent 存在“直接下游通过 `transfer` 触发、且该下游会用 `continue` 直接回流给自己、同时该下游没有 `complete` 下游”的审查回路时，系统会先只放行这类直接审查回路；只有这些回路全部通过后，才会继续放行该 Agent 其余直接 `transfer` 下游，避免 Build 与单个审查 Agent 多轮对话时反复提前触发无关下游。gating-scheduler[planHandoffDispatch, recordHandoffBatchResponse]、gating-router[handleActionRequired, continueAfterHandoffBatchResponse]
 - 同一轮里若某个 Agent 需要同时触发多个直接 `transfer` 下游 reviewer，这批 reviewer 会并发启动；只有当前整批 reviewer 都返回后，系统才会决定是否回流给上游修复，或继续补跑这一轮尚未确认通过的 reviewer，避免把并发批次错误串成“一次只放行一个”。gating-scheduler[planHandoffDispatch, recordHandoffBatchResponse]、orchestrator[createLangGraphBatchRunners]
 - 团队成员列表支持直接调整 Agent 顺序；该顺序会持久化到拓扑配置，并直接决定拓扑图从左到右的节点排列。types[resolveTopologyAgentOrder]、orchestrator[saveTopology, normalizeTopology]、frontend-agent-order[orderAgentsForFrontend]
-- 拓扑图中的 Agent 节点顺序是稳定的：未显式保存顺序时，默认优先取 `Build` 作为最左侧起点；当前拓扑未声明 `Build` 时，节点顺序按已声明的 Agent 顺序解析。types[resolveBuildAgentName, resolveTopologyAgentOrder, createDefaultTopology]
+- 拓扑图中的 Agent 节点顺序是稳定的：未显式保存顺序时，默认优先取 `Build` 作为最左侧起点；当前拓扑未声明 `Build` 时，节点顺序按已声明的 Agent 顺序解析。types[resolveBuildAgentId, resolveTopologyAgentOrder, createDefaultTopology]
 - 拓扑配置中的 `nodes` 统一保存为有序的 Agent 名称字符串数组；该数组既是节点集合真源，也是节点顺序真源，其他派生标识在运行时推导。store[readWorkspaceState, writeWorkspaceState]、orchestrator[normalizeTopology]
-- 默认入口语义统一按当前 `nodes` 与 `Build` 是否存在在运行时推导，配置文件使用这套推导结果表达入口。types[resolvePrimaryTopologyStartTarget, resolveBuildAgentName, createDefaultTopology]
+- 默认入口语义统一按当前 `nodes` 与 `Build` 是否存在在运行时推导，配置文件使用这套推导结果表达入口。types[resolvePrimaryTopologyStartTarget, resolveBuildAgentId, createDefaultTopology]
 - 编译后的最终拓扑会额外持久化 `topology.langgraph` 边界信息：`start.id` 固定为 LangGraph 的 `__start__`，并显式保存它连接到哪些业务节点；`end` 是否写入 `__end__`，取决于团队拓扑根图里是否显式声明了指向 `__end__` 的终止边；系统不会额外伪造一个业务 EndNode。types[createTopologyLangGraphRecord]、team-dsl[createTopology, compileTeamDsl]、store[readWorkspaceState, writeWorkspaceState]
 - 拓扑配置中的 `edges` 持久化 `source / target / triggerOn`；当 `triggerOn = continue` 时，还会额外持久化该边自己的 `maxRevisionRounds`，用于限制这条审视回流链路可连续反驳的最大轮数，默认值为 `4`。边的唯一标识在运行时按三元组即时推导。types[normalizeActionRequiredMaxRounds, getActionRequiredEdgeLoopLimit, getTopologyEdgeId]、store[readWorkspaceState]、orchestrator[normalizeTopology]
 - 拓扑节点顶部直接展示 Agent 当前状态徽标，包括 `未启动 / 运行中 / 已完成 / 执行失败`；审查类 Agent 则显示 `审查通过 / 审查不通过`。topology-graph-helpers[getTopologyAgentStatusBadgePresentation]、TopologyGraph[TopologyGraph]
@@ -102,12 +102,12 @@
 
 ### 3.4 聊天与消息传递
 
-- Task 群聊支持 `@AgentName` 提交任务；输入 `@` 会弹出候选 Agent 列表，支持方向键、鼠标和 `Tab` 自动补全。chat-mentions[getMentionContext, getMentionOptionItems]、ChatWindow[ChatWindow]
+- Task 群聊支持 `@AgentId` 提交任务；输入 `@` 会弹出候选 Agent 列表，支持方向键、鼠标和 `Tab` 自动补全。chat-mentions[getMentionContext, getMentionOptionItems]、ChatWindow[ChatWindow]
 - 用户在 Task 群聊里直接 `@Agent` 时，群聊展示保留原始 `@Agent` 文本；底层发送给目标 Agent 前，会去掉仅用于寻址的开头或结尾 `@Agent`，并按 raw 模式封装为单行 `[User] <正文>`，不会拼成下游结构化段落。task-submission[resolveTaskSubmissionTarget]、message-forwarding[stripTargetMention]、orchestrator[submitTask, createLangGraphBatchRunners]
 - 群聊中同时展示 `user -> agent`、`agent -> agent` 协作消息，以及 Agent 最终回复。chat-messages[mergeTaskChatMessages]、ChatWindow[ChatWindow]、orchestrator[createLangGraphBatchRunners]
 - 当一个 Agent 同时触发多个下游 Agent 时，聊天区会合并展示为一条批量 `Agent -> Agent` 派发消息，而不是拆成多条重复消息。orchestrator[createLangGraphBatchRunners, shouldSuppressDuplicateDispatchMessage]、chat-messages[mergeTaskChatMessages]
 - 这类批量 `Agent -> Agent` 派发消息仅用于聊天区展示给人看，不会作为“尚未收到的群聊历史”再次转发给下游 Agent。orchestrator[createLangGraphBatchRunners]、message-forwarding[buildDownstreamForwardedContextFromMessages]
-- Agent 自动触发下游 Agent 时，只有首次自动流转会封装 `[Initial Task]` 与 `[From <AgentName> Agent]` 结构化段落；后续 Agent 间继续流转时只保留 `[From <AgentName> Agent]`，其中 `[Initial Task]` 固定承载当前 Task 的首条用户任务。orchestrator[consumeInitialTaskForwardingAllowanceFromGraphState, buildAgentExecutionPrompt]、message-forwarding[buildDownstreamForwardedContextFromMessages, getInitialUserMessageContent]
+- Agent 自动触发下游 Agent 时，只有首次自动流转会封装 `[Initial Task]` 与 `[From <AgentId> Agent]` 结构化段落；后续 Agent 间继续流转时只保留 `[From <AgentId> Agent]`，其中 `[Initial Task]` 固定承载当前 Task 的首条用户任务。orchestrator[consumeInitialTaskForwardingAllowanceFromGraphState, buildAgentExecutionPrompt]、message-forwarding[buildDownstreamForwardedContextFromMessages, getInitialUserMessageContent]
 - 对非 `Build` 且非审查类的下游，系统会在 `[Project Git Diff Summary]` 段附带当前 Project Git Diff 的精简摘要，帮助下游 Agent 快速感知最新改动；发给 `Build` 或审查类 Agent 时不附带该段，避免把辅助上下文误判为待审正文。orchestrator[buildProjectGitDiffSummary, createLangGraphBatchRunners]、types[usesOpenCodeBuiltinPrompt, isReviewAgentInTopology]
 - Agent 自动派发下游时，不会额外补充整段群聊历史，但会携带本轮需要的首条用户任务与当前上游结果；若上游结果已完整包含用户消息，会自动去重。message-forwarding[buildDownstreamForwardedContextFromMessages, contentContainsNormalized]、orchestrator[createLangGraphBatchRunners]
 - 群聊落库与 Agent 间转发只使用 OpenCode 返回消息里的公开 `text` part；`reasoning`、步骤和工具调用不会混入群聊正文或下游 prompt。opencode-client[extractVisibleMessageText, getSessionRuntime]、orchestrator[stripStructuredSignals]

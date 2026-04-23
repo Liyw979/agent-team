@@ -58,7 +58,6 @@ test("createTopology 支持把 spawn 作为下游模式写进 DSL", () => {
   assert.deepEqual(topology.spawnRules, [
     {
       id: "spawn-rule:TaskReview",
-      name: "TaskReview",
       spawnNodeName: "TaskReview",
       sourceTemplateName: "Build",
       entryRole: "entry",

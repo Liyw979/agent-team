@@ -222,7 +222,6 @@ function buildSpawnRules(input: CreateTopologyDslInput): SpawnRule[] {
 
     return {
       id: `spawn-rule:${target}`,
-      name: config?.name ?? target,
       spawnNodeName: target,
       sourceTemplateName,
       entryRole: config?.entryRole ?? "entry",
@@ -251,7 +250,7 @@ export function createTopology(
         ? {
             spawnRules: input.spawnRules.map((rule) => ({
               ...rule,
-              spawnNodeName: rule.spawnNodeName ?? rule.name,
+              spawnNodeName: rule.spawnNodeName ?? rule.id,
               spawnedAgents: rule.spawnedAgents.map((agent) => ({ ...agent })),
               edges: rule.edges.map((edge) => ({
                 ...edge,

@@ -172,8 +172,8 @@ export function cloneGraphTaskState(state: GraphTaskState): GraphTaskState {
     runningAgents: [...state.runningAgents],
     queuedAgents: [...state.queuedAgents],
     sourceRevisionStateByAgent: Object.fromEntries(
-      Object.entries(state.sourceRevisionStateByAgent).map(([agentName, revisionState]) => [
-        agentName,
+      Object.entries(state.sourceRevisionStateByAgent).map(([agentId, revisionState]) => [
+        agentId,
         {
           currentRevision: revisionState.currentRevision,
           reviewerPassRevision: { ...revisionState.reviewerPassRevision },
@@ -195,8 +195,8 @@ export function cloneGraphTaskState(state: GraphTaskState): GraphTaskState {
       ]),
     ),
     pendingActionRequiredRequestsByAgent: Object.fromEntries(
-      Object.entries(state.pendingActionRequiredRequestsByAgent).map(([agentName, request]) => [
-        agentName,
+      Object.entries(state.pendingActionRequiredRequestsByAgent).map(([agentId, request]) => [
+        agentId,
         {
           opinion: request.opinion,
           agentContextContent: request.agentContextContent,
@@ -222,8 +222,8 @@ export function graphStateToSchedulerRuntime(state: GraphTaskState): GatingSched
     runningAgents: new Set(state.runningAgents),
     queuedAgents: new Set(state.queuedAgents),
     sourceRevisionStateByAgent: new Map(
-      Object.entries(state.sourceRevisionStateByAgent).map(([agentName, revisionState]) => [
-        agentName,
+      Object.entries(state.sourceRevisionStateByAgent).map(([agentId, revisionState]) => [
+        agentId,
         {
           currentRevision: revisionState.currentRevision,
           reviewerPassRevision: new Map(Object.entries(revisionState.reviewerPassRevision)),
@@ -257,8 +257,8 @@ export function applySchedulerRuntimeToGraphState(
   state.runningAgents = [...runtime.runningAgents];
   state.queuedAgents = [...runtime.queuedAgents];
   state.sourceRevisionStateByAgent = Object.fromEntries(
-    [...runtime.sourceRevisionStateByAgent.entries()].map(([agentName, revisionState]) => [
-      agentName,
+    [...runtime.sourceRevisionStateByAgent.entries()].map(([agentId, revisionState]) => [
+      agentId,
       {
         currentRevision: revisionState.currentRevision,
         reviewerPassRevision: Object.fromEntries(revisionState.reviewerPassRevision.entries()),

@@ -7,12 +7,12 @@ test("未显式 @Agent 时默认投递给 start node", () => {
   const resolution = resolveTaskSubmissionTarget({
     content: "请直接实现功能",
     availableAgents: ["BA", "Build", "TaskReview"],
-    defaultTargetAgent: "BA",
+    defaultTargetAgentId: "BA",
   });
 
   assert.deepEqual(resolution, {
     ok: true,
-    targetAgent: "BA",
+    targetAgentId: "BA",
   });
 });
 
@@ -20,13 +20,29 @@ test("显式 @Agent 时仍然从该 Agent 开始，而不是回退到 start node
   const resolution = resolveTaskSubmissionTarget({
     content: "@TaskReview 请直接验收",
     availableAgents: ["BA", "Build", "TaskReview"],
-    defaultTargetAgent: "BA",
+    defaultTargetAgentId: "BA",
   });
 
   assert.deepEqual(resolution, {
     ok: true,
-    targetAgent: "TaskReview",
+    targetAgentId: "TaskReview",
   });
+});
+
+test("显式 mentionAgentId 字段按 Agent ID 寻址且输出 targetAgentId", () => {
+  const resolution = resolveTaskSubmissionTarget({
+    content: "请直接验收",
+    availableAgents: ["BA", "Build", "TaskReview"],
+    defaultTargetAgentId: "BA",
+    mentionAgentId: "TaskReview",
+  });
+
+  assert.deepEqual(resolution, {
+    ok: true,
+    targetAgentId: "TaskReview",
+  });
+  const legacyTargetKey = ["target", "Agent"].join("");
+  assert.equal(Object.prototype.hasOwnProperty.call(resolution, legacyTargetKey), false);
 });
 
 test("缺少 Build 时仍允许显式 @ 非 Build Agent 发送消息", () => {
@@ -37,7 +53,7 @@ test("缺少 Build 时仍允许显式 @ 非 Build Agent 发送消息", () => {
 
   assert.deepEqual(resolution, {
     ok: true,
-    targetAgent: "BA",
+    targetAgentId: "BA",
   });
 });
 
@@ -45,12 +61,12 @@ test("缺少 Build 但存在 start node 时，未显式 @ 任何 Agent 仍然默
   const resolution = resolveTaskSubmissionTarget({
     content: "请先整理需求",
     availableAgents: ["BA"],
-    defaultTargetAgent: "BA",
+    defaultTargetAgentId: "BA",
   });
 
   assert.deepEqual(resolution, {
     ok: true,
-    targetAgent: "BA",
+    targetAgentId: "BA",
   });
 });
 

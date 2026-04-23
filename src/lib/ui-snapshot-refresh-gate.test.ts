@@ -58,27 +58,24 @@ function createUiSnapshotPayload(input: {
       },
       agents: [
         {
-          id: "task-1:BA",
           taskId: "task-1",
-          name: "BA",
+          id: "BA",
           opencodeSessionId: null,
           opencodeAttachBaseUrl: null,
           status: input.baStatus,
           runCount: input.baStatus === "idle" ? 0 : 1,
         },
         {
-          id: "task-1:UnitTest",
           taskId: "task-1",
-          name: "UnitTest",
+          id: "UnitTest",
           opencodeSessionId: null,
           opencodeAttachBaseUrl: null,
           status: input.unitTestStatus,
           runCount: input.unitTestStatus === "idle" ? 0 : 1,
         },
         {
-          id: "task-1:Build",
           taskId: "task-1",
-          name: "Build",
+          id: "Build",
           opencodeSessionId: null,
           opencodeAttachBaseUrl: null,
           status: buildStatus,
@@ -120,7 +117,7 @@ test("较新的 ui snapshot 响应一旦已被接受，较旧响应必须被拒�
   });
   assert.equal(acceptedNewer.accepted, true);
   assert.equal(acceptedNewer.latestAcceptedRequestId, 2);
-  assert.equal(acceptedNewer.payload?.task?.agents.find((agent) => agent.name === "UnitTest")?.status, "running");
+  assert.equal(acceptedNewer.payload?.task?.agents.find((agent) => agent.id === "UnitTest")?.status, "running");
 
   const rejectedOlder = decideUiSnapshotRefreshAcceptance({
     latestAcceptedRequestId: acceptedNewer.latestAcceptedRequestId,
@@ -170,7 +167,7 @@ test("ui snapshot 门禁允许首次响应和更大请求号通过，但拒绝�
   });
   assert.equal(newerAccepted.accepted, true);
   assert.equal(newerAccepted.latestAcceptedRequestId, 3);
-  assert.equal(newerAccepted.payload?.task?.agents.find((agent) => agent.name === "BA")?.status, "completed");
+  assert.equal(newerAccepted.payload?.task?.agents.find((agent) => agent.id === "BA")?.status, "completed");
 });
 
 test("较大的请求号若带回更旧的任务快照，必须被拒绝，避免把 BA 已完成和 Build 已启动回滚成旧画面", () => {

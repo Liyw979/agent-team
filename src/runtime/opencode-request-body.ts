@@ -1,4 +1,4 @@
-import { toOpenCodeAgentName } from "./opencode-agent-name";
+import { toOpenCodeAgentId } from "./opencode-agent-id";
 
 interface SubmitMessageBodyInput {
   agent: string;
@@ -8,7 +8,7 @@ interface SubmitMessageBodyInput {
 
 export function buildSubmitMessageBody(payload: SubmitMessageBodyInput): Record<string, unknown> {
   const body: Record<string, unknown> = {
-    agent: toOpenCodeAgentName(payload.agent),
+    agent: toOpenCodeAgentId(payload.agent),
     parts: [
       {
         type: "text",
