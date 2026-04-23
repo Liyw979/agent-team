@@ -13,6 +13,7 @@ import {
 } from "@shared/types";
 import type { OpenCodeExecutionResult } from "./opencode-client";
 import { Orchestrator, isTerminalTaskStatus } from "./orchestrator";
+import { buildAgentSystemPrompt } from "./agent-system-prompt";
 import { compileTeamDsl, type TeamDslDefinition } from "./team-dsl";
 import { isOpenCodeServeCommand } from "./opencode-process-cleanup";
 import { buildInjectedConfigFromAgents } from "./project-agent-source";
@@ -2319,36 +2320,9 @@ test("审查 Agent 返回 action_required 后会在其余 reviewer 收齐后回�
 });
 
 test("审视类 system prompt 会使用真实来源 Agent 名称", () => {
-  const orchestrator = createTestOrchestrator({
-    userDataPath: createTempDir(),
-    enableEventStream: false,
-  });
+  const systemPrompt = buildAgentSystemPrompt();
 
-  const typed = orchestrator as unknown as Orchestrator & {
-    createSystemPrompt: (
-      agent: { name: string },
-      prompt: {
-        mode: "structured";
-        from: string;
-        userMessage?: string;
-        agentMessage?: string;
-        gitDiffSummary?: string;
-      },
-      reviewAgent: boolean,
-    ) => string;
-  };
-
-  const systemPrompt = typed.createSystemPrompt(
-    { name: "TaskReview" },
-    {
-      mode: "structured",
-      from: "BA",
-      agentMessage: "这里应该替换成真实来源 Agent。",
-    },
-    true,
-  );
-
-  assert.match(systemPrompt, /你需要对 `\[From BA Agent\]` 做出回应。/);
+  assert.doesNotMatch(systemPrompt, /\[From BA Agent\]/);
   assert.doesNotMatch(systemPrompt, /\[@来源 Agent Message\]/);
 });
 

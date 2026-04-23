@@ -9,19 +9,18 @@ import {
 } from "../shared/review-response";
 
 test("Build agent does not inject a system prompt", () => {
-  const prompt = buildAgentSystemPrompt({
-    name: "Build",
-  }, false);
+  const body = buildSubmitMessageBody({
+    agent: "Build",
+    content: "Implement feature",
+  });
 
-  assert.equal(prompt, "");
+  assert.equal("system" in body, false);
 });
 
 test("Review agents keep the response contract in the system prompt", () => {
-  const prompt = buildAgentSystemPrompt({
-    name: "TaskReview",
-  }, true, "[From BA Agent]");
+  const prompt = buildAgentSystemPrompt();
 
-  assert.match(prompt, /`\[From BA Agent\]`/);
+  assert.doesNotMatch(prompt, /\[From BA Agent\]/);
   assert.doesNotMatch(prompt, /\[@/);
   assert.match(
     prompt,
@@ -34,20 +33,25 @@ test("Review agents keep the response contract in the system prompt", () => {
 });
 
 test("Non-review agents do not inject a system prompt", () => {
-  const prompt = buildAgentSystemPrompt({
-    name: "BA",
-  }, false);
+  const body = buildSubmitMessageBody({
+    agent: "Build",
+    content: "Implement feature",
+  });
 
-  assert.equal(prompt, "");
+  assert.equal("system" in body, false);
+});
+
+test("Review agents system prompt only describes response labels", () => {
+  const prompt = buildAgentSystemPrompt();
+
+  assert.match(prompt, /回复必须以<xxx>标签开头/);
+  assert.doesNotMatch(prompt, /上游消息正文/);
 });
 
 test("Build agent request body omits system", () => {
   const body = buildSubmitMessageBody({
     agent: "Build",
     content: "Implement feature",
-    system: buildAgentSystemPrompt({
-      name: "Build",
-    }, false),
   });
 
   assert.equal("system" in body, false);
@@ -58,13 +62,11 @@ test("Review agent request body keeps system", () => {
   const body = buildSubmitMessageBody({
     agent: "TaskReview",
     content: "Review the delivery",
-    system: buildAgentSystemPrompt({
-      name: "TaskReview",
-    }, true, "[From Build Agent]"),
+    system: buildAgentSystemPrompt(),
   });
 
   assert.equal(typeof body["system"], "string");
-  assert.match(String(body["system"]), /\[From Build Agent\]/);
+  assert.doesNotMatch(String(body["system"]), /\[From Build Agent\]/);
   assert.match(
     String(body["system"]),
     new RegExp(REVIEW_CONTINUE_LABEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
@@ -73,4 +75,11 @@ test("Review agent request body keeps system", () => {
     String(body["system"]),
     new RegExp(REVIEW_COMPLETE_LABEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
   );
+});
+
+test("Review agents build a system prompt", () => {
+  const systemPrompt = buildAgentSystemPrompt();
+
+  assert.equal(typeof systemPrompt, "string");
+  assert.doesNotMatch(String(systemPrompt), /\[From Build Agent\]/);
 });

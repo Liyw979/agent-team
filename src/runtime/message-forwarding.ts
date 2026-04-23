@@ -25,6 +25,11 @@ export function buildUserHistoryContent(content: string, targetAgentId: string):
   return `@${targetAgentId} ${trimmed}`;
 }
 
+export function buildSourceAgentMessageSectionLabel(sourceAgentName: string): string {
+  const displayName = sourceAgentName.trim() || "来源 Agent";
+  return `[From ${displayName} Agent]`;
+}
+
 export function stripTargetMention(content: string, targetAgentName: string): string {
   const trimmed = stripLeadingTargetMention(content, targetAgentName);
   if (!trimmed) {

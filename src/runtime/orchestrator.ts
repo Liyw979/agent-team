@@ -54,6 +54,7 @@ import {
 } from "./gating-rules";
 import {
   buildDownstreamForwardedContextFromMessages,
+  buildSourceAgentMessageSectionLabel,
   buildUserHistoryContent as buildUserHistoryContentPure,
   contentContainsNormalized as contentContainsNormalizedPure,
   getInitialUserMessageContent as getInitialUserMessageContentPure,
@@ -915,7 +916,7 @@ export class Orchestrator {
       sections.push(`[Initial Task]\n${prompt.userMessage.trim()}`);
     }
     if (prompt.agentMessage?.trim()) {
-      sections.push(`${this.buildSourceAgentMessageSection(prompt.from)}\n${prompt.agentMessage.trim()}`);
+      sections.push(`${buildSourceAgentMessageSectionLabel(prompt.from)}\n${prompt.agentMessage.trim()}`);
     }
     if (sections.length === 0) {
       sections.push("[Initial Task]\n（无）");
@@ -926,11 +927,6 @@ export class Orchestrator {
     return sections
       .join("\n\n")
       .trim();
-  }
-
-  private buildSourceAgentMessageSection(sourceAgentName: string): string {
-    const displayName = this.getAgentDisplayName(sourceAgentName.trim() || "来源 Agent");
-    return `[From ${displayName} Agent]`;
   }
 
   private resolveAgentContextContent(
@@ -1152,22 +1148,6 @@ export class Orchestrator {
       cwd: projectPath,
       command: attachCommand,
     });
-  }
-
-  protected createSystemPrompt(
-    agent: AgentRecord,
-    prompt: AgentExecutionPrompt,
-    reviewAgent: boolean,
-  ): string {
-    if (!reviewAgent) {
-      return "";
-    }
-
-    const sourceSectionLabel = prompt.mode === "structured"
-      ? this.buildSourceAgentMessageSection(prompt.from)
-      : undefined;
-
-    return buildAgentSystemPrompt(agent, reviewAgent, sourceSectionLabel);
   }
 
   private createTaskTitle(content: string): string {
@@ -1651,7 +1631,7 @@ export class Orchestrator {
         sessionId: agentSessionId,
         content: dispatchedContent,
         agent: executableAgentName,
-        system: this.createSystemPrompt(latestAgent, prompt, reviewAgent),
+        ...(reviewAgent ? { system: buildAgentSystemPrompt() } : {}),
       });
 
       if (response.status === "error") {
