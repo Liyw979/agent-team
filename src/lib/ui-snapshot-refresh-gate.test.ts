@@ -24,7 +24,7 @@ function createSystemMessage(id: string, sender: "system" | "BA", content: strin
     timestamp,
     kind: "agent-final",
     status: "completed",
-    reviewDecision: "approved",
+    reviewDecision: "complete",
     reviewOpinion: "",
     rawResponse: content,
   };

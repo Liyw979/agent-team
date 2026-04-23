@@ -16,7 +16,7 @@ test("gating-router 状态流转回归场景优先迁移到 scheduler script 测
     "gating-router.test.ts 不应该再保留可迁移到 script 的循环上限场景",
   );
   assert.equal(
-    source.includes("needs_revision 边支持单独配置更小的回流上限"),
+    source.includes("action_required 边支持单独配置更小的回流上限"),
     false,
     "gating-router.test.ts 不应该再保留可迁移到 script 的 maxRevisionRounds 场景",
   );

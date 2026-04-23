@@ -3,7 +3,7 @@ export type AgentStatus =
   | "running"
   | "completed"
   | "failed"
-  | "needs_revision";
+  | "continue";
 
 export type TaskStatus =
   | "pending"
@@ -11,7 +11,7 @@ export type TaskStatus =
   | "waiting"
   | "finished"
   | "failed"
-  | "needs_revision";
+  | "continue";
 
 export type PermissionMode = "allow" | "ask" | "deny";
 
@@ -109,10 +109,10 @@ export interface TaskAgentRecord {
   runCount: number;
 }
 
-export type TopologyEdgeTrigger = | "association" | "approved" | "needs_revision";
+export type TopologyEdgeTrigger = | "transfer" | "complete" | "continue";
 export type TopologyEdgeMessageMode = "none" | "last" | "all";
 
-export const DEFAULT_NEEDS_REVISION_MAX_ROUNDS = 4;
+export const DEFAULT_ACTION_REQUIRED_MAX_ROUNDS = 4;
 export const DEFAULT_TOPOLOGY_EDGE_MESSAGE_MODE: TopologyEdgeMessageMode = "last";
 export const LANGGRAPH_START_NODE_ID = "__start__";
 export const LANGGRAPH_END_NODE_ID = "__end__";
@@ -194,15 +194,15 @@ export interface SpawnActivationRecord {
   dispatched: boolean;
 }
 
-export function normalizeNeedsRevisionMaxRounds(value: unknown): number {
+export function normalizeActionRequiredMaxRounds(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
-    return DEFAULT_NEEDS_REVISION_MAX_ROUNDS;
+    return DEFAULT_ACTION_REQUIRED_MAX_ROUNDS;
   }
 
   return Math.max(1, Math.floor(value));
 }
 
-export function getNeedsRevisionEdgeLoopLimit(
+export function getActionRequiredEdgeLoopLimit(
   topology: Pick<TopologyRecord, "edges">,
   sourceAgentId: string,
   targetAgentId: string,
@@ -211,9 +211,9 @@ export function getNeedsRevisionEdgeLoopLimit(
     (item) =>
       item.source === sourceAgentId
       && item.target === targetAgentId
-      && normalizeTopologyEdgeTrigger(item.triggerOn) === "needs_revision",
+      && normalizeTopologyEdgeTrigger(item.triggerOn) === "continue",
   );
-  return normalizeNeedsRevisionMaxRounds(edge?.maxRevisionRounds);
+  return normalizeActionRequiredMaxRounds(edge?.maxRevisionRounds);
 }
 
 interface BaseMessageRecord {
@@ -244,7 +244,7 @@ export interface TaskCreatedMessageRecord extends BaseMessageRecord {
 
 export interface AgentFinalMessageRecord extends BaseMessageRecord {
   kind: "agent-final";
-  reviewDecision: "approved" | "needs_revision" | "invalid";
+  reviewDecision: "complete" | "continue" | "invalid";
   reviewOpinion: string;
   rawResponse: string;
   status: "completed" | "error";
@@ -258,8 +258,8 @@ export interface AgentDispatchMessageRecord extends BaseMessageRecord {
   senderDisplayName?: string;
 }
 
-export interface RevisionRequestMessageRecord extends BaseMessageRecord {
-  kind: "revision-request";
+export interface ActionRequiredRequestMessageRecord extends BaseMessageRecord {
+  kind: "continue-request";
   targetAgentIds: string[];
   senderDisplayName?: string;
 }
@@ -281,7 +281,7 @@ export type MessageRecord =
   | TaskCreatedMessageRecord
   | AgentFinalMessageRecord
   | AgentDispatchMessageRecord
-  | RevisionRequestMessageRecord
+  | ActionRequiredRequestMessageRecord
   | TaskCompletedMessageRecord
   | OrchestratorWaitingMessageRecord;
 
@@ -297,8 +297,8 @@ export function isAgentDispatchMessageRecord(message: MessageRecord): message is
   return message.kind === "agent-dispatch";
 }
 
-export function isRevisionRequestMessageRecord(message: MessageRecord): message is RevisionRequestMessageRecord {
-  return message.kind === "revision-request";
+export function isActionRequiredRequestMessageRecord(message: MessageRecord): message is ActionRequiredRequestMessageRecord {
+  return message.kind === "continue-request";
 }
 
 export function isTaskCompletedMessageRecord(message: MessageRecord): message is TaskCompletedMessageRecord {
@@ -309,7 +309,7 @@ export function getMessageTargetAgentIds(message: MessageRecord): string[] {
   switch (message.kind) {
     case "user":
     case "agent-dispatch":
-    case "revision-request":
+    case "continue-request":
       return message.targetAgentIds;
     default:
       return [];
@@ -320,7 +320,7 @@ export function getMessageSenderDisplayName(message: MessageRecord): string | un
   switch (message.kind) {
     case "agent-final":
     case "agent-dispatch":
-    case "revision-request":
+    case "continue-request":
       return message.senderDisplayName;
     default:
       return undefined;
@@ -430,11 +430,11 @@ export interface AgentTeamEvent {
   payload: unknown;
 }
 
-export function normalizeTopologyEdgeTrigger(value: unknown): "association" | "approved" | "needs_revision" {
-  if (value === "approved" || value === "needs_revision") {
+export function normalizeTopologyEdgeTrigger(value: unknown): "transfer" | "complete" | "continue" {
+  if (value === "complete" || value === "continue") {
     return value;
   }
-  return "association";
+  return "transfer";
 }
 
 export function getTopologyEdgeId(edge: Pick<TopologyEdge, "source" | "target" | "triggerOn">): string {
@@ -450,7 +450,7 @@ export function isReviewAgentInTopology(
       edge.source === agentName &&
       (() => {
         const triggerOn = normalizeTopologyEdgeTrigger(edge.triggerOn);
-        return triggerOn === "approved" || triggerOn === "needs_revision";
+        return triggerOn === "complete" || triggerOn === "continue";
       })(),
   );
 }
@@ -542,15 +542,15 @@ export function createDefaultTopology(
       target,
       triggerOn,
       messageMode: DEFAULT_TOPOLOGY_EDGE_MESSAGE_MODE,
-      ...(triggerOn === "needs_revision"
+      ...(triggerOn === "continue"
         ? {
-            maxRevisionRounds: DEFAULT_NEEDS_REVISION_MAX_ROUNDS,
+            maxRevisionRounds: DEFAULT_ACTION_REQUIRED_MAX_ROUNDS,
           }
         : {}),
     });
   };
 
-  push(startAgent?.name, nextAgent?.name, "association");
+  push(startAgent?.name, nextAgent?.name, "transfer");
 
   return {
     nodes,

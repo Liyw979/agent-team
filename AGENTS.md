@@ -14,7 +14,7 @@
 - 当前系统围绕当前 `cwd` 下的团队拓扑、Task 会话、群聊记录与 Agent 运行态工作，数据模型使用工作区与 Task。
 - GUI 主布局为：上方当前 Task 拓扑图，下方左侧当前 Task 群聊，右侧当前 Task Agent 列表；前端只负责展示与聊天发消息，不负责任何配置写入。
 - CLI 与 GUI 复用同一套 `Orchestrator`、OpenCode 与文件存储逻辑。
-- 同一 Task 内若某条 `needs_revision` 回流链路达到自己的最大反驳次数，系统会先隔离这条超限 reviewer 链路并继续推进同源的其他待处理 reviewer；只有当前 Task 已不存在其他可继续推进的待处理链路时，才会以该超限原因结束任务。gating-router[continueAfterReviewerLoopLimit, enforceNeedsRevisionLoopLimit]
+- 同一 Task 内若某条 `action_required` 回流链路达到自己的最大反驳次数，系统会先隔离这条超限 reviewer 链路并继续推进同源的其他待处理 reviewer；只有当前 Task 已不存在其他可继续推进的待处理链路时，才会以该超限原因结束任务。gating-router[continueAfterReviewerLoopLimit, enforceActionRequiredLoopLimit]
 
 ### 1.2 技术栈
 
@@ -75,30 +75,30 @@
 - 若当前节点执行完成后，拓扑里不存在可自动继续推进的下游节点，Task 会进入 `waiting` 状态；左侧 Task 列表与群聊系统消息必须同步反映该状态。gating-router[applyAgentResultToGraphState]、langgraph-runtime[resumeTask, runTaskLoop]、orchestrator[moveTaskToWaiting]
 - 当 Task 进入 `finished` 状态时，右侧拓扑面板中的每个 Agent 节点都统一显示为 `已完成`；聊天区会追加一条“任务已经结束”的系统消息。orchestrator[completeTask]、task-completion-message[buildTaskCompletionMessageContent]、task-lifecycle-rules[reconcileTaskSnapshotFromMessages]、topology-graph-helpers[getTopologyAgentStatusBadgePresentation]
 - Agent 运行态成功码统一使用 `completed`。gating-rules[resolveAgentStatusFromReview]、task-lifecycle-rules[reconcileTaskSnapshotFromMessages, resolveStandaloneTaskStatusAfterAgentRun]
-- 审查 Agent 若显式返回标签段，系统只识别以 `<needs_revision>` 或 `<approved>` 开头的尾段，右侧结束标签可选；其中 `<needs_revision>` 表示需要继续回应，若当前拓扑存在可用的 `needs_revision` 下游，系统会继续按失败链路把意见回流给对应下游；只有不存在可继续派发的失败链路时，才会把当前 Task 结束并标记为“不通过”。若审查 Agent 没有返回正确的 `<needs_revision>` 或 `<approved>` 标签，系统默认按通过处理。review-parser[parseReview, stripStructuredSignals]、review-response[extractTrailingReviewSignalBlock]、gating-rules[resolveAgentStatusFromReview]、gating-router[applyAgentResultToGraphState, handleNeedsRevision]、orchestrator[createLangGraphBatchRunners, completeTask]
-- 同一个上游 Agent 在收到回流意见后再次成功交付时，会重新派发当前拓扑里满足条件的全部下游 Agent；不会因为某个下游在上一轮已成功执行过，就被静默跳过。gating-scheduler[planAssociationDispatch, recordAssociationBatchResponse]、gating-router[continueAfterAssociationBatchResponse, triggerAssociationDownstream]
+- 审查 Agent 若显式返回标签段，系统只识别以 `<continue>` 或 `<approved>` 开头的尾段，右侧结束标签可选；其中 `<continue>` 表示需要继续回应，若当前拓扑存在可用的 `action_required` 下游，系统会继续按失败链路把意见回流给对应下游；只有不存在可继续派发的失败链路时，才会把当前 Task 结束并标记为“不通过”。若审查 Agent 没有返回正确的 `<continue>` 或 `<approved>` 标签，系统默认按通过处理。review-parser[parseReview, stripStructuredSignals]、review-response[extractTrailingReviewSignalBlock]、gating-rules[resolveAgentStatusFromReview]、gating-router[applyAgentResultToGraphState, handleActionRequired]、orchestrator[createLangGraphBatchRunners, completeTask]
+- 同一个上游 Agent 在收到回流意见后再次成功交付时，会重新派发当前拓扑里满足条件的全部下游 Agent；不会因为某个下游在上一轮已成功执行过，就被静默跳过。gating-scheduler[planHandoffDispatch, recordHandoffBatchResponse]、gating-router[continueAfterHandoffBatchResponse, triggerHandoffDownstream]
 
 ### 3.3 拓扑与调度
 
 - LangGraph 是唯一调度运行时核心；`TopologyRecord` 是产品真源，运行时会在主进程内把它编译为图状态与调度索引。langgraph-runtime[resumeTask]、gating-router[createGraphTaskState, applyAgentResultToGraphState]、topology-compiler[compileTopology]
-- 拓扑边持久化 `source / target / triggerOn`；`triggerOn` 只允许 `association`、`approved`、`needs_revision`。其中 `association` 表示普通协作流转，节点完成后直接触发下游；`approved` 表示审查通过后才触发下游；`needs_revision` 表示审查不通过后的回流或继续回应链路。store[readWorkspaceState, writeWorkspaceState]、orchestrator[normalizeTopology]、topology-compiler[compileTopology]
-- 递归式 DSL 中，`spawn` 仍会被当成拓扑中的正常节点；当父图里存在唯一的 `spawn -> 某节点` 回流边时，编译阶段会把这条边的 `triggerOn` 一并记到 `spawn rule` 上，再由子图唯一终局角色按这条触发类型直接回到外层节点，同时把 `spawn` 节点自身标记为已完成，避免激活残留卡住后续流程。漏洞团队当前写的是 `["疑点辩论", "初筛", "association"]`，所以它的 `裁决总结` 会按 `association` 回到 `初筛`。team-dsl[compileTeamDsl]、runtime-topology[instantiateSpawnBundle]、gating-router[applyAgentResultToGraphState]
+- 拓扑边持久化 `source / target / triggerOn`；`triggerOn` 只允许 `handoff`、`approved`、`action_required`。其中 `handoff` 表示普通协作流转，节点完成后直接触发下游；`approved` 表示审查通过后才触发下游；`action_required` 表示审查不通过后的回流或继续回应链路。store[readWorkspaceState, writeWorkspaceState]、orchestrator[normalizeTopology]、topology-compiler[compileTopology]
+- 递归式 DSL 中，`spawn` 仍会被当成拓扑中的正常节点；当父图里存在唯一的 `spawn -> 某节点` 回流边时，编译阶段会把这条边的 `triggerOn` 一并记到 `spawn rule` 上，再由子图唯一终局角色按这条触发类型直接回到外层节点，同时把 `spawn` 节点自身标记为已完成，避免激活残留卡住后续流程。漏洞团队当前写的是 `["疑点辩论", "初筛", "handoff"]`，所以它的 `裁决总结` 会按 `handoff` 回到 `初筛`。team-dsl[compileTeamDsl]、runtime-topology[instantiateSpawnBundle]、gating-router[applyAgentResultToGraphState]
 - 漏洞挖掘团队的默认对抗拓扑里，`初筛` 会先把 finding 交给 `反方`，而不是先交给 `正方`；这是一条刻意保留的拓扑设计技巧，用来先由反方挑战证据链、暴露缺口，再进入正反对抗，避免正方开场直接同意导致对抗性不足。config/team-topologies/vulnerability-team.topology.json、team-dsl[compileTeamDsl]、scheduler-script-harness[assertSchedulerScript]
 - 静态 `spawn` 节点属于调度节点，会保留在拓扑数据中供运行时识别，但前端拓扑图不会直接展示这类工厂节点；只有 `spawn` 实际展开出来的运行时 Agent 实例会作为可见节点显示。topology-spawn-drafts[getTopologyDisplayNodeIds]、TopologyGraph[TopologyGraph]、runtime-topology-graph[buildEffectiveTopology]
-- 当某个 Agent 存在“直接下游通过 `association` 触发、且该下游会用 `needs_revision` 直接回流给自己、同时该下游没有 `approved` 下游”的审查回路时，系统会先只放行这类直接审查回路；只有这些回路全部通过后，才会继续放行该 Agent 其余直接 `association` 下游，避免 Build 与单个审查 Agent 多轮对话时反复提前触发无关下游。gating-scheduler[planAssociationDispatch, recordAssociationBatchResponse]、gating-router[handleNeedsRevision, continueAfterAssociationBatchResponse]
-- 同一轮里若某个 Agent 需要同时触发多个直接 `association` 下游 reviewer，这批 reviewer 会并发启动；只有当前整批 reviewer 都返回后，系统才会决定是否回流给上游修复，或继续补跑这一轮尚未确认通过的 reviewer，避免把并发批次错误串成“一次只放行一个”。gating-scheduler[planAssociationDispatch, recordAssociationBatchResponse]、orchestrator[createLangGraphBatchRunners]
+- 当某个 Agent 存在“直接下游通过 `handoff` 触发、且该下游会用 `action_required` 直接回流给自己、同时该下游没有 `approved` 下游”的审查回路时，系统会先只放行这类直接审查回路；只有这些回路全部通过后，才会继续放行该 Agent 其余直接 `handoff` 下游，避免 Build 与单个审查 Agent 多轮对话时反复提前触发无关下游。gating-scheduler[planHandoffDispatch, recordHandoffBatchResponse]、gating-router[handleActionRequired, continueAfterHandoffBatchResponse]
+- 同一轮里若某个 Agent 需要同时触发多个直接 `handoff` 下游 reviewer，这批 reviewer 会并发启动；只有当前整批 reviewer 都返回后，系统才会决定是否回流给上游修复，或继续补跑这一轮尚未确认通过的 reviewer，避免把并发批次错误串成“一次只放行一个”。gating-scheduler[planHandoffDispatch, recordHandoffBatchResponse]、orchestrator[createLangGraphBatchRunners]
 - 团队成员列表支持直接调整 Agent 顺序；该顺序会持久化到拓扑配置，并直接决定拓扑图从左到右的节点排列。types[resolveTopologyAgentOrder]、orchestrator[saveTopology, normalizeTopology]、frontend-agent-order[orderAgentsForFrontend]
 - 拓扑图中的 Agent 节点顺序是稳定的：未显式保存顺序时，默认优先取 `Build` 作为最左侧起点；当前拓扑未声明 `Build` 时，节点顺序按已声明的 Agent 顺序解析。types[resolveBuildAgentName, resolveTopologyAgentOrder, createDefaultTopology]
 - 拓扑配置中的 `nodes` 统一保存为有序的 Agent 名称字符串数组；该数组既是节点集合真源，也是节点顺序真源，其他派生标识在运行时推导。store[readWorkspaceState, writeWorkspaceState]、orchestrator[normalizeTopology]
 - 默认入口语义统一按当前 `nodes` 与 `Build` 是否存在在运行时推导，配置文件使用这套推导结果表达入口。types[resolvePrimaryTopologyStartTarget, resolveBuildAgentName, createDefaultTopology]
 - 编译后的最终拓扑会额外持久化 `topology.langgraph` 边界信息：`start.id` 固定为 LangGraph 的 `__start__`，并显式保存它连接到哪些业务节点；`end` 只有在团队拓扑明确声明“存在语义上的结束节点”时才会写入 `__end__`，像当前开发团队这类依靠调度状态自然收束的拓扑会把 `end` 保存为 `null`，而不是伪造一个业务 EndNode。types[createTopologyLangGraphRecord]、team-dsl[createTopology, compileTeamDsl]、store[readWorkspaceState, writeWorkspaceState]
-- 拓扑配置中的 `edges` 持久化 `source / target / triggerOn`；当 `triggerOn = needs_revision` 时，还会额外持久化该边自己的 `maxRevisionRounds`，用于限制这条审视回流链路可连续反驳的最大轮数，默认值为 `4`。边的唯一标识在运行时按三元组即时推导。types[normalizeNeedsRevisionMaxRounds, getNeedsRevisionEdgeLoopLimit, getTopologyEdgeId]、store[readWorkspaceState]、orchestrator[normalizeTopology]
+- 拓扑配置中的 `edges` 持久化 `source / target / triggerOn`；当 `triggerOn = action_required` 时，还会额外持久化该边自己的 `maxRevisionRounds`，用于限制这条审视回流链路可连续反驳的最大轮数，默认值为 `4`。边的唯一标识在运行时按三元组即时推导。types[normalizeActionRequiredMaxRounds, getActionRequiredEdgeLoopLimit, getTopologyEdgeId]、store[readWorkspaceState]、orchestrator[normalizeTopology]
 - 拓扑节点顶部直接展示 Agent 当前状态徽标，包括 `未启动 / 运行中 / 已完成 / 执行失败`；审查类 Agent 则显示 `审查通过 / 审查不通过`。topology-graph-helpers[getTopologyAgentStatusBadgePresentation]、TopologyGraph[TopologyGraph]
 - 拓扑图中每个 Agent 节点头部都会在状态 icon 左侧提供 `attach` 按钮；点击后直接打开该 Agent 对应的 OpenCode attach 终端。topology-graph-helpers[getTopologyNodeHeaderActionOrder]、TopologyGraph[TopologyGraph]、App[App]、orchestrator[openAgentTerminal]
 - 拓扑图中的 Agent 节点颜色用于表达当前运行状态；内置与本地类型信息仅在编辑面板等辅助信息中展示。topology-graph-helpers[getTopologyAgentStatusBadgePresentation]、agent-colors[getAgentColorToken]、TopologyGraph[TopologyGraph]
 - 拓扑图会隐藏静态 `spawn` 工厂节点；当某个 `spawn` 子图已经实例化出 runtime agent 时，前端会用实例节点（如 `正方-1`）替换对应模板节点（如 `正方`）进行展示，避免模板卡片出现空历史区。topology-spawn-drafts[getTopologyDisplayNodeIds]、TopologyGraph[TopologyGraph]
 - 拓扑图在面板尺寸变化时会保持“Agent 在上、历史区在下、首尾节点贴近左右边界但保留少量留白、顶部预留连线通道”的布局约束，而不是把整张图简单等比缩放后居中。topology-canvas[buildTopologyCanvasLayout]、TopologyGraph[TopologyGraph]
-- 前端拓扑编辑面板支持为每一条 `needs_revision` 关系单独配置“最大反驳次数”；默认显示 `4`，不同审视关系可以分别保存不同数值。types[normalizeNeedsRevisionMaxRounds, getNeedsRevisionEdgeLoopLimit]、orchestrator[normalizeTopology]、store[readWorkspaceState, writeWorkspaceState]
+- 前端拓扑编辑面板支持为每一条 `action_required` 关系单独配置“最大反驳次数”；默认显示 `4`，不同审视关系可以分别保存不同数值。types[normalizeActionRequiredMaxRounds, getActionRequiredEdgeLoopLimit]、orchestrator[normalizeTopology]、store[readWorkspaceState, writeWorkspaceState]
 
 ### 3.4 聊天与消息传递
 
@@ -112,7 +112,7 @@
 - Agent 自动派发下游时，不会额外补充整段群聊历史，但会携带本轮需要的首条用户任务与当前上游结果；若上游结果已完整包含用户消息，会自动去重。message-forwarding[buildDownstreamForwardedContextFromMessages, contentContainsNormalized]、orchestrator[createLangGraphBatchRunners]
 - 群聊落库与 Agent 间转发只使用 OpenCode 返回消息里的公开 `text` part；`reasoning`、步骤和工具调用不会混入群聊正文或下游 prompt。opencode-client[extractVisibleMessageText, getSessionRuntime]、orchestrator[stripStructuredSignals]
 - 同一个 Agent 的最终回复后若紧接着自动向下游传递，群聊会把“最终回复 + 下游派发提示”合并成同一条消息；合并后只追加 `@目标Agent` 标记，避免连续出现两条重复的同名 Agent 卡片。chat-messages[mergeTaskChatMessages]、chat-message-format[buildMentionSuffix, formatAgentDispatchContent]
-- 审查 Agent 给出以 `<needs_revision>` 开头的尾段后，群聊会把该 Agent 的结果正文与回应请求合并展示成同一条消息，并在消息末尾统一追加 `@目标Agent` 标记；右侧结束标签可选。chat-messages[mergeTaskChatMessages]、chat-message-format[formatRevisionRequestContent]、review-response[stripReviewResponseMarkup, stripLeadingReviewResponseLabel]
+- 审查 Agent 给出以 `<continue>` 开头的尾段后，群聊会把该 Agent 的结果正文与回应请求合并展示成同一条消息，并在消息末尾统一追加 `@目标Agent` 标记；右侧结束标签可选。chat-messages[mergeTaskChatMessages]、chat-message-format[formatActionRequiredRequestContent]、review-response[stripReviewResponseMarkup, stripLeadingReviewResponseLabel]
 - Agent 最终回复写入群聊时，只会在命中“正式结果 / 最终回复 / 最终交付 / 结论”等明确交付标题时提取对应尾部章节展示；若只是普通结构化文档而不存在这类标题，则保留完整正文，避免误截断到附录内容。chat-messages[extractAgentFinalDisplayContent, extractTrailingTopLevelSection]
 
 ### 3.5 GUI 交互

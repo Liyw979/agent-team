@@ -8,5 +8,5 @@ test("聊天消息格式化只接受 string[] 目标列表，不再接受 string
   assert.equal(SOURCE.includes("string[] | string | undefined"), false);
   assert.equal(SOURCE.includes("string[] | string"), false);
   assert.match(SOURCE, /parseTargetAgentIds\(value: string\[\]\): string\[\]/u);
-  assert.match(SOURCE, /formatRevisionRequestContent\(content: string, targetAgentIds: string\[\]\): string/u);
+  assert.match(SOURCE, /formatActionRequiredRequestContent\(content: string, targetAgentIds: string\[\]\): string/u);
 });

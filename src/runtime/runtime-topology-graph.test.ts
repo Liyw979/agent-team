@@ -11,8 +11,8 @@ test("buildEffectiveTopology 不会因为 nodeRecords 只保存局部节点而�
     projectId: "runtime-topology-node-records",
     nodes: ["BA", "Build", "QA"],
     edges: [
-      { source: "BA", target: "Build", triggerOn: "association", messageMode: "last" },
-      { source: "Build", target: "QA", triggerOn: "association", messageMode: "last" },
+      { source: "BA", target: "Build", triggerOn: "transfer", messageMode: "last" },
+      { source: "Build", target: "QA", triggerOn: "transfer", messageMode: "last" },
     ],
     nodeRecords: [
       { id: "BA", kind: "agent", templateName: "BA", spawnEnabled: false },

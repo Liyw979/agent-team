@@ -3,7 +3,7 @@ import {
   getMessageTargetAgentIds,
   isAgentDispatchMessageRecord,
   isAgentFinalMessageRecord,
-  isRevisionRequestMessageRecord,
+  isActionRequiredRequestMessageRecord,
   isTaskCompletedMessageRecord,
   isUserMessageRecord,
   resolveBuildAgentName,
@@ -56,7 +56,7 @@ export function getPersistedCompletionSeedAgentNames(input: {
         seeds.add(targetName);
       }
     }
-    if (isRevisionRequestMessageRecord(message)) {
+    if (isActionRequiredRequestMessageRecord(message)) {
       for (const targetAgentId of targetAgentIds) {
         seeds.add(targetAgentId);
       }
@@ -106,7 +106,7 @@ function referencesMissingActivatedAgent(
     return parseTargetAgentIds(getMessageTargetAgentIds(message)).some((targetName) => !knownAgentNames.has(targetName));
   }
 
-  if (isRevisionRequestMessageRecord(message)) {
+  if (isActionRequiredRequestMessageRecord(message)) {
     return parseTargetAgentIds(getMessageTargetAgentIds(message)).some((targetAgentId) => !knownAgentNames.has(targetAgentId));
   }
 
@@ -174,8 +174,8 @@ function resolveAgentStatusFromFinalMessage(message: MessageRecord): TaskAgentRe
   if (!isAgentFinalMessageRecord(message)) {
     return "completed";
   }
-  if (message.reviewDecision === "needs_revision") {
-    return "needs_revision";
+  if (message.reviewDecision === "continue") {
+    return "continue";
   }
   if (message.status === "error") {
     return "failed";
@@ -197,7 +197,7 @@ function hasLaterActivationForAgent(
       return true;
     }
 
-    if (isRevisionRequestMessageRecord(message) && parseTargetAgentIds(getMessageTargetAgentIds(message)).includes(agentName)) {
+    if (isActionRequiredRequestMessageRecord(message) && parseTargetAgentIds(getMessageTargetAgentIds(message)).includes(agentName)) {
       return true;
     }
 

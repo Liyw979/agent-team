@@ -8,7 +8,7 @@ import type {
   TopologyRecord,
 } from "@shared/types";
 
-export interface GraphRevisionRequest {
+export interface GraphActionRequiredRequest {
   opinion: string | null;
   agentContextContent: string;
 }
@@ -18,7 +18,7 @@ export interface GatingSourceRevisionState {
   reviewerPassRevision: Map<string, number>;
 }
 
-export interface GatingAssociationDispatchBatchState {
+export interface GatingHandoffDispatchBatchState {
   sourceAgentId: string;
   sourceContent: string;
   targets: string[];
@@ -35,7 +35,7 @@ export interface GatingSchedulerRuntimeState {
   runningAgents: Set<string>;
   queuedAgents: Set<string>;
   sourceRevisionStateByAgent: Map<string, GatingSourceRevisionState>;
-  activeAssociationBatchBySource: Map<string, GatingAssociationDispatchBatchState>;
+  activeHandoffBatchBySource: Map<string, GatingHandoffDispatchBatchState>;
 }
 
 export interface GraphSourceRevisionState {
@@ -43,7 +43,7 @@ export interface GraphSourceRevisionState {
   reviewerPassRevision: Record<string, number>;
 }
 
-export interface GraphAssociationBatchState {
+export interface GraphHandoffBatchState {
   sourceAgentId: string;
   sourceContent: string;
   targets: string[];
@@ -70,10 +70,10 @@ export interface GraphTaskState {
   runningAgents: string[];
   queuedAgents: string[];
   sourceRevisionStateByAgent: Record<string, GraphSourceRevisionState>;
-  activeAssociationBatchBySource: Record<string, GraphAssociationBatchState>;
-  pendingRevisionRequestsByAgent: Record<string, GraphRevisionRequest>;
-  pendingAssociationRepairTargetsBySource: Record<string, string[]>;
-  reviewFailLoopCountByEdge: Record<string, number>;
+  activeHandoffBatchBySource: Record<string, GraphHandoffBatchState>;
+  pendingActionRequiredRequestsByAgent: Record<string, GraphActionRequiredRequest>;
+  pendingHandoffRepairTargetsBySource: Record<string, string[]>;
+  actionRequiredLoopCountByEdge: Record<string, number>;
   spawnSequenceByRule: Record<string, number>;
   hasForwardedInitialTask: boolean;
 }
@@ -99,10 +99,10 @@ export function createEmptyGraphTaskState(input: {
     runningAgents: [],
     queuedAgents: [],
     sourceRevisionStateByAgent: {},
-    activeAssociationBatchBySource: {},
-    pendingRevisionRequestsByAgent: {},
-    pendingAssociationRepairTargetsBySource: {},
-    reviewFailLoopCountByEdge: {},
+    activeHandoffBatchBySource: {},
+    pendingActionRequiredRequestsByAgent: {},
+    pendingHandoffRepairTargetsBySource: {},
+    actionRequiredLoopCountByEdge: {},
     spawnSequenceByRule: {},
     hasForwardedInitialTask: false,
   };
@@ -175,8 +175,8 @@ export function cloneGraphTaskState(state: GraphTaskState): GraphTaskState {
         },
       ]),
     ),
-    activeAssociationBatchBySource: Object.fromEntries(
-      Object.entries(state.activeAssociationBatchBySource).map(([sourceAgentId, batch]) => [
+    activeHandoffBatchBySource: Object.fromEntries(
+      Object.entries(state.activeHandoffBatchBySource).map(([sourceAgentId, batch]) => [
         sourceAgentId,
         {
           sourceAgentId: batch.sourceAgentId,
@@ -189,8 +189,8 @@ export function cloneGraphTaskState(state: GraphTaskState): GraphTaskState {
         },
       ]),
     ),
-    pendingRevisionRequestsByAgent: Object.fromEntries(
-      Object.entries(state.pendingRevisionRequestsByAgent).map(([agentName, request]) => [
+    pendingActionRequiredRequestsByAgent: Object.fromEntries(
+      Object.entries(state.pendingActionRequiredRequestsByAgent).map(([agentName, request]) => [
         agentName,
         {
           opinion: request.opinion,
@@ -198,13 +198,13 @@ export function cloneGraphTaskState(state: GraphTaskState): GraphTaskState {
         },
       ]),
     ),
-    pendingAssociationRepairTargetsBySource: Object.fromEntries(
-      Object.entries(state.pendingAssociationRepairTargetsBySource).map(([sourceAgentId, targets]) => [
+    pendingHandoffRepairTargetsBySource: Object.fromEntries(
+      Object.entries(state.pendingHandoffRepairTargetsBySource).map(([sourceAgentId, targets]) => [
         sourceAgentId,
         [...targets],
       ]),
     ),
-    reviewFailLoopCountByEdge: { ...state.reviewFailLoopCountByEdge },
+    actionRequiredLoopCountByEdge: { ...state.actionRequiredLoopCountByEdge },
     spawnSequenceByRule: { ...state.spawnSequenceByRule },
   };
 }
@@ -225,8 +225,8 @@ export function graphStateToSchedulerRuntime(state: GraphTaskState): GatingSched
         } satisfies GatingSourceRevisionState,
       ]),
     ),
-    activeAssociationBatchBySource: new Map(
-      Object.entries(state.activeAssociationBatchBySource).map(([sourceAgentId, batch]) => [
+    activeHandoffBatchBySource: new Map(
+      Object.entries(state.activeHandoffBatchBySource).map(([sourceAgentId, batch]) => [
         sourceAgentId,
         {
           sourceAgentId: batch.sourceAgentId,
@@ -236,7 +236,7 @@ export function graphStateToSchedulerRuntime(state: GraphTaskState): GatingSched
           respondedTargets: [...batch.respondedTargets],
           sourceRevision: batch.sourceRevision,
           failedTargets: [...batch.failedTargets],
-        } satisfies GatingAssociationDispatchBatchState,
+        } satisfies GatingHandoffDispatchBatchState,
       ]),
     ),
   };
@@ -260,8 +260,8 @@ export function applySchedulerRuntimeToGraphState(
       },
     ]),
   );
-  state.activeAssociationBatchBySource = Object.fromEntries(
-    [...runtime.activeAssociationBatchBySource.entries()].map(([sourceAgentId, batch]) => [
+  state.activeHandoffBatchBySource = Object.fromEntries(
+    [...runtime.activeHandoffBatchBySource.entries()].map(([sourceAgentId, batch]) => [
       sourceAgentId,
       {
         sourceAgentId: batch.sourceAgentId,

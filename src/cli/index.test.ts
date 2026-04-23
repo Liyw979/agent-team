@@ -26,7 +26,7 @@ function appearsInOrder(source: string, before: string, after: string): boolean 
   return beforeIndex !== -1 && afterIndex !== -1 && beforeIndex < afterIndex;
 }
 
-test("CLI no longer accepts the legacy review relation alias", () => {
+test("CLI no longer accepts the removed review shortcut", () => {
   assert.doesNotMatch(CLI_SOURCE, /relation === "review"/);
 });
 

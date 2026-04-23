@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {
   createDefaultTopology,
   getSpawnRules,
-  getNeedsRevisionEdgeLoopLimit,
+  getActionRequiredEdgeLoopLimit,
   isReviewAgentInTopology,
   normalizeTopologyEdgeTrigger,
   type TopologyAgentSeed,
@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 const TYPES_SOURCE = readFileSync(new URL("./types.ts", import.meta.url), "utf8");
 const MESSAGE_RECORD_BLOCK = TYPES_SOURCE.match(/export interface MessageRecord \{[\s\S]*?\n\}/u)?.[0] ?? "";
 
-test("默认拓扑只生成首节点到次节点的 association 边", () => {
+test("默认拓扑只生成首节点到次节点的 transfer 边", () => {
   const agents: TopologyAgentSeed[] = [
     { name: "BA" },
     { name: "Build" },
@@ -31,7 +31,7 @@ test("默认拓扑只生成首节点到次节点的 association 边", () => {
   assert.deepEqual(topology.edges[0], {
     source: "Build",
     target: "BA",
-    triggerOn: "association",
+    triggerOn: "transfer",
     messageMode: "last",
   });
   assert.deepEqual(topology.langgraph, {
@@ -42,7 +42,7 @@ test("默认拓扑只生成首节点到次节点的 association 边", () => {
     end: null,
   });
   assert.equal(
-    topology.edges.some((edge) => edge.triggerOn === "approved" || edge.triggerOn === "needs_revision"),
+    topology.edges.some((edge) => edge.triggerOn === "complete" || edge.triggerOn === "continue"),
     false,
   );
 });
@@ -74,7 +74,7 @@ test("存在 review 出边时 isReviewAgentInTopology 返回 true", () => {
       {
         source: "TaskReview",
         target: "Build",
-        triggerOn: "needs_revision",
+        triggerOn: "continue",
         messageMode: "last",
       },
     ],
@@ -84,28 +84,28 @@ test("存在 review 出边时 isReviewAgentInTopology 返回 true", () => {
   assert.equal(isReviewAgentInTopology(topology, "Build"), false);
 });
 
-test("needs_revision 边默认回流上限为 4，且支持按边单独覆盖", () => {
+test("continue 边默认回流上限为 4，且支持按边单独覆盖", () => {
   const topology: TopologyRecord = {
     nodes: ["Build", "UnitTest", "TaskReview"],
     edges: [
       {
         source: "UnitTest",
         target: "Build",
-        triggerOn: "needs_revision",
+        triggerOn: "continue",
         messageMode: "last",
       },
       {
         source: "TaskReview",
         target: "Build",
-        triggerOn: "needs_revision",
+        triggerOn: "continue",
         messageMode: "last",
         maxRevisionRounds: 7,
       },
     ],
   };
 
-  assert.equal(getNeedsRevisionEdgeLoopLimit(topology, "UnitTest", "Build"), 4);
-  assert.equal(getNeedsRevisionEdgeLoopLimit(topology, "TaskReview", "Build"), 7);
+  assert.equal(getActionRequiredEdgeLoopLimit(topology, "UnitTest", "Build"), 4);
+  assert.equal(getActionRequiredEdgeLoopLimit(topology, "TaskReview", "Build"), 7);
 });
 
 test("只有 Build 继续视为 OpenCode 内置 prompt", () => {
@@ -115,9 +115,11 @@ test("只有 Build 继续视为 OpenCode 内置 prompt", () => {
   assert.equal(usesOpenCodeBuiltinPrompt("UnitTest"), false);
 });
 
-test("旧的 review_pass / review_fail 别名不再被识别为合法 trigger", () => {
-  assert.equal(normalizeTopologyEdgeTrigger("review_pass"), "association");
-  assert.equal(normalizeTopologyEdgeTrigger("review_fail"), "association");
+test("未知 trigger 会回退到 transfer，canonical trigger 保持新命名", () => {
+  assert.equal(normalizeTopologyEdgeTrigger("unknown"), "transfer");
+  assert.equal(normalizeTopologyEdgeTrigger("transfer"), "transfer");
+  assert.equal(normalizeTopologyEdgeTrigger("complete"), "complete");
+  assert.equal(normalizeTopologyEdgeTrigger("continue"), "continue");
 });
 
 test("MessageRecord 不再暴露无生产用途的 projectId / sessionId / sourceAgentId", () => {
@@ -165,7 +167,7 @@ test("getSpawnRules 保留显式声明的 messageMode，不再依赖默认补值
           {
             sourceRole: "pro",
             targetRole: "con",
-            triggerOn: "needs_revision",
+            triggerOn: "continue",
             messageMode: "all",
           },
         ],
@@ -178,7 +180,7 @@ test("getSpawnRules 保留显式声明的 messageMode，不再依赖默认补值
     {
       sourceRole: "pro",
       targetRole: "con",
-      triggerOn: "needs_revision",
+      triggerOn: "continue",
       messageMode: "all",
     },
   ]);

@@ -19,7 +19,7 @@ type TestMessageInput = {
   targetAgentIds?: string[];
   agentFinalStatus?: "completed" | "error";
   taskCompletedStatus?: "finished" | "failed";
-  reviewDecision?: "approved" | "needs_revision" | "invalid";
+  reviewDecision?: "complete" | "continue" | "invalid";
   senderDisplayName?: string;
 };
 
@@ -30,8 +30,8 @@ import {
 } from "./message-forwarding";
 import {
   resolveAgentStatusFromReview,
-  resolveRevisionRequestContinuationAction,
-  shouldStopTaskForUnhandledRevisionRequest,
+  resolveActionRequiredRequestContinuationAction,
+  shouldStopTaskForUnhandledActionRequiredRequest,
 } from "./gating-rules";
 import {
   getPersistedCompletionSeedAgentNames,
@@ -94,7 +94,7 @@ function createMessage(input: TestMessageInput): MessageRecord {
         timestamp,
         kind: "agent-final",
         status: input.agentFinalStatus ?? "completed",
-        reviewDecision: input.reviewDecision ?? "approved",
+        reviewDecision: input.reviewDecision ?? "complete",
         reviewOpinion: "",
         rawResponse: input.content,
         ...(input.senderDisplayName ? { senderDisplayName: input.senderDisplayName } : {}),
@@ -115,14 +115,14 @@ function createMessage(input: TestMessageInput): MessageRecord {
       };
       return message;
     }
-    case "revision-request": {
+    case "continue-request": {
       const message: MessageRecord = {
         id,
         taskId,
         sender: input.sender,
         content: input.content,
         timestamp,
-        kind: "revision-request",
+        kind: "continue-request",
         targetAgentIds: input.targetAgentIds ?? [],
         ...(input.senderDisplayName ? { senderDisplayName: input.senderDisplayName } : {}),
       };
@@ -309,7 +309,7 @@ test("单目标消息也只通过 targetAgentIds 数组表达目标", () => {
     createMessage({
       sender: "TaskReview",
       content: "请补充实现依据。\n\n@Build",
-      kind: "revision-request",
+      kind: "continue-request",
       targetAgentIds: ["Build"],
     }),
   ];
@@ -319,7 +319,7 @@ test("单目标消息也只通过 targetAgentIds 数组表达目标", () => {
     topology: createTopologyForTest({
       projectId: "project-1",
       nodes: ["Build", "TaskReview"],
-      edges: [{ source: "TaskReview", target: "Build", triggerOn: "needs_revision" }],
+      edges: [{ source: "TaskReview", target: "Build", triggerOn: "continue" }],
     }),
     agents: [
       createAgent({ name: "Build", status: "idle" }),
@@ -334,10 +334,10 @@ test("旧运行数据里悬空 idle Agent 不会阻止持久化补偿逻辑判�
     projectId: "project-1",
     nodes: ["BA", "Build", "CodeReview", "IntegrationTest", "TaskReview", "UnitTest"],
     edges: [
-      { source: "BA", target: "Build", triggerOn: "association", messageMode: "last" },
-      { source: "Build", target: "UnitTest", triggerOn: "association", messageMode: "last" },
-      { source: "Build", target: "TaskReview", triggerOn: "association", messageMode: "last" },
-      { source: "Build", target: "CodeReview", triggerOn: "association", messageMode: "last" },
+      { source: "BA", target: "Build", triggerOn: "transfer", messageMode: "last" },
+      { source: "Build", target: "UnitTest", triggerOn: "transfer", messageMode: "last" },
+      { source: "Build", target: "TaskReview", triggerOn: "transfer", messageMode: "last" },
+      { source: "Build", target: "CodeReview", triggerOn: "transfer", messageMode: "last" },
     ],
   });
   const agents = [
@@ -397,7 +397,7 @@ test("spawn 运行时实例刚被 dispatch 但尚未完成时，持久化补偿�
     projectId: "project-1",
     nodes: ["初筛", "疑点辩论"],
     edges: [
-      { source: "初筛", target: "疑点辩论", triggerOn: "association", messageMode: "last" },
+      { source: "初筛", target: "疑点辩论", triggerOn: "transfer", messageMode: "last" },
     ],
   });
   const runtimeAgentName = "正方-1";
@@ -435,7 +435,7 @@ test("spawn 运行时实例已写入 dispatch 消息但尚未落库为 task agen
     projectId: "project-1",
     nodes: ["初筛", "疑点辩论"],
     edges: [
-      { source: "初筛", target: "疑点辩论", triggerOn: "association", messageMode: "last" },
+      { source: "初筛", target: "疑点辩论", triggerOn: "transfer", messageMode: "last" },
     ],
   });
   const runtimeAgentName = "正方-1";
@@ -471,7 +471,7 @@ test("没有消息和运行痕迹时，持久化补偿逻辑只会把 Build 当�
   const topology = createTopologyForTest({
     projectId: "project-1",
     nodes: ["BA", "Build", "TaskReview"],
-    edges: [{ source: "Build", target: "TaskReview", triggerOn: "association", messageMode: "last" }],
+    edges: [{ source: "Build", target: "TaskReview", triggerOn: "transfer", messageMode: "last" }],
   });
   const seedAgentNames = getPersistedCompletionSeedAgentNames({
     topology,
@@ -487,7 +487,7 @@ test("没有消息和运行痕迹时，持久化补偿逻辑只会把 Build 当�
 });
 
 test("过期 reviewer 回复不应被当成有效回流继续触发修复", () => {
-  const action = resolveRevisionRequestContinuationAction({
+  const action = resolveActionRequiredRequestContinuationAction({
     continuation: null,
     fallbackActionWhenNoBatch: "ignore",
   });
@@ -496,7 +496,7 @@ test("过期 reviewer 回复不应被当成有效回流继续触发修复", () =
 });
 
 test("没有 batch continuation 但允许 direct fallback 时，会继续触发 fallback reviewer", () => {
-  const action = resolveRevisionRequestContinuationAction({
+  const action = resolveActionRequiredRequestContinuationAction({
     continuation: null,
     fallbackActionWhenNoBatch: "trigger_fallback_review",
   });
@@ -505,7 +505,7 @@ test("没有 batch continuation 但允许 direct fallback 时，会继续触发 
 });
 
 test("reviewer 已经形成有效回流动作时，不应直接结束 Task", () => {
-  const shouldStopTask = shouldStopTaskForUnhandledRevisionRequest({
+  const shouldStopTask = shouldStopTaskForUnhandledActionRequiredRequest({
     completeTaskOnFinish: true,
     continuationAction: "trigger_repair_review",
   });
@@ -513,13 +513,13 @@ test("reviewer 已经形成有效回流动作时，不应直接结束 Task", () 
   assert.equal(shouldStopTask, false);
 });
 
-test("reviewer 给出需要修复时应标记为 needs_revision 而不是 failed", () => {
+test("reviewer 给出需要修复时应标记为 action_required 而不是 failed", () => {
   const status = resolveAgentStatusFromReview({
-    reviewDecision: "needs_revision",
+    reviewDecision: "continue",
     reviewAgent: true,
   });
 
-  assert.equal(status, "needs_revision");
+  assert.equal(status, "continue");
 });
 
 test("reviewer 缺少强制标签时应标记为 failed", () => {

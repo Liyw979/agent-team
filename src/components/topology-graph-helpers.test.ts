@@ -57,7 +57,7 @@ test("getTopologyAgentStatusBadgePresentation 会把审查 agent 映射为审查
       {
         source: "CodeReview",
         target: "Build",
-        triggerOn: "needs_revision" as const,
+        triggerOn: "continue" as const,
         messageMode: "last" as const,
       },
     ],
@@ -66,7 +66,7 @@ test("getTopologyAgentStatusBadgePresentation 会把审查 agent 映射为审查
   assert.deepEqual(
     getTopologyAgentStatusBadgePresentation(topology, "CodeReview", "completed"),
     {
-      label: "审查通过",
+      label: "已完成判定",
       icon: "success",
       className: "border border-[#2c4a3f]/18 bg-[#edf5f0] text-[#2c4a3f]",
       effectClassName: "",
@@ -74,9 +74,9 @@ test("getTopologyAgentStatusBadgePresentation 会把审查 agent 映射为审查
   );
 
   assert.deepEqual(
-    getTopologyAgentStatusBadgePresentation(topology, "CodeReview", "needs_revision"),
+    getTopologyAgentStatusBadgePresentation(topology, "CodeReview", "continue"),
     {
-      label: "审查不通过",
+      label: "继续处理",
       icon: "failed",
       className: "border border-[#d66b63]/45 bg-[#fff1ef] text-[#a33f38]",
       effectClassName: "",
@@ -88,7 +88,7 @@ test("getTopologyAgentStatusBadgePresentation 会把审查 agent 映射为审查
       finalLoopReviewerName: "CodeReview",
     }),
     {
-      label: "审查不通过，最后一次",
+      label: "继续处理，最后一次",
       icon: "failed",
       className: "border border-[#d66b63]/45 bg-[#fff1ef] text-[#a33f38]",
       effectClassName: "",

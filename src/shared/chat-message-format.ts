@@ -29,7 +29,7 @@ export function formatAgentDispatchContent(_content: string, targetAgentIds: str
   return [body, mentionSuffix].filter(Boolean).join("\n\n").trim();
 }
 
-export function formatRevisionRequestContent(content: string, targetAgentIds: string[]): string {
+export function formatActionRequiredRequestContent(content: string, targetAgentIds: string[]): string {
   const body = stripLeadingMentions(content);
   const mentionSuffix = buildMentionSuffix(parseTargetAgentIds(targetAgentIds));
   return [body, mentionSuffix].filter(Boolean).join("\n\n").trim();

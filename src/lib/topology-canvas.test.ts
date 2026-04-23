@@ -7,8 +7,8 @@ test("buildTopologyCanvasLayout 会按面板宽高把节点横向纵向铺满", 
   const layout = buildTopologyCanvasLayout({
     nodes: ["BA", "Build", "CodeReview", "UnitTest", "TaskReview"],
     edges: [
-      { source: "BA", target: "Build", triggerOn: "association", messageMode: "last" },
-      { source: "Build", target: "CodeReview", triggerOn: "approved", messageMode: "last" },
+      { source: "BA", target: "Build", triggerOn: "transfer", messageMode: "last" },
+      { source: "Build", target: "CodeReview", triggerOn: "complete", messageMode: "last" },
     ],
     availableWidth: 1860,
     availableHeight: 360,

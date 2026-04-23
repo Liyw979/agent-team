@@ -153,10 +153,10 @@ export function upsertDebateSpawnDraft(
       { role: "summary", templateName: input.summaryTemplateName },
     ],
     edges: [
-      { sourceRole: "pro", targetRole: "con", triggerOn: "needs_revision", messageMode: "last" },
-      { sourceRole: "con", targetRole: "pro", triggerOn: "needs_revision", messageMode: "last" },
-      { sourceRole: "pro", targetRole: "summary", triggerOn: "approved", messageMode: "last" },
-      { sourceRole: "con", targetRole: "summary", triggerOn: "approved", messageMode: "last" },
+      { sourceRole: "pro", targetRole: "con", triggerOn: "continue", messageMode: "last" },
+      { sourceRole: "con", targetRole: "pro", triggerOn: "continue", messageMode: "last" },
+      { sourceRole: "pro", targetRole: "summary", triggerOn: "complete", messageMode: "last" },
+      { sourceRole: "con", targetRole: "summary", triggerOn: "complete", messageMode: "last" },
     ],
     exitWhen: "one_side_agrees",
     reportToTemplateName: input.reportToTemplateName,
@@ -167,7 +167,7 @@ export function upsertDebateSpawnDraft(
   ).concat({
     source: input.sourceTemplateName,
     target: spawnNodeId,
-    triggerOn: "association" as const,
+    triggerOn: "transfer" as const,
     messageMode: "last" as const,
   });
 

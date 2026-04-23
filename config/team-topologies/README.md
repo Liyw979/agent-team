@@ -101,7 +101,7 @@
       {
         "from": "正方",
         "to": "反方",
-        "trigger_type": "needs_revision",
+        "trigger_type": "continue",
         "message_type": "last"
       }
     ]
@@ -144,13 +144,13 @@
   {
     "from": "上游节点",
     "to": "下游节点",
-    "trigger_type": "association",
+    "trigger_type": "transfer",
     "message_type": "last"
   },
   {
     "from": "上游节点",
     "to": "另一个下游节点",
-    "trigger_type": "association",
+    "trigger_type": "transfer",
     "message_type": "all"
   }
 ]
@@ -169,12 +169,12 @@
 
 `trigger_type` 当前支持三种值：
 
-- `association`
+- `transfer`
   表示普通协作流转。当前节点执行完成后，会沿这条边把结果继续派发给下游节点。
-- `approved`
-  表示审查通过后才流转。通常用于 reviewer / 裁决类节点在确认“通过”后，再把流程推进到下一个节点。
-- `needs_revision`
-  表示审查不通过后的回流。当前节点明确要求继续修改或继续回应时，流程会沿这条边把意见退回给对应下游节点。
+- `complete`
+  表示当前分支已经完成判定后再流转。通常用于 reviewer / 裁决类节点在确认当前分支可以结束后，再把流程推进到下一个节点。
+- `continue`
+  表示当前分支需要继续处理时的回流。当前节点明确要求继续修改、补充或回应时，流程会沿这条边把意见退回给对应下游节点。
 
 `message_type` 当前支持三种值：
 
@@ -189,20 +189,20 @@
 
 ```json
 [
-  { "from": "BA", "to": "Build", "trigger_type": "association", "message_type": "last" },
-  { "from": "Build", "to": "CodeReview", "trigger_type": "association", "message_type": "last" },
-  { "from": "CodeReview", "to": "Build", "trigger_type": "needs_revision", "message_type": "last" }
+  { "from": "BA", "to": "Build", "trigger_type": "transfer", "message_type": "last" },
+  { "from": "Build", "to": "CodeReview", "trigger_type": "transfer", "message_type": "last" },
+  { "from": "CodeReview", "to": "Build", "trigger_type": "continue", "message_type": "last" }
 ]
 ```
 
 含义：
 
-- `association`
+- `transfer`
   普通协作流转；当前节点完成后直接把结果交给下游继续执行
-- `approved`
-  审查通过后流转；只有当前节点判定“通过”时才会触发这条边
-- `needs_revision`
-  审查不通过后回流；当前节点要求继续修改、补充或回应时，会沿这条边退回
+- `complete`
+  当前分支完成判定后流转；只有当前节点明确表示这一分支可以结束时才会触发这条边
+- `continue`
+  当前分支继续处理时回流；当前节点要求继续修改、补充或回应时，会沿这条边退回
 
 ## 4. 研发团队示例
 
@@ -219,13 +219,13 @@
     { "type": "agent", "name": "TaskReview", "prompt": "...", "writable": false }
   ],
   "links": [
-    { "from": "BA", "to": "Build", "trigger_type": "association", "message_type": "last" },
-    { "from": "Build", "to": "CodeReview", "trigger_type": "association", "message_type": "last" },
-    { "from": "Build", "to": "UnitTest", "trigger_type": "association", "message_type": "last" },
-    { "from": "Build", "to": "TaskReview", "trigger_type": "association", "message_type": "last" },
-    { "from": "CodeReview", "to": "Build", "trigger_type": "needs_revision", "message_type": "last" },
-    { "from": "UnitTest", "to": "Build", "trigger_type": "needs_revision", "message_type": "last" },
-    { "from": "TaskReview", "to": "Build", "trigger_type": "needs_revision", "message_type": "last" }
+    { "from": "BA", "to": "Build", "trigger_type": "transfer", "message_type": "last" },
+    { "from": "Build", "to": "CodeReview", "trigger_type": "transfer", "message_type": "last" },
+    { "from": "Build", "to": "UnitTest", "trigger_type": "transfer", "message_type": "last" },
+    { "from": "Build", "to": "TaskReview", "trigger_type": "transfer", "message_type": "last" },
+    { "from": "CodeReview", "to": "Build", "trigger_type": "continue", "message_type": "last" },
+    { "from": "UnitTest", "to": "Build", "trigger_type": "continue", "message_type": "last" },
+    { "from": "TaskReview", "to": "Build", "trigger_type": "continue", "message_type": "last" }
   ]
 }
 ```
@@ -239,7 +239,7 @@
 - `疑点辩论` 是 `spawn` 节点
 - `spawn.graph` 里定义正方、反方、裁决总结的子图
 - 在这份漏洞团队拓扑里，`裁决总结` 的要求是：若裁定为真实漏洞，就输出正式漏洞报告；若裁定为误报，就什么都不做
-- 根图写的是 `{ "from": "疑点辩论", "to": "初筛", "trigger_type": "association", "message_type": "none" }`，因此 `裁决总结` 完成本轮裁决后，会按 `association` 触发 `初筛` 继续寻找下一个 finding
+- 根图写的是 `{ "from": "疑点辩论", "to": "初筛", "trigger_type": "transfer", "message_type": "none" }`，因此 `裁决总结` 完成本轮裁决后，会按 `transfer` 触发 `初筛` 继续寻找下一个 finding
 
 ## 6. 当前硬约束
 

@@ -16,9 +16,9 @@ test("gating-scheduler 不再声明运行时 state 类型", () => {
     "gating-scheduler.ts 不应该再声明 GatingSourceRevisionState",
   );
   assert.equal(
-    source.includes("export interface GatingAssociationDispatchBatchState"),
+    source.includes("export interface GatingHandoffDispatchBatchState"),
     false,
-    "gating-scheduler.ts 不应该再声明 GatingAssociationDispatchBatchState",
+    "gating-scheduler.ts 不应该再声明 GatingHandoffDispatchBatchState",
   );
   assert.equal(
     source.includes("export interface GatingSchedulerRuntimeState"),

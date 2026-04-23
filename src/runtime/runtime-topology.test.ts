@@ -17,7 +17,7 @@ function createVulnTopology(): TopologyRecord {
       { id: "疑点辩论工厂", kind: "spawn", templateName: "正方模板", spawnRuleId: "finding-debate" },
     ],
     edges: [
-      { source: "初筛", target: "疑点辩论工厂", triggerOn: "association", messageMode: "all" },
+      { source: "初筛", target: "疑点辩论工厂", triggerOn: "transfer", messageMode: "all" },
     ],
     spawnRules: [
       {
@@ -31,14 +31,14 @@ function createVulnTopology(): TopologyRecord {
           { role: "summary", templateName: "Summary模板" },
         ],
         edges: [
-          { sourceRole: "pro", targetRole: "con", triggerOn: "needs_revision", messageMode: "last" },
-          { sourceRole: "con", targetRole: "pro", triggerOn: "needs_revision", messageMode: "last" },
-          { sourceRole: "pro", targetRole: "summary", triggerOn: "approved", messageMode: "last" },
-          { sourceRole: "con", targetRole: "summary", triggerOn: "approved", messageMode: "last" },
+          { sourceRole: "pro", targetRole: "con", triggerOn: "continue", messageMode: "last" },
+          { sourceRole: "con", targetRole: "pro", triggerOn: "continue", messageMode: "last" },
+          { sourceRole: "pro", targetRole: "summary", triggerOn: "complete", messageMode: "last" },
+          { sourceRole: "con", targetRole: "summary", triggerOn: "complete", messageMode: "last" },
         ],
         exitWhen: "one_side_agrees",
         reportToTemplateName: "初筛",
-        reportToTriggerOn: "association",
+        reportToTriggerOn: "transfer",
       },
     ],
   };
@@ -83,37 +83,37 @@ test("instantiateSpawnBundle 会为一个 finding 生成正反 summary 三个运
       messageMode: "all",
       source: "初筛",
       target: "正方模板-1",
-      triggerOn: "association",
+      triggerOn: "transfer",
     },
     {
       messageMode: "last",
       source: "正方模板-1",
       target: "反方模板-1",
-      triggerOn: "needs_revision",
+      triggerOn: "continue",
     },
     {
       messageMode: "last",
       source: "反方模板-1",
       target: "正方模板-1",
-      triggerOn: "needs_revision",
+      triggerOn: "continue",
     },
     {
       messageMode: "last",
       source: "正方模板-1",
       target: "Summary模板-1",
-      triggerOn: "approved",
+      triggerOn: "complete",
     },
     {
       messageMode: "last",
       source: "反方模板-1",
       target: "Summary模板-1",
-      triggerOn: "approved",
+      triggerOn: "complete",
     },
     {
       messageMode: "last",
       source: "Summary模板-1",
       target: "初筛",
-      triggerOn: "association",
+      triggerOn: "transfer",
     },
   ]);
 });
@@ -134,7 +134,7 @@ test("instantiateSpawnBundle 会继承 source -> spawn 的 messageMode 到 entry
   assert.deepEqual(bundle.edges[0], {
     source: "初筛",
     target: "正方模板-1",
-    triggerOn: "association",
+    triggerOn: "transfer",
     messageMode: "all",
   });
 });
@@ -161,7 +161,7 @@ test("instantiateSpawnBundle 识别 source 节点时不会误把 spawn 节点当
   assert.deepEqual(bundle.edges[0], {
     source: "初筛",
     target: "正方模板-1",
-    triggerOn: "association",
+    triggerOn: "transfer",
     messageMode: "all",
   });
 });

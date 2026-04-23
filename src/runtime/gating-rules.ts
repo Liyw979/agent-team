@@ -1,27 +1,27 @@
 import type { AgentStatus } from "@shared/types";
 
-type RevisionRequestContinuationInput = {
+type ActionRequiredRequestContinuationInput = {
   continuation: {
     pendingTargets: string[];
     repairReviewerAgentId: string | null;
     redispatchTargets: string[];
   } | null;
   fallbackActionWhenNoBatch?: Extract<
-    RevisionRequestContinuationAction,
+    ActionRequiredRequestContinuationAction,
     "ignore" | "trigger_fallback_review"
   >;
 };
 
-type RevisionRequestContinuationAction =
+type ActionRequiredRequestContinuationAction =
   | "ignore"
   | "wait_pending_reviewers"
   | "trigger_repair_review"
   | "redispatch_reviewers"
   | "trigger_fallback_review";
 
-export function shouldStopTaskForUnhandledRevisionRequest(input: {
+export function shouldStopTaskForUnhandledActionRequiredRequest(input: {
   completeTaskOnFinish: boolean;
-  continuationAction: RevisionRequestContinuationAction;
+  continuationAction: ActionRequiredRequestContinuationAction;
 }): boolean {
   if (!input.completeTaskOnFinish) {
     return false;
@@ -31,23 +31,23 @@ export function shouldStopTaskForUnhandledRevisionRequest(input: {
 }
 
 export function resolveAgentStatusFromReview(input: {
-  reviewDecision: "approved" | "needs_revision" | "invalid";
+  reviewDecision: "complete" | "continue" | "invalid";
   reviewAgent: boolean;
 }): AgentStatus {
   if (input.reviewDecision === "invalid") {
     return "failed";
   }
 
-  if (input.reviewDecision === "needs_revision") {
-    return input.reviewAgent ? "needs_revision" : "failed";
+  if (input.reviewDecision === "continue") {
+    return input.reviewAgent ? "continue" : "failed";
   }
 
   return "completed";
 }
 
-export function resolveRevisionRequestContinuationAction(
-  input: RevisionRequestContinuationInput,
-): RevisionRequestContinuationAction {
+export function resolveActionRequiredRequestContinuationAction(
+  input: ActionRequiredRequestContinuationInput,
+): ActionRequiredRequestContinuationAction {
   if (!input.continuation) {
     return input.fallbackActionWhenNoBatch ?? "ignore";
   }

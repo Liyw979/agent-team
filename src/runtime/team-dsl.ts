@@ -1,7 +1,7 @@
 import {
   type AgentRecord,
   createTopologyLangGraphRecord,
-  normalizeNeedsRevisionMaxRounds,
+  normalizeActionRequiredMaxRounds,
   type TopologyEdgeMessageMode,
   type TopologyEdgeTrigger,
   type TopologyLangGraphRecord,
@@ -63,7 +63,7 @@ export interface CompiledTeamDsl {
 const GraphDslLinkSchema: z.ZodType<GraphDslLink> = z.object({
   from: z.string(),
   to: z.string(),
-  trigger_type: z.enum(["association", "approved", "needs_revision"]),
+  trigger_type: z.enum(["transfer", "complete", "continue"]),
   message_type: z.enum(["none", "last", "all"]),
 }).strict();
 
@@ -116,9 +116,9 @@ function normalizeComparableTopology(topology: TopologyRecord): TopologyRecord {
         target: edge.target,
         triggerOn: edge.triggerOn,
         messageMode: edge.messageMode,
-        ...(edge.triggerOn === "needs_revision"
+        ...(edge.triggerOn === "continue"
           ? {
-              maxRevisionRounds: normalizeNeedsRevisionMaxRounds(edge.maxRevisionRounds),
+              maxRevisionRounds: normalizeActionRequiredMaxRounds(edge.maxRevisionRounds),
             }
           : {}),
       }))

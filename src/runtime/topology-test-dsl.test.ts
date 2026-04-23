@@ -7,27 +7,27 @@ test("createTopology 支持以前端下游模板 DSL 生成普通拓扑", () => 
   const topology = createTopology({
     projectId: "dsl-basic",
     downstream: {
-      BA: { Build: "association" },
+      BA: { Build: "transfer" },
       Build: {
-        CodeReview: "association",
-        UnitTest: "association",
-        TaskReview: "association",
+        CodeReview: "transfer",
+        UnitTest: "transfer",
+        TaskReview: "transfer",
       },
       CodeReview: {
-        Build: "needs_revision",
-        TaskReview: "approved",
+        Build: "continue",
+        TaskReview: "complete",
       },
     },
   });
 
   assert.deepEqual(topology.nodes, ["BA", "Build", "CodeReview", "UnitTest", "TaskReview"]);
   assert.deepEqual(topology.edges, [
-    { source: "BA", target: "Build", triggerOn: "association", messageMode: "last" },
-    { source: "Build", target: "CodeReview", triggerOn: "association", messageMode: "last" },
-    { source: "Build", target: "UnitTest", triggerOn: "association", messageMode: "last" },
-    { source: "Build", target: "TaskReview", triggerOn: "association", messageMode: "last" },
-    { source: "CodeReview", target: "Build", triggerOn: "needs_revision", messageMode: "last" },
-    { source: "CodeReview", target: "TaskReview", triggerOn: "approved", messageMode: "last" },
+    { source: "BA", target: "Build", triggerOn: "transfer", messageMode: "last" },
+    { source: "Build", target: "CodeReview", triggerOn: "transfer", messageMode: "last" },
+    { source: "Build", target: "UnitTest", triggerOn: "transfer", messageMode: "last" },
+    { source: "Build", target: "TaskReview", triggerOn: "transfer", messageMode: "last" },
+    { source: "CodeReview", target: "Build", triggerOn: "continue", messageMode: "last" },
+    { source: "CodeReview", target: "TaskReview", triggerOn: "complete", messageMode: "last" },
   ]);
 });
 
@@ -36,7 +36,7 @@ test("createTopology 支持把 spawn 作为下游模式写进 DSL", () => {
     projectId: "dsl-spawn",
     downstream: {
       Build: { TaskReview: "spawn" },
-      TaskReview: { Build: "needs_revision" },
+      TaskReview: { Build: "continue" },
     },
     spawn: {
       TaskReview: {},
@@ -44,8 +44,8 @@ test("createTopology 支持把 spawn 作为下游模式写进 DSL", () => {
   });
 
   assert.deepEqual(topology.edges, [
-    { source: "Build", target: "TaskReview", triggerOn: "association", messageMode: "last" },
-    { source: "TaskReview", target: "Build", triggerOn: "needs_revision", messageMode: "last" },
+    { source: "Build", target: "TaskReview", triggerOn: "transfer", messageMode: "last" },
+    { source: "TaskReview", target: "Build", triggerOn: "continue", messageMode: "last" },
   ]);
   assert.deepEqual(topology.nodeRecords, [
     { id: "Build", kind: "agent", templateName: "Build" },

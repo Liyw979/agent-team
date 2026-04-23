@@ -12,7 +12,7 @@ import {
   type AgentRecord,
   BUILD_AGENT_NAME,
   createDefaultTopology,
-  normalizeNeedsRevisionMaxRounds,
+  normalizeActionRequiredMaxRounds,
   normalizeTopologyEdgeTrigger,
   type DeleteTaskPayload,
   type GetTaskRuntimePayload,
@@ -33,7 +33,7 @@ import {
 } from "@shared/types";
 import {
   formatAgentDispatchContent,
-  formatRevisionRequestContent,
+  formatActionRequiredRequestContent,
   parseTargetAgentIds,
 } from "@shared/chat-message-format";
 import { buildAgentSystemPrompt } from "./agent-system-prompt";
@@ -675,7 +675,7 @@ export class Orchestrator {
       return;
     }
 
-    if (latestTask.status === "needs_revision") {
+    if (latestTask.status === "continue") {
       return;
     }
 
@@ -1010,13 +1010,13 @@ export class Orchestrator {
       return opinion;
     }
 
-    if (parsedReview.decision === "needs_revision") {
+    if (parsedReview.decision === "continue") {
       return "（该 Agent 已给出需要响应的结论，但未返回可展示的结果正文。）";
     }
     if (parsedReview.decision === "invalid") {
       return parsedReview.validationError ?? "（该 Agent 返回了无效的审查结果。）";
     }
-    if (parsedReview.decision === "approved") {
+    if (parsedReview.decision === "complete") {
       return "通过";
     }
     return "（该 Agent 未返回可展示的结果正文。）";
@@ -1304,9 +1304,9 @@ export class Orchestrator {
     const edges = topology.edges
       .filter(
         (edge) =>
-          normalizeTopologyEdgeTrigger(edge.triggerOn) === "association" ||
-          normalizeTopologyEdgeTrigger(edge.triggerOn) === "approved" ||
-          normalizeTopologyEdgeTrigger(edge.triggerOn) === "needs_revision",
+          normalizeTopologyEdgeTrigger(edge.triggerOn) === "transfer" ||
+          normalizeTopologyEdgeTrigger(edge.triggerOn) === "complete" ||
+          normalizeTopologyEdgeTrigger(edge.triggerOn) === "continue",
       )
       .filter((edge) => validTopologyNames.has(edge.source) && validTopologyNames.has(edge.target))
       .filter((edge) => {
@@ -1330,9 +1330,9 @@ export class Orchestrator {
         target: edge.target,
         triggerOn: normalizeTopologyEdgeTrigger(edge.triggerOn),
         messageMode: edge.messageMode,
-        ...(normalizeTopologyEdgeTrigger(edge.triggerOn) === "needs_revision"
+        ...(normalizeTopologyEdgeTrigger(edge.triggerOn) === "continue"
           ? {
-              maxRevisionRounds: normalizeNeedsRevisionMaxRounds(edge.maxRevisionRounds),
+              maxRevisionRounds: normalizeActionRequiredMaxRounds(edge.maxRevisionRounds),
             }
           : {}),
       }));
@@ -1454,7 +1454,7 @@ export class Orchestrator {
     const topology = this.store.getTopology(cwd);
     const batchSize = batch.jobs.length;
 
-    if (batch.jobs.every((job) => job.kind === "association" || job.kind === "approved")) {
+    if (batch.jobs.every((job) => job.kind === "transfer" || job.kind === "complete")) {
       const sourceAgentId = batch.sourceAgentId ?? "System";
       if (!this.shouldSuppressDuplicateDispatchMessage(cwd, taskId, sourceAgentId, batch.triggerTargets)) {
         const triggerMessage: MessageRecord = {
@@ -1503,7 +1503,7 @@ export class Orchestrator {
               buildEffectiveTopology(state),
               batch.sourceAgentId,
               job.agentName,
-              job.kind === "raw" ? "association" : job.kind,
+              job.kind === "raw" ? "transfer" : job.kind,
             ),
           },
         )
@@ -1515,9 +1515,9 @@ export class Orchestrator {
           from: "User",
           content: batch.sourceContent ?? "",
           allowDirectFallbackWhenNoBatch:
-            this.getOutgoingEdges(topology, job.agentName, "needs_revision").length > 0,
+            this.getOutgoingEdges(topology, job.agentName, "continue").length > 0,
         };
-      } else if (job.kind === "revision_request") {
+      } else if (job.kind === "continue_request") {
         const revisionContent =
           batch.sourceContent?.trim()
           || "请直接回应当前内容，给出你的判断、补充、澄清、反驳或修改方案。";
@@ -1537,11 +1537,11 @@ export class Orchestrator {
           taskId,
           sender: batch.sourceAgentId ?? "Reviewer",
           timestamp: new Date().toISOString(),
-          content: formatRevisionRequestContent(
+          content: formatActionRequiredRequestContent(
             revisionContent,
             [job.agentName],
           ),
-          kind: "revision-request",
+          kind: "continue-request",
           targetAgentIds: [job.agentName],
           ...withOptionalString(
             {},
@@ -1680,20 +1680,20 @@ export class Orchestrator {
       };
       this.store.insertMessage(cwd, taskMessage);
 
-      const reviewFailureTargets =
-        parsedReview.decision === "needs_revision"
-          ? this.getOutgoingEdges(topology, runtimeAgentName, "needs_revision")
+      const actionRequiredTargets =
+        parsedReview.decision === "continue"
+          ? this.getOutgoingEdges(topology, runtimeAgentName, "continue")
           : [];
       const agentStatus = resolveAgentStatusFromReview({
         reviewDecision: parsedReview.decision,
         reviewAgent,
       });
       this.store.updateTaskAgentStatus(task.cwd, task.id, runtimeAgentName, agentStatus);
-      if (parsedReview.decision === "needs_revision" && reviewFailureTargets.length > 0) {
+      if (parsedReview.decision === "continue" && actionRequiredTargets.length > 0) {
         this.updateTaskStatusIfActive(
           task.cwd,
           task.id,
-          concurrentBatchSize > 1 ? "running" : "needs_revision",
+          concurrentBatchSize > 1 ? "running" : "continue",
           null,
         );
       } else if (agentStatus === "failed") {
@@ -1863,7 +1863,7 @@ export class Orchestrator {
   private getOutgoingEdges(
     topology: TopologyRecord,
     sourceAgentId: string,
-    triggerOn: "association" | "approved" | "needs_revision",
+    triggerOn: "transfer" | "complete" | "continue",
   ) {
     return topology.edges.filter(
       (edge) => edge.source === sourceAgentId && edge.triggerOn === triggerOn,
@@ -1874,9 +1874,9 @@ export class Orchestrator {
     topology: TopologyRecord,
     sourceAgentId: string,
     targetAgentId: string,
-    triggerOn: "association" | "approved" | "revision_request",
+    triggerOn: "transfer" | "complete" | "continue_request",
   ) {
-    const normalizedTriggerOn = triggerOn === "revision_request" ? "needs_revision" : triggerOn;
+    const normalizedTriggerOn = triggerOn === "continue_request" ? "continue" : triggerOn;
     const edge = topology.edges.find(
       (item) =>
         item.source === sourceAgentId

@@ -38,7 +38,7 @@ function createMessage(input: {
       content: input.content,
       kind: "agent-final",
       status: "completed",
-      reviewDecision: "approved",
+      reviewDecision: "complete",
       reviewOpinion: "",
       rawResponse: input.content,
     };
@@ -55,14 +55,14 @@ function createMessage(input: {
       dispatchDisplayContent: input.content,
     };
   }
-  if (input.kind === "revision-request") {
+  if (input.kind === "continue-request") {
     return {
       id: input.id,
       taskId: "task-1",
       sender: input.sender,
       timestamp: input.timestamp,
       content: input.content,
-      kind: "revision-request",
+      kind: "continue-request",
       targetAgentIds: input.targetAgentIds ?? [],
     };
   }
@@ -174,7 +174,7 @@ test("renderChatStreamEntries 输出的是群聊文本，不包含 agent runtime
           content: "Build 已完成。",
           kind: "agent-final",
           status: "completed",
-          reviewDecision: "approved",
+          reviewDecision: "complete",
           reviewOpinion: "",
           rawResponse: "Build 已完成。",
         },

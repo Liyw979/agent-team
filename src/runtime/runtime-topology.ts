@@ -93,7 +93,7 @@ export function instantiateSpawnBundle(input: {
       target: targetNodeInstance.id,
       triggerOn: edge.triggerOn,
       messageMode: edge.messageMode,
-      ...(edge.triggerOn === "needs_revision" && typeof edge.maxRevisionRounds === "number"
+      ...(edge.triggerOn === "continue" && typeof edge.maxRevisionRounds === "number"
         ? { maxRevisionRounds: edge.maxRevisionRounds }
         : {}),
     };
@@ -102,7 +102,7 @@ export function instantiateSpawnBundle(input: {
   const sourceToSpawnEdge = input.topology.edges.find((edge) =>
     edge.source === sourceNode.id
     && edge.target === spawnNode.id
-    && edge.triggerOn === "association",
+    && edge.triggerOn === "transfer",
   );
   const entryNode = nodes.find((node) => node.role === rule.entryRole);
   if (sourceToSpawnEdge && entryNode) {
@@ -111,7 +111,7 @@ export function instantiateSpawnBundle(input: {
       target: entryNode.id,
       triggerOn: sourceToSpawnEdge.triggerOn,
       messageMode: sourceToSpawnEdge.messageMode,
-      ...(sourceToSpawnEdge.triggerOn === "needs_revision" && typeof sourceToSpawnEdge.maxRevisionRounds === "number"
+      ...(sourceToSpawnEdge.triggerOn === "continue" && typeof sourceToSpawnEdge.maxRevisionRounds === "number"
         ? { maxRevisionRounds: sourceToSpawnEdge.maxRevisionRounds }
         : {}),
     });
@@ -134,7 +134,7 @@ export function instantiateSpawnBundle(input: {
     edges.push({
       source: reportSourceNode.id,
       target: reportNode.id,
-      triggerOn: rule.reportToTriggerOn ?? "approved",
+      triggerOn: rule.reportToTriggerOn ?? "complete",
       messageMode: "last",
     });
   }

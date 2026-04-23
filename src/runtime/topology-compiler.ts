@@ -1,16 +1,16 @@
 import type { TopologyEdgeTrigger, TopologyRecord } from "@shared/types";
 
 interface TopologyIndex {
-  associationTargetsBySource: Record<string, string[]>;
+  handoffTargetsBySource: Record<string, string[]>;
   approvedTargetsBySource: Record<string, string[]>;
-  needsRevisionTargetsBySource: Record<string, string[]>;
+  actionRequiredTargetsBySource: Record<string, string[]>;
 }
 
 export function compileTopology(topology: TopologyRecord): TopologyIndex {
   return {
-    associationTargetsBySource: buildTargets(topology, "association"),
-    approvedTargetsBySource: buildTargets(topology, "approved"),
-    needsRevisionTargetsBySource: buildTargets(topology, "needs_revision"),
+    handoffTargetsBySource: buildTargets(topology, "transfer"),
+    approvedTargetsBySource: buildTargets(topology, "complete"),
+    actionRequiredTargetsBySource: buildTargets(topology, "continue"),
   };
 }
 
