@@ -54,6 +54,21 @@ interface SchedulerScriptTrace {
   steps: SchedulerScriptTraceStep[];
 }
 
+type SchedulerScriptDecisionSnapshot =
+  | {
+      type: "execute_batch";
+      sourceAgentId: string | null;
+      targets: string[];
+    }
+  | {
+      type: "finished";
+      finishReason?: string;
+    }
+  | {
+      type: "failed";
+      errorMessage: string;
+    };
+
 interface RequiredDispatchAssertion {
   lineIndex: number;
   senderId: string;
@@ -70,7 +85,7 @@ interface RequiredConsumerMessage {
 }
 
 interface SchedulerScriptNegativeVariant {
-  kind: "missing_target" | "missing_dispatch_line" | "missing_consumer_line";
+  kind: "missing_target" | "missing_dispatch_line" | "missing_consumer_line" | "truncate_after_line";
   sourceLineIndex: number;
   removedTarget: string | null;
   removedMessageLineIndex: number | null;
@@ -482,6 +497,30 @@ async function runSchedulerScriptInternal(
 
 export const runSchedulerScriptDrived = runSchedulerScriptInternal;
 
+export function collectDecisionSnapshots(
+  trace: SchedulerScriptTrace,
+): SchedulerScriptDecisionSnapshot[] {
+  return trace.steps.map((step) => {
+    if (step.afterDecision.type === "execute_batch") {
+      return {
+        type: "execute_batch",
+        sourceAgentId: step.afterDecision.batch.sourceAgentId,
+        targets: getScriptVisibleDecisionTargets(step.afterState, step.afterDecision),
+      };
+    }
+    if (step.afterDecision.type === "finished") {
+      return {
+        type: "finished",
+        ...(step.afterDecision.finishReason ? { finishReason: step.afterDecision.finishReason } : {}),
+      };
+    }
+    return {
+      type: "failed",
+      errorMessage: step.afterDecision.errorMessage,
+    };
+  });
+}
+
 export function collectRequiredDispatchAssertions(
   trace: SchedulerScriptTrace,
 ): RequiredDispatchAssertion[] {
@@ -595,6 +634,20 @@ function buildMissingConsumerLineVariant(input: {
   };
 }
 
+function buildTruncateAfterLineVariant(input: {
+  script: string[];
+  sourceLineIndex: number;
+}): SchedulerScriptNegativeVariant {
+  return {
+    kind: "truncate_after_line",
+    sourceLineIndex: input.sourceLineIndex,
+    removedTarget: null,
+    removedMessageLineIndex: null,
+    script: input.script.slice(0, input.sourceLineIndex + 1),
+    expectedFailureCategory: "consumer_contract",
+  };
+}
+
 export function buildDispatchOmissionVariants(input: {
   script: string[];
   trace: SchedulerScriptTrace;
@@ -631,6 +684,23 @@ export function buildDispatchOmissionVariants(input: {
     }));
   }
 
+  for (const step of input.trace.steps) {
+    if (step.lineIndex >= input.script.length - 1) {
+      continue;
+    }
+    if (canScriptEndAfterLastLine({
+      state: step.afterState,
+      lastLine: step.line,
+      decision: step.afterDecision,
+    })) {
+      continue;
+    }
+    variants.push(buildTruncateAfterLineVariant({
+      script: input.script,
+      sourceLineIndex: step.lineIndex,
+    }));
+  }
+
   return variants;
 }
 
@@ -641,7 +711,7 @@ function getAutoDerivedNegativeFailurePattern(
     return /脚本提前结束|当前仍在等待|当前还缺少|下一条回应 Agent 不匹配|脚本包含 \[|sender 不在当前 execute_batch 目标里|sender 不在当前等待中的 pending targets 里|无法继续推进|没有显式给出 @|并没有显式给出 @|调度目标不匹配/u;
   }
 
-  return /调度目标不匹配|脚本包含 \[|没有显式给出 @|execute_batch|脚本提前结束|当前仍在等待|当前还缺少/u;
+  return /调度目标不匹配|脚本包含 \[|没有显式给出 @|execute_batch|脚本提前结束|当前仍在等待|当前还缺少|不存在的 Agent|下一条回应 Agent 不匹配/u;
 }
 
 export async function assertAutoDerivedNegativeScripts(
@@ -717,8 +787,7 @@ function assertSenderAllowed(
   if (decision.type === "execute_batch") {
     const actualTargets = decision.batch.jobs.map((job) => job.agentId);
     assert.ok(
-      decision.batch.sourceAgentId === senderId
-        || actualTargets.includes(senderId),
+      actualTargets.includes(senderId),
       buildUnexpectedNextSenderMessage({
         rawLine,
         actualSenderId: senderId,

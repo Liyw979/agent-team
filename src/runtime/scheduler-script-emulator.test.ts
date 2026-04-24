@@ -26,6 +26,7 @@ import {
 import { parseSchedulerScriptLine } from "./scheduler-script-dsl";
 import { createGraphTaskState, type GraphRoutingDecision } from "./gating-router";
 import { compileTeamDsl } from "./team-dsl";
+import { createTopology } from "./topology-test-dsl";
 
 function readBuiltinTopology(fileName: string) {
   return JSON.parse(
@@ -223,6 +224,51 @@ test("scheduler script emulator 纯函数会基于真实核心轨迹自动派生
       && variant.sourceLineIndex === 8
       && variant.removedMessageLineIndex === 10
     ),
+  );
+  assert.ok(
+    variants.some((variant) =>
+      variant.kind === "truncate_after_line"
+      && variant.sourceLineIndex === 8
+      && variant.script.length === 9
+    ),
+  );
+});
+
+test("scheduler script emulator 自动派生的 missing_consumer_line 会抓住 source 抢跑下一轮", async () => {
+  const topology = createTopology({
+    downstream: {
+      A: { B: "transfer" },
+      B: { A: "continue" },
+    },
+  });
+  const script = [
+    "user: @A start",
+    "A: first @B",
+    "B: feedback @A",
+    "A: second @B",
+    "B: done",
+  ];
+  const trace = await runSchedulerScriptDrived({
+    topology,
+    script,
+  });
+  const variants = buildDispatchOmissionVariants({
+    script,
+    trace,
+  });
+  const variant = variants.find((item) =>
+    item.kind === "missing_consumer_line"
+    && item.sourceLineIndex === 1
+    && item.removedMessageLineIndex === 2
+  );
+
+  assert.ok(variant, "必须派生出删掉第 1 轮消费者消息的负例");
+  await assert.rejects(
+    runSchedulerScriptDrived({
+      topology,
+      script: variant.script,
+    }),
+    /下一条回应 Agent 不匹配|当前步骤模拟值为 \[B\]/u,
   );
 });
 
@@ -796,12 +842,18 @@ test("scheduler script emulator 要求 execute_batch 必须显式写在当前 ag
   );
 });
 
-test("scheduler script emulator 不再支持 spawn1 这类短别名", async () => {
-  const topology = compileTeamDsl(readBuiltinTopology("vulnerability-team.topology.json")).topology;
+test("scheduler script emulator 不允许 dispatch source 在 batch 未被消费前重复发送普通消息", async () => {
+  const topology = createTopology({
+    downstream: {
+      A: { B: "transfer" },
+    },
+  });
 
   const script = [
-    "user: @线索发现 请持续挖掘当前代码中的可疑漏洞点。",
-    "线索发现: 发现第 1 个可疑点：上传文件名可能被直接拼进目标路径。 @漏洞挑战-spawn1",
+    "user: @A start",
+    "A: first @B",
+    "A: second @B",
+    "B: ack",
   ];
 
   await assert.rejects(
@@ -809,7 +861,24 @@ test("scheduler script emulator 不再支持 spawn1 这类短别名", async () =
       topology,
       script,
     }),
-    /不存在的 Agent|漏洞挑战-spawn1/u,
+    /下一条回应 Agent 不匹配|当前步骤模拟值为 \[B\]|脚本包含 \[B\]/u,
+  );
+});
+
+test("scheduler script emulator 不再支持非法短别名", async () => {
+  const topology = compileTeamDsl(readBuiltinTopology("vulnerability-team.topology.json")).topology;
+
+  const script = [
+    "user: @线索发现 请持续挖掘当前代码中的可疑漏洞点。",
+    "线索发现: 发现第 1 个可疑点：上传文件名可能被直接拼进目标路径。 @漏洞挑战-alias1",
+  ];
+
+  await assert.rejects(
+    runSchedulerScriptDrived({
+      topology,
+      script,
+    }),
+    /不存在的 Agent|漏洞挑战-alias1/u,
   );
 });
 

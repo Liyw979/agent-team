@@ -4,7 +4,6 @@ import {
   getMessageSenderDisplayName,
   isAgentDispatchMessageRecord,
   isAgentFinalMessageRecord,
-  isActionRequiredRequestMessageRecord,
 } from "@shared/types";
 import {
   buildMentionSuffix,
@@ -82,14 +81,20 @@ function extractTrailingMentionAgentIds(content: string): string[] {
 const TRAILING_FOLLOW_UP_OFFER_PATTERN =
   /\n\n(?<tail>(?:如果你(?:愿意|希望|需要)|若你(?:愿意|希望|需要)|如需)[\s\S]*)$/u;
 
-function stripTrailingFollowUpOffer(content: string): string {
+export function stripTrailingFollowUpOffer(content: string): string {
   const trimmed = content.trim();
   if (!trimmed) {
     return "";
   }
 
   const match = TRAILING_FOLLOW_UP_OFFER_PATTERN.exec(trimmed);
-  const tail = match?.groups?.tail?.trim() ?? "";
+  if (!match || typeof match.index !== "number") {
+    return trimmed;
+  }
+
+  const tail = typeof match.groups?.["tail"] === "string"
+    ? match.groups["tail"].trim()
+    : "";
   if (!tail) {
     return trimmed;
   }
