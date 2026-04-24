@@ -8,8 +8,6 @@ import {
 } from "@shared/types";
 import {
   buildMentionSuffix,
-  formatAgentDispatchContent,
-  formatActionRequiredRequestContent,
   parseTargetAgentIds,
 } from "@shared/chat-message-format";
 import {
@@ -50,6 +48,58 @@ function stripTrailingMentions(content: string): string {
   return lines.join("\n").trim();
 }
 
+function extractTrailingMentionAgentIds(content: string): string[] {
+  const trimmed = content.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  const lines = trimmed.split(/\r?\n/);
+  const mentions: string[] = [];
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index]?.trim() ?? "";
+    if (!line) {
+      if (mentions.length > 0) {
+        continue;
+      }
+      continue;
+    }
+    if (!/^(?:@\S+\s*)+$/u.test(line)) {
+      break;
+    }
+    mentions.unshift(
+      ...line
+        .split(/\s+/u)
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .map((item) => item.replace(/^@/u, "")),
+    );
+  }
+
+  return parseTargetAgentIds(mentions);
+}
+
+const TRAILING_FOLLOW_UP_OFFER_PATTERN =
+  /\n\n(?<tail>(?:如果你(?:愿意|希望|需要)|若你(?:愿意|希望|需要)|如需)[\s\S]*)$/u;
+
+function stripTrailingFollowUpOffer(content: string): string {
+  const trimmed = content.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const match = TRAILING_FOLLOW_UP_OFFER_PATTERN.exec(trimmed);
+  const tail = match?.groups?.tail?.trim() ?? "";
+  if (!tail) {
+    return trimmed;
+  }
+  if (!/(?:我(?:也)?可以|可继续|下一步可以)/u.test(tail)) {
+    return trimmed;
+  }
+
+  return trimmed.slice(0, match.index).trimEnd();
+}
+
 function stripRevisionFeedbackLabel(content: string): string {
   return stripLeadingReviewResponseLabel(stripReviewResponseMarkup(content));
 }
@@ -62,6 +112,11 @@ function getActionRequiredRequestDisplayBody(message: MessageRecord): string {
   }
 
   return stripReviewResponseMarkup(normalized);
+}
+
+function formatDisplayContentWithStoredMentions(sourceContent: string, body: string): string {
+  const mentions = extractTrailingMentionAgentIds(sourceContent);
+  return [stripTrailingMentions(body), buildMentionSuffix(mentions)].filter(Boolean).join("\n\n").trim();
 }
 
 function hasMeaningfulText(value: string): boolean {
@@ -111,9 +166,8 @@ function extractAgentFinalDisplayContent(message: MessageRecord): string {
 function buildMergedActionRequiredRequestContent(previous: ChatMessageItem, current: MessageRecord): string {
   const summary = previous.content.trim();
   const feedback = getActionRequiredRequestDisplayBody(current);
-  const targets = isActionRequiredRequestMessageRecord(current) ? parseTargetAgentIds(current.targetAgentIds) : [];
   if (!feedback) {
-    return formatActionRequiredRequestContent(summary, targets);
+    return formatDisplayContentWithStoredMentions(current.content, summary);
   }
 
   const normalizedSummary = summary.replace(/\s+/g, " ").trim();
@@ -123,31 +177,56 @@ function buildMergedActionRequiredRequestContent(previous: ChatMessageItem, curr
     .trim();
 
   if (!normalizedSummary) {
-    return formatActionRequiredRequestContent(feedback, targets);
+    return formatDisplayContentWithStoredMentions(current.content, feedback);
   }
 
   if (
     normalizedSummary === normalizedFeedback ||
     normalizedSummaryFeedback === normalizedFeedback
   ) {
-    return formatActionRequiredRequestContent(summary, targets);
+    return formatDisplayContentWithStoredMentions(current.content, summary);
   }
 
-  return formatActionRequiredRequestContent(
-    `${summary}\n\n${feedback}`,
-    targets,
-  );
+  return formatDisplayContentWithStoredMentions(current.content, `${summary}\n\n${feedback}`);
 }
 
 function buildMergedAgentFinalTriggerContent(previous: ChatMessageItem, current: MessageRecord): string {
-  const base = previous.content.trim();
-  const targets = isAgentDispatchMessageRecord(current) ? parseTargetAgentIds(current.targetAgentIds) : [];
+  const base = stripTrailingFollowUpOffer(previous.content.trim());
+  const targets = extractTrailingMentionAgentIds(current.content);
+  const resolvedTargets = targets.length > 0
+    ? targets
+    : (isAgentDispatchMessageRecord(current) ? parseTargetAgentIds(current.targetAgentIds) : []);
 
-  if (targets.length === 0) {
+  if (resolvedTargets.length === 0) {
     return [base, current.content.trim()].filter(Boolean).join("\n\n");
   }
 
-  return [base, buildMentionSuffix(targets)].filter(Boolean).join("\n\n");
+  const mergedTargets = [...new Set([
+    ...extractTrailingMentionAgentIds(previous.content),
+    ...resolvedTargets,
+  ])];
+  return [stripTrailingMentions(base), buildMentionSuffix(mergedTargets)].filter(Boolean).join("\n\n");
+}
+
+function buildMergedAgentDispatchContent(previous: ChatMessageItem, current: MessageRecord): string {
+  const previousBody = stripTrailingMentions(stripTrailingFollowUpOffer(previous.content.trim()));
+  const previousTargets = extractTrailingMentionAgentIds(previous.content);
+  const currentDisplayContent = getDisplayContent(current);
+  const currentBody = stripTrailingMentions(currentDisplayContent);
+  const currentTargets = extractTrailingMentionAgentIds(currentDisplayContent);
+  const mergedTargets = [...new Set([...previousTargets, ...currentTargets])];
+  const bodyParts: string[] = [];
+  const normalizedPreviousBody = previousBody.replace(/\s+/g, " ").trim();
+  const normalizedCurrentBody = currentBody.replace(/\s+/g, " ").trim();
+
+  if (previousBody) {
+    bodyParts.push(previousBody);
+  }
+  if (currentBody && normalizedCurrentBody !== normalizedPreviousBody) {
+    bodyParts.push(currentBody);
+  }
+
+  return [bodyParts.join("\n\n").trim(), buildMentionSuffix(mergedTargets)].filter(Boolean).join("\n\n");
 }
 
 function shouldMergeAgentDispatch(previous: ChatMessageItem, current: MessageRecord) {
@@ -222,17 +301,10 @@ function getDisplayContent(message: MessageRecord): string {
     return extractAgentFinalDisplayContent(message);
   }
   if (message.kind === "agent-dispatch") {
-    const dispatchContent = message.dispatchDisplayContent.trim() || message.content;
-    return formatAgentDispatchContent(
-      dispatchContent,
-      parseTargetAgentIds(message.targetAgentIds),
-    );
+    return message.content.trim();
   }
   if (message.kind === "continue-request") {
-    return formatActionRequiredRequestContent(
-      getActionRequiredRequestDisplayBody(message),
-      message.targetAgentIds,
-    );
+    return formatDisplayContentWithStoredMentions(message.content, getActionRequiredRequestDisplayBody(message));
   }
   return message.content;
 }
@@ -252,7 +324,9 @@ export function mergeTaskChatMessages(messages: MessageRecord[]): ChatMessageIte
           ? buildMergedActionRequiredRequestContent(last, message)
           : message.kind === "agent-dispatch" && last.kinds.at(-1) === "agent-final"
             ? buildMergedAgentFinalTriggerContent(last, message)
-          : [last.content, getDisplayContent(message)].filter(Boolean).join("\n\n");
+            : message.kind === "agent-dispatch" && last.kinds.at(-1) === "agent-dispatch"
+              ? buildMergedAgentDispatchContent(last, message)
+              : [last.content, getDisplayContent(message)].filter(Boolean).join("\n\n");
       last.kinds.push(message.kind);
       last.messageChain.push(message);
       continue;

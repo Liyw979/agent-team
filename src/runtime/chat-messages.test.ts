@@ -429,3 +429,94 @@ test("回流超限转给 approved 下游时，群聊只保留 reviewer 正文并
     `${reviewBody}\n\n@讨论总结-1`,
   );
 });
+
+test("实现结果后连续派发 reviewer 时，群聊会去掉尾部追问并折叠重复 mention", () => {
+  const merged = mergeTaskChatMessages([
+    createMessage({
+      id: "build-final",
+      sender: "Build",
+      timestamp: "2026-04-24T15:54:14.000Z",
+      content: `已把重复校验收成一条统一路径。
+
+验证结果：
+\`.venv/bin/python -m pytest\`
+\`10 passed\`
+
+如果你愿意，我可以继续把函数和测试再压到一个更极简、但仍可读的版本。`,
+      kind: "agent-final",
+    }),
+    createMessage({
+      id: "build-dispatch-1",
+      sender: "Build",
+      timestamp: "2026-04-24T15:54:21.000Z",
+      content: "@UnitTest @TaskReview",
+      kind: "agent-dispatch",
+      targetAgentIds: ["UnitTest", "TaskReview"],
+    }),
+    createMessage({
+      id: "build-dispatch-2",
+      sender: "Build",
+      timestamp: "2026-04-24T15:54:21.100Z",
+      content: "@UnitTest @TaskReview",
+      kind: "agent-dispatch",
+      targetAgentIds: ["UnitTest", "TaskReview"],
+    }),
+  ]);
+
+  assert.equal(merged.length, 1);
+  assert.equal(
+    merged[0]?.content,
+    `已把重复校验收成一条统一路径。
+
+验证结果：
+\`.venv/bin/python -m pytest\`
+\`10 passed\`
+
+@UnitTest @TaskReview`,
+  );
+});
+
+test("单条 dispatch 自身已包含尾部 mention 时，聊天展示不会再重复追加一遍", () => {
+  const merged = mergeTaskChatMessages([
+    createMessage({
+      id: "build-dispatch-with-trailing-mention",
+      sender: "Build",
+      timestamp: "2026-04-24T15:54:21.886Z",
+      content: `已把重复校验收成一条统一路径。
+
+现在 \`add_tool.py\` 里：
+- 只保留一个对外函数 \`add(a, b)\`
+- 用一个小循环统一校验 \`a\` 和 \`b\`
+- 仍然严格排除 \`bool\`
+
+验证结果：
+- \`.venv/bin/python -m pytest\`
+- \`10 passed\`
+
+如果你愿意，我可以继续把函数和测试再压到一个更极简、但仍可读的版本。
+
+@UnitTest @TaskReview`,
+      kind: "agent-dispatch",
+      targetAgentIds: ["UnitTest", "TaskReview"],
+    }),
+  ]);
+
+  assert.equal(merged.length, 1);
+  assert.equal(
+    merged[0]?.content,
+    `已把重复校验收成一条统一路径。
+
+现在 \`add_tool.py\` 里：
+- 只保留一个对外函数 \`add(a, b)\`
+- 用一个小循环统一校验 \`a\` 和 \`b\`
+- 仍然严格排除 \`bool\`
+
+验证结果：
+- \`.venv/bin/python -m pytest\`
+- \`10 passed\`
+
+如果你愿意，我可以继续把函数和测试再压到一个更极简、但仍可读的版本。
+
+@UnitTest @TaskReview`,
+  );
+});
