@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
 import test from "node:test";
 
 import type { TopologyRecord } from "@shared/types";
@@ -28,17 +26,8 @@ import {
   createGraphTaskState,
   type GraphRoutingDecision,
 } from "./gating-router";
-import { compileTeamDsl } from "./team-dsl";
+import { compileBuiltinVulnerabilityTopology } from "./builtin-topology-test-helpers";
 import { createTopology } from "./topology-test-dsl";
-
-function readBuiltinTopology(fileName: string) {
-  return JSON.parse(
-    fs.readFileSync(
-      path.resolve("config", "team-topologies", fileName),
-      "utf8",
-    ),
-  ) as Parameters<typeof compileTeamDsl>[0];
-}
 
 function parseMessageLine(line: string) {
   const parsed = parseSchedulerScriptLine(line);
@@ -75,9 +64,7 @@ test("scheduler script emulator 模块不再单独导出 parseSchedulerScriptLin
 });
 
 test("scheduler script drived 支持漏洞团队 2 个 finding 且每个 finding 各有两轮正反讨论后结束", async () => {
-  const topology = compileTeamDsl(
-    readBuiltinTopology("vulnerability-team.topology.json"),
-  ).topology;
+  const topology = compileBuiltinVulnerabilityTopology().topology;
 
   const script = [
     "user: @线索发现 请持续挖掘当前代码中的可疑漏洞点，直到没有新 finding 为止。",
@@ -100,9 +87,7 @@ test("scheduler script drived 支持漏洞团队 2 个 finding 且每个 finding
 });
 
 test("scheduler script drived 支持内置漏洞团队拓扑里的讨论总结直接 transfer 回线索发现", async () => {
-  const topology = compileTeamDsl(
-    readBuiltinTopology("vulnerability-team.topology.json"),
-  ).topology;
+  const topology = compileBuiltinVulnerabilityTopology().topology;
 
   const script = [
     "user: @线索发现 请持续挖掘当前代码中的可疑漏洞点，直到没有新 finding 为止。",
@@ -1000,9 +985,7 @@ test("scheduler script emulator 不会根据正文关键词替拓扑上的 revie
 });
 
 test("scheduler script emulator 在漏洞团队里把第二个 finding 错写成上一轮实例时直接失败", async () => {
-  const topology = compileTeamDsl(
-    readBuiltinTopology("vulnerability-team.topology.json"),
-  ).topology;
+  const topology = compileBuiltinVulnerabilityTopology().topology;
 
   const script = [
     "user: @线索发现 请持续挖掘当前代码中的可疑漏洞点，直到没有新 finding 为止。",
@@ -1071,9 +1054,7 @@ test("scheduler script emulator 不允许 dispatch source 在 batch 未被消费
 });
 
 test("scheduler script emulator 不再支持非法短别名", async () => {
-  const topology = compileTeamDsl(
-    readBuiltinTopology("vulnerability-team.topology.json"),
-  ).topology;
+  const topology = compileBuiltinVulnerabilityTopology().topology;
 
   const script = [
     "user: @线索发现 请持续挖掘当前代码中的可疑漏洞点。",
