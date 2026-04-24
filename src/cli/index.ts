@@ -400,7 +400,7 @@ function buildHelp() {
     "  task ui --file <topology-json> --message <message> [--cwd <path>]",
     "",
     "说明：",
-    "  - `task headless` 默认只打印诊断信息与 attach 调试命令；传 `--show-message` 后才展示完整消息记录。",
+    "  - `task headless` 默认打印诊断信息与 attach 调试命令；传 `--show-message` 后再额外展示完整消息记录。",
     "  - `task ui` 会在当前 CLI 进程里启动本地 Web Host，并打开浏览器；命令本身会保持驻留，按 Ctrl+C 后才清理并退出。",
     "  - 新建任务时必须传 `--file` 和 `--message`。",
   ].join("\n");

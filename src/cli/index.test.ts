@@ -70,10 +70,11 @@ test("task headless prints the log file path through renderTaskSessionSummary", 
   assert.doesNotMatch(CLI_SOURCE, /task show/);
 });
 
-test("task headless 默认隐藏消息记录，但仍然传递 attach 与消息输出开关", () => {
+test("task headless 默认保留 attach、隐藏消息记录，并继续传递输出开关", () => {
   assert.match(CLI_SOURCE, /printAttach: streamingPlan\.printAttach,/);
   assert.match(CLI_SOURCE, /printMessages: streamingPlan\.printMessages,/);
   assert.match(CLI_SOURCE, /const printMessages = options\?\.printMessages !== false;/);
+  assert.match(CLI_SOURCE, /默认打印诊断信息与 attach 调试命令；传 `--show-message` 后再额外展示完整消息记录。/);
 });
 
 test("CLI no longer depends on ProjectSnapshot or ensureProjectForPath", () => {

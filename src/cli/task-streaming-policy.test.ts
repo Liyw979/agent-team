@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { resolveCliTaskStreamingPlan } from "./task-streaming-policy";
 
-test("task headless 默认只打印 attach 调试信息，不展示消息记录", () => {
+test("task headless 默认打印 attach，但不打印消息记录", () => {
   assert.deepEqual(
     resolveCliTaskStreamingPlan({
       command: {
@@ -21,7 +21,7 @@ test("task headless 默认只打印 attach 调试信息，不展示消息记录"
   );
 });
 
-test("task headless 传 --show-message 后会打印完整群聊", () => {
+test("task headless 传 --show-message 后会继续打印 attach，并展示完整群聊", () => {
   assert.deepEqual(
     resolveCliTaskStreamingPlan({
       command: {
