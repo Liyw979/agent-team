@@ -106,3 +106,25 @@ test("task-completed 与更晚的 agent-final 必须纠正滞后的 task/agent �
   assert.equal(reconciled.task.completedAt, "2026-04-21T03:48:00.910Z");
   assert.equal(reconciled.agents.find((agent) => agent.id === "CodeReview")?.status, "completed");
 });
+
+test("reconcileTaskSnapshotFromMessages 在 agents 缺失时不会抛出 input.agents.map", () => {
+  const task: TaskRecord = {
+    id: "task-1",
+    title: "demo",
+    status: "running",
+    cwd: "/Users/liyw/code/empty",
+    opencodeSessionId: null,
+    agentCount: 0,
+    createdAt: "2026-04-24T00:00:00.000Z",
+    completedAt: null,
+    initializedAt: "2026-04-24T00:00:00.000Z",
+  };
+
+  assert.doesNotThrow(() =>
+    reconcileTaskSnapshotFromMessages({
+      task,
+      agents: undefined as unknown as TaskAgentRecord[],
+      messages: [],
+    }),
+  );
+});

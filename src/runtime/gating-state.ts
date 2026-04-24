@@ -19,6 +19,7 @@ export interface GatingSourceRevisionState {
 }
 
 export interface GatingHandoffDispatchBatchState {
+  dispatchKind: "handoff" | "approved";
   sourceAgentId: string;
   sourceContent: string;
   targets: string[];
@@ -44,6 +45,7 @@ export interface GraphSourceRevisionState {
 }
 
 export interface GraphHandoffBatchState {
+  dispatchKind: "handoff" | "approved";
   sourceAgentId: string;
   sourceContent: string;
   targets: string[];
@@ -184,6 +186,7 @@ export function cloneGraphTaskState(state: GraphTaskState): GraphTaskState {
       Object.entries(state.activeHandoffBatchBySource).map(([sourceAgentId, batch]) => [
         sourceAgentId,
         {
+          dispatchKind: batch.dispatchKind,
           sourceAgentId: batch.sourceAgentId,
           sourceContent: batch.sourceContent,
           targets: [...batch.targets],
@@ -234,6 +237,7 @@ export function graphStateToSchedulerRuntime(state: GraphTaskState): GatingSched
       Object.entries(state.activeHandoffBatchBySource).map(([sourceAgentId, batch]) => [
         sourceAgentId,
         {
+          dispatchKind: batch.dispatchKind,
           sourceAgentId: batch.sourceAgentId,
           sourceContent: batch.sourceContent,
           targets: [...batch.targets],
@@ -268,9 +272,10 @@ export function applySchedulerRuntimeToGraphState(
   state.activeHandoffBatchBySource = Object.fromEntries(
     [...runtime.activeHandoffBatchBySource.entries()].map(([sourceAgentId, batch]) => [
       sourceAgentId,
-      {
-        sourceAgentId: batch.sourceAgentId,
-        sourceContent: batch.sourceContent,
+        {
+          dispatchKind: batch.dispatchKind,
+          sourceAgentId: batch.sourceAgentId,
+          sourceContent: batch.sourceContent,
         targets: [...batch.targets],
         pendingTargets: [...batch.pendingTargets],
         respondedTargets: [...batch.respondedTargets],

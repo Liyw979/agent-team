@@ -459,6 +459,111 @@ test("spawn 运行时实例已写入 dispatch 消息但尚未落库为 task agen
   assert.equal(shouldFinish, false);
 });
 
+test("reviewer 仍处于 continue 状态时，持久化补偿逻辑不会把中途流程误判为 finished", () => {
+  const topology = createTopologyForTest({
+    nodes: ["Build", "CodeReview", "UnitTest", "TaskReview"],
+    edges: [
+      { source: "Build", target: "CodeReview", triggerOn: "transfer", messageMode: "last" },
+      { source: "Build", target: "UnitTest", triggerOn: "transfer", messageMode: "last" },
+      { source: "Build", target: "TaskReview", triggerOn: "transfer", messageMode: "last" },
+      { source: "CodeReview", target: "Build", triggerOn: "continue", messageMode: "last" },
+    ],
+  });
+  const agents = [
+    createAgent({ id: "Build", status: "completed", runCount: 2 }),
+    createAgent({ id: "CodeReview", status: "continue", runCount: 1 }),
+    createAgent({ id: "UnitTest", status: "completed", runCount: 1 }),
+    createAgent({ id: "TaskReview", status: "completed", runCount: 1 }),
+  ];
+  const messages = [
+    createMessage({
+      sender: "Build",
+      content: "Build 首轮实现完成。",
+      kind: "agent-final",
+      timestamp: "2026-04-24T15:36:15.000Z",
+    }),
+    createMessage({
+      sender: "Build",
+      content: "@CodeReview @UnitTest @TaskReview",
+      kind: "agent-dispatch",
+      targetAgentIds: ["CodeReview", "UnitTest", "TaskReview"],
+      timestamp: "2026-04-24T15:36:16.000Z",
+    }),
+    createMessage({
+      sender: "CodeReview",
+      content: "还需要继续修改。\n\n@Build",
+      kind: "continue-request",
+      targetAgentIds: ["Build"],
+      timestamp: "2026-04-24T15:36:29.000Z",
+    }),
+    createMessage({
+      sender: "UnitTest",
+      content: "测试通过。",
+      kind: "agent-final",
+      timestamp: "2026-04-24T15:37:20.000Z",
+    }),
+    createMessage({
+      sender: "TaskReview",
+      content: "可以验收。",
+      kind: "agent-final",
+      timestamp: "2026-04-24T15:37:21.000Z",
+    }),
+  ];
+
+  const shouldFinish = shouldFinishTaskFromPersistedState({
+    taskStatus: "running",
+    topology,
+    agents,
+    messages,
+  });
+
+  assert.equal(shouldFinish, false);
+});
+
+test("最新一条是 agent-dispatch 时，持久化补偿逻辑不会把重新派发中的任务误判为 finished", () => {
+  const topology = createTopologyForTest({
+    nodes: ["Build", "CodeReview", "UnitTest", "TaskReview"],
+    edges: [
+      { source: "Build", target: "CodeReview", triggerOn: "transfer", messageMode: "last" },
+      { source: "Build", target: "UnitTest", triggerOn: "transfer", messageMode: "last" },
+      { source: "Build", target: "TaskReview", triggerOn: "transfer", messageMode: "last" },
+      { source: "CodeReview", target: "Build", triggerOn: "continue", messageMode: "last" },
+      { source: "UnitTest", target: "Build", triggerOn: "continue", messageMode: "last" },
+      { source: "TaskReview", target: "Build", triggerOn: "continue", messageMode: "last" },
+    ],
+  });
+  const agents = [
+    createAgent({ id: "Build", status: "completed", runCount: 3 }),
+    createAgent({ id: "CodeReview", status: "completed", runCount: 1 }),
+    createAgent({ id: "UnitTest", status: "completed", runCount: 2 }),
+    createAgent({ id: "TaskReview", status: "completed", runCount: 1 }),
+  ];
+  const messages = [
+    createMessage({
+      sender: "Build",
+      content: "Build 已根据 UnitTest 意见修复完成。",
+      kind: "agent-final",
+      timestamp: "2026-04-24T15:37:17.000Z",
+    }),
+    createMessage({
+      sender: "Build",
+      content: "@CodeReview @TaskReview",
+      kind: "agent-dispatch",
+      targetAgentIds: ["CodeReview", "TaskReview"],
+      timestamp: "2026-04-24T15:37:20.000Z",
+    }),
+  ];
+
+  const shouldFinish = shouldFinishTaskFromPersistedState({
+    taskStatus: "running",
+    topology,
+    agents,
+    messages,
+  });
+
+  assert.equal(shouldFinish, false);
+});
+
 test("没有消息和运行痕迹时，持久化补偿逻辑只会把 Build 当默认入口 seed", () => {
   const topology = createTopologyForTest({
     nodes: ["BA", "Build", "TaskReview"],

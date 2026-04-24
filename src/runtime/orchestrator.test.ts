@@ -3130,6 +3130,143 @@ test("并发审查失败时不会提前追加任务结束系统消息", async ()
   assert.equal(failedCompletionMessages.length, 0);
 });
 
+test("重新派发 stale reviewer 的 dispatch 窗口里，不会被 getTaskSnapshot 提前补成 finished", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+
+  let releaseRedispatchSummary: () => void = () => undefined;
+  const redispatchSummaryGate = new Promise<void>((resolve) => {
+    releaseRedispatchSummary = resolve;
+  });
+  let buildRunCount = 0;
+  let unitTestRunCount = 0;
+  let taskReviewRunCount = 0;
+
+  const orchestrator = createTestOrchestrator({
+    userDataPath,
+    enableEventStream: false,
+  });
+  const typed = orchestrator as unknown as Orchestrator & {
+    opencodeClient: {
+      createSession: (projectPath: string, title: string) => Promise<string>;
+      reloadConfig: () => Promise<void>;
+    };
+    opencodeRunner: {
+      run: (payload: { agent: string }) => Promise<OpenCodeExecutionResult>;
+    };
+    buildProjectGitDiffSummary: (cwd: string) => Promise<string>;
+  };
+  stubOpenCodeAttachBaseUrl(orchestrator);
+
+  typed.opencodeClient.createSession = async (...args: [string, string]) => `session:${args[1]}`;
+  typed.opencodeClient.reloadConfig = async () => undefined;
+  typed.buildProjectGitDiffSummary = async () => {
+    if (buildRunCount >= 2 && taskReviewRunCount === 1) {
+      await redispatchSummaryGate;
+    }
+    return "";
+  };
+  typed.opencodeRunner.run = async ({ agent }) => {
+    if (agent === "Build") {
+      buildRunCount += 1;
+      return buildCompletedExecutionResult({
+        agent,
+        finalMessage: buildRunCount === 1 ? "Build 首轮实现完成。" : "Build 已根据 UnitTest 意见修复完成。",
+        messageId: `message:Build:${buildRunCount}`,
+        timestamp: `2026-04-24T15:37:1${buildRunCount}.000Z`,
+      });
+    }
+
+    if (agent === "UnitTest") {
+      unitTestRunCount += 1;
+      return buildCompletedExecutionResult({
+        agent,
+        finalMessage:
+          unitTestRunCount === 1
+            ? "UnitTest 未通过。\n\n<continue>请修复 UnitTest。</continue>"
+            : "UnitTest 通过。\n\n<complete>同意当前结果。</complete>",
+        messageId: `message:UnitTest:${unitTestRunCount}`,
+        timestamp: `2026-04-24T15:37:2${unitTestRunCount}.000Z`,
+      });
+    }
+
+    taskReviewRunCount += 1;
+    return buildCompletedExecutionResult({
+      agent,
+      finalMessage: "TaskReview 通过。\n\n<complete>同意当前结果。</complete>",
+      messageId: `message:TaskReview:${taskReviewRunCount}`,
+      timestamp: `2026-04-24T15:37:3${taskReviewRunCount}.000Z`,
+    });
+  };
+
+  let project = await orchestrator.getWorkspaceSnapshot(projectPath);
+  project = await addBuiltinAgents(orchestrator, project.cwd, ["Build", "UnitTest", "TaskReview"]);
+  await orchestrator.saveTopology({
+    cwd: project.cwd,
+    topology: {
+      ...project.topology,
+      nodes: ["Build", "UnitTest", "TaskReview"],
+      edges: [
+        { source: "Build", target: "UnitTest", triggerOn: "transfer", messageMode: "last" },
+        { source: "Build", target: "TaskReview", triggerOn: "transfer", messageMode: "last" },
+        { source: "UnitTest", target: "Build", triggerOn: "continue", messageMode: "last" },
+      ],
+    },
+  });
+
+  const submittedTask = await orchestrator.submitTask({
+    cwd: project.cwd,
+    content: "@Build 请完成这个需求。",
+  });
+
+  const snapshotDuringRedispatchWindow = await waitForTaskSnapshot(
+    orchestrator,
+    submittedTask.task.id,
+    (snapshot) =>
+      buildRunCount === 2
+      && taskReviewRunCount === 1
+      && snapshot.messages.some(
+        (message) =>
+          message.sender === "Build"
+          && message.kind === "agent-dispatch"
+          && getMessageTargetAgentIds(message).includes("TaskReview"),
+      ),
+    8000,
+  );
+
+  assert.notEqual(snapshotDuringRedispatchWindow.task.status, "finished");
+  assert.equal(
+    snapshotDuringRedispatchWindow.messages.some(
+      (message) =>
+        message.sender === "system"
+        && message.kind === "task-completed"
+        && message.status === "finished",
+    ),
+    false,
+  );
+
+  releaseRedispatchSummary();
+
+  const settledSnapshot = await waitForTaskSnapshot(
+    orchestrator,
+    submittedTask.task.id,
+    (snapshot) =>
+      snapshot.task.status === "finished"
+      && taskReviewRunCount === 2,
+    8000,
+  );
+
+  assert.equal(
+    settledSnapshot.messages.some(
+      (message) =>
+        message.sender === "system"
+        && message.kind === "task-completed"
+        && message.status === "finished",
+    ),
+    true,
+  );
+});
+
 test("getWorkspaceSnapshot 不会再跨进程回放当前工作区任务", async () => {
   const userDataPath = createTempDir();
   const projectPath = createTempDir();

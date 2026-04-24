@@ -8,10 +8,19 @@ import {
   isUserMessageRecord,
   resolveBuildAgentId,
 } from "@shared/types";
-import type { MessageRecord, TaskAgentRecord, TaskRecord, TopologyRecord } from "@shared/types";
+import type {
+  MessageRecord,
+  TaskAgentRecord,
+  TaskRecord,
+  TopologyRecord,
+} from "@shared/types";
 
 type MinimalMessage = MessageRecord;
 type MinimalAgent = Pick<TaskAgentRecord, "id" | "status" | "runCount">;
+
+function normalizeTaskAgents<T>(agents: T[] | undefined): T[] {
+  return Array.isArray(agents) ? agents : [];
+}
 
 export function resolveStandaloneTaskStatusAfterAgentRun(input: {
   latestAgentStatus: Pick<TaskAgentRecord, "status">["status"];
@@ -32,27 +41,32 @@ export function getPersistedCompletionSeedAgentIds(input: {
   agents: MinimalAgent[];
   messages: MinimalMessage[];
 }): string[] {
+  const agents = normalizeTaskAgents(input.agents);
   const validNames = new Set([
     ...input.topology.nodes,
-    ...input.agents.map((agent) => agent.id),
+    ...agents.map((agent) => agent.id),
   ]);
   const seeds = new Set<string>();
 
-  for (const agent of input.agents) {
+  for (const agent of agents) {
     if (agent.status !== "idle" || agent.runCount > 0) {
       seeds.add(agent.id);
     }
   }
 
   for (const message of input.messages) {
-    const targetAgentIds = parseTargetAgentIds(getMessageTargetAgentIds(message));
+    const targetAgentIds = parseTargetAgentIds(
+      getMessageTargetAgentIds(message),
+    );
     if (isUserMessageRecord(message)) {
       for (const targetAgentId of targetAgentIds) {
         seeds.add(targetAgentId);
       }
     }
     if (isAgentDispatchMessageRecord(message)) {
-      for (const targetName of parseTargetAgentIds(getMessageTargetAgentIds(message))) {
+      for (const targetName of parseTargetAgentIds(
+        getMessageTargetAgentIds(message),
+      )) {
         seeds.add(targetName);
       }
     }
@@ -103,11 +117,15 @@ function referencesMissingActivatedAgent(
   }
 
   if (isAgentDispatchMessageRecord(message)) {
-    return parseTargetAgentIds(getMessageTargetAgentIds(message)).some((targetName) => !knownAgentIds.has(targetName));
+    return parseTargetAgentIds(getMessageTargetAgentIds(message)).some(
+      (targetName) => !knownAgentIds.has(targetName),
+    );
   }
 
   if (isActionRequiredRequestMessageRecord(message)) {
-    return parseTargetAgentIds(getMessageTargetAgentIds(message)).some((targetAgentId) => !knownAgentIds.has(targetAgentId));
+    return parseTargetAgentIds(getMessageTargetAgentIds(message)).some(
+      (targetAgentId) => !knownAgentIds.has(targetAgentId),
+    );
   }
 
   return false;
@@ -119,6 +137,7 @@ export function shouldFinishTaskFromPersistedState(input: {
   agents: MinimalAgent[];
   messages: MinimalMessage[];
 }): boolean {
+  const agents = normalizeTaskAgents(input.agents);
   if (input.taskStatus !== "running" && input.taskStatus !== "waiting") {
     return false;
   }
@@ -127,30 +146,42 @@ export function shouldFinishTaskFromPersistedState(input: {
   if (latestMessage?.sender === "user") {
     return false;
   }
+  if (
+    latestMessage &&
+    (isAgentDispatchMessageRecord(latestMessage) ||
+      isActionRequiredRequestMessageRecord(latestMessage))
+  ) {
+    return false;
+  }
 
-  const knownAgentIds = new Set(input.agents.map((agent) => agent.id));
+  const knownAgentIds = new Set(agents.map((agent) => agent.id));
   if (referencesMissingActivatedAgent(latestMessage, knownAgentIds)) {
     return false;
   }
 
-  if (input.agents.some((agent) => agent.status === "running")) {
+  if (agents.some((agent) => agent.status === "running")) {
     return false;
   }
 
-  const participatingAgents = new Set(getPersistedCompletionSeedAgentIds(input));
+  const participatingAgents = new Set(
+    getPersistedCompletionSeedAgentIds(input),
+  );
   if (participatingAgents.size === 0) {
     return false;
   }
 
-  const participatingSucceeded = input.agents
+  const participatingSucceeded = agents
     .filter((agent) => participatingAgents.has(agent.id))
     .every((agent) => agent.status === "completed");
   if (!participatingSucceeded) {
     return false;
   }
 
-  const reachableFromParticipating = collectReachableTopologyNodes(input.topology, participatingAgents);
-  for (const agent of input.agents) {
+  const reachableFromParticipating = collectReachableTopologyNodes(
+    input.topology,
+    participatingAgents,
+  );
+  for (const agent of agents) {
     if (agent.status !== "idle" || participatingAgents.has(agent.id)) {
       continue;
     }
@@ -158,9 +189,12 @@ export function shouldFinishTaskFromPersistedState(input: {
       continue;
     }
 
-    const reachableFromIdle = collectReachableTopologyNodes(input.topology, [agent.id]);
+    const reachableFromIdle = collectReachableTopologyNodes(input.topology, [
+      agent.id,
+    ]);
     const reconnectsToParticipating = [...participatingAgents].some(
-      (participant) => participant !== agent.id && reachableFromIdle.has(participant),
+      (participant) =>
+        participant !== agent.id && reachableFromIdle.has(participant),
     );
     if (!reconnectsToParticipating) {
       return false;
@@ -170,7 +204,9 @@ export function shouldFinishTaskFromPersistedState(input: {
   return true;
 }
 
-function resolveAgentStatusFromFinalMessage(message: MessageRecord): TaskAgentRecord["status"] {
+function resolveAgentStatusFromFinalMessage(
+  message: MessageRecord,
+): TaskAgentRecord["status"] {
   if (!isAgentFinalMessageRecord(message)) {
     return "completed";
   }
@@ -193,15 +229,24 @@ function hasLaterActivationForAgent(
       continue;
     }
 
-    if (isUserMessageRecord(message) && parseTargetAgentIds(getMessageTargetAgentIds(message)).includes(agentId)) {
+    if (
+      isUserMessageRecord(message) &&
+      parseTargetAgentIds(getMessageTargetAgentIds(message)).includes(agentId)
+    ) {
       return true;
     }
 
-    if (isActionRequiredRequestMessageRecord(message) && parseTargetAgentIds(getMessageTargetAgentIds(message)).includes(agentId)) {
+    if (
+      isActionRequiredRequestMessageRecord(message) &&
+      parseTargetAgentIds(getMessageTargetAgentIds(message)).includes(agentId)
+    ) {
       return true;
     }
 
-    if (isAgentDispatchMessageRecord(message) && parseTargetAgentIds(getMessageTargetAgentIds(message)).includes(agentId)) {
+    if (
+      isAgentDispatchMessageRecord(message) &&
+      parseTargetAgentIds(getMessageTargetAgentIds(message)).includes(agentId)
+    ) {
       return true;
     }
   }
@@ -214,13 +259,15 @@ export function reconcileTaskSnapshotFromMessages(input: {
   agents: TaskAgentRecord[];
   messages: MessageRecord[];
 }) {
+  const agents = normalizeTaskAgents(input.agents);
   const latestCompletionMessage = [...input.messages]
     .reverse()
     .find((message) => isTaskCompletedMessageRecord(message));
 
   const task: TaskRecord =
     latestCompletionMessage &&
-    (latestCompletionMessage.status === "finished" || latestCompletionMessage.status === "failed")
+    (latestCompletionMessage.status === "finished" ||
+      latestCompletionMessage.status === "failed")
       ? {
           ...input.task,
           status: latestCompletionMessage.status,
@@ -237,7 +284,7 @@ export function reconcileTaskSnapshotFromMessages(input: {
   }
 
   const taskFinished = task.status === "finished";
-  const agents = input.agents.map((agent) => {
+  const reconciledAgents = agents.map((agent) => {
     if (taskFinished) {
       return {
         ...agent,
@@ -250,7 +297,13 @@ export function reconcileTaskSnapshotFromMessages(input: {
       return agent;
     }
 
-    if (hasLaterActivationForAgent(input.messages, agent.id, latestFinalMessage.timestamp)) {
+    if (
+      hasLaterActivationForAgent(
+        input.messages,
+        agent.id,
+        latestFinalMessage.timestamp,
+      )
+    ) {
       return agent;
     }
 
@@ -262,6 +315,6 @@ export function reconcileTaskSnapshotFromMessages(input: {
 
   return {
     task,
-    agents,
+    agents: reconciledAgents,
   };
 }

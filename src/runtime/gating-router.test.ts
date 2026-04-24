@@ -7,6 +7,7 @@ import {
   applyAgentResultToGraphState,
   createGraphTaskState,
   createUserDispatchDecision,
+  resolveRestrictedRepairTargetsForSource,
 } from "./gating-router";
 import { resolveExecutionReviewAgent } from "./review-agent-context";
 
@@ -96,6 +97,27 @@ test("resolveExecutionReviewAgent 会把 spawn 子图里带 complete 出边的�
       executableAgentId: "漏洞论证",
     }),
     true,
+  );
+});
+
+test("resolveRestrictedRepairTargetsForSource 只会保留 source 的直接 handoff reviewer", () => {
+  const topology: TopologyRecord = {
+    nodes: ["Build", "UnitTest", "CodeReview", "TaskReview"],
+    edges: [
+      { source: "Build", target: "UnitTest", triggerOn: "transfer", messageMode: "last" },
+      { source: "UnitTest", target: "CodeReview", triggerOn: "complete", messageMode: "last" },
+      { source: "CodeReview", target: "Build", triggerOn: "continue", messageMode: "last" },
+      { source: "CodeReview", target: "TaskReview", triggerOn: "complete", messageMode: "last" },
+    ],
+  };
+
+  assert.deepEqual(
+    resolveRestrictedRepairTargetsForSource(topology, "Build", ["CodeReview"]),
+    [],
+  );
+  assert.deepEqual(
+    resolveRestrictedRepairTargetsForSource(topology, "Build", ["UnitTest", "CodeReview"]),
+    ["UnitTest"],
   );
 });
 
@@ -237,6 +259,89 @@ test("router 会保留 CodeReview 嵌套链路可先于外层 handoff 批次剩�
   assert.deepEqual(afterUnitTest.decision, {
     type: "finished",
   });
+});
+
+test("CodeReview 通过 UnitTest 间接回流 Build 后，Build 下一轮仍会重新派发直接 handoff reviewer", () => {
+  const topology: TopologyRecord = {
+    nodes: ["BA", "Build", "UnitTest", "CodeReview", "TaskReview"],
+    edges: [
+      { source: "BA", target: "Build", triggerOn: "transfer", messageMode: "last" },
+      { source: "Build", target: "UnitTest", triggerOn: "transfer", messageMode: "last" },
+      { source: "UnitTest", target: "Build", triggerOn: "continue", messageMode: "last" },
+      { source: "UnitTest", target: "CodeReview", triggerOn: "complete", messageMode: "last" },
+      { source: "CodeReview", target: "Build", triggerOn: "continue", messageMode: "last" },
+      { source: "CodeReview", target: "TaskReview", triggerOn: "complete", messageMode: "last" },
+      { source: "TaskReview", target: "Build", triggerOn: "continue", messageMode: "last" },
+    ],
+  };
+  const baseResult = {
+    status: "completed" as const,
+    agentStatus: "completed" as const,
+    opinion: null,
+    allowDirectFallbackWhenNoBatch: false,
+    signalDone: false,
+  };
+
+  const startState = createGraphTaskState({
+    taskId: "nested-review-back-to-build",
+    topology,
+  });
+  const afterBa = applyAgentResultToGraphState(startState, {
+    agentId: "BA",
+    reviewAgent: false,
+    reviewDecision: "complete",
+    agentContextContent: "BA 已整理需求",
+    ...baseResult,
+  });
+  const afterBuild1 = applyAgentResultToGraphState(afterBa.state, {
+    agentId: "Build",
+    reviewAgent: false,
+    reviewDecision: "complete",
+    agentContextContent: "Build 第 1 次构建完成",
+    ...baseResult,
+  });
+  const afterUnitTestFail1 = applyAgentResultToGraphState(afterBuild1.state, {
+    agentId: "UnitTest",
+    reviewAgent: true,
+    reviewDecision: "continue",
+    agentContextContent: "UnitTest 第 1 轮未通过",
+    ...baseResult,
+  });
+  const afterBuild2 = applyAgentResultToGraphState(afterUnitTestFail1.state, {
+    agentId: "Build",
+    reviewAgent: false,
+    reviewDecision: "complete",
+    agentContextContent: "Build 第 2 次构建完成",
+    ...baseResult,
+  });
+  const afterUnitTestPass2 = applyAgentResultToGraphState(afterBuild2.state, {
+    agentId: "UnitTest",
+    reviewAgent: true,
+    reviewDecision: "complete",
+    agentContextContent: "UnitTest 第 2 轮通过",
+    ...baseResult,
+  });
+  const afterCodeReviewFail = applyAgentResultToGraphState(afterUnitTestPass2.state, {
+    agentId: "CodeReview",
+    reviewAgent: true,
+    reviewDecision: "continue",
+    agentContextContent: "CodeReview 未通过",
+    ...baseResult,
+  });
+
+  assert.equal(afterCodeReviewFail.decision.type, "execute_batch");
+  assert.deepEqual(afterCodeReviewFail.decision.batch.jobs.map((job) => job.agentId), ["Build"]);
+
+  const afterBuild3 = applyAgentResultToGraphState(afterCodeReviewFail.state, {
+    agentId: "Build",
+    reviewAgent: false,
+    reviewDecision: "complete",
+    agentContextContent: "Build 第 3 次构建完成",
+    ...baseResult,
+  });
+
+  assert.equal(afterBuild3.decision.type, "execute_batch");
+  assert.deepEqual(afterBuild3.decision.batch.jobs.map((job) => job.agentId), ["UnitTest"]);
 });
 
 test("router 会在并发 reviewer 未收齐前保持等待，不会提前回流", () => {

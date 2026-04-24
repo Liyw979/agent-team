@@ -156,13 +156,14 @@ export function instantiateSpawnBundles(input: {
   activationId: string;
   items: SpawnItemPayload[];
 }): SpawnBundleInstantiation[] {
+  const useExplicitIndex = input.items.length > 1;
   return input.items.map((item, index) =>
     instantiateSpawnBundle({
       topology: input.topology,
       spawnRuleId: input.spawnRuleId,
       activationId: input.activationId,
       item,
-      instanceIndex: index + 1,
+      ...(useExplicitIndex ? { instanceIndex: index + 1 } : {}),
     }),
   );
 }

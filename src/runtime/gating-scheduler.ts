@@ -105,6 +105,7 @@ export class GatingScheduler {
     }
 
     const batch: GatingHandoffDispatchBatchState = {
+      dispatchKind: "handoff",
       sourceAgentId,
       sourceContent,
       targets: targetNames,
@@ -155,6 +156,21 @@ export class GatingScheduler {
           this.buildTriggerSignature(completed, edge.target),
         );
       }
+    }
+
+    if (readyTargets.length > 0) {
+      const sourceState = this.getOrCreateSourceRevisionState(sourceAgentId);
+      const batch: GatingHandoffDispatchBatchState = {
+        dispatchKind: "approved",
+        sourceAgentId,
+        sourceContent,
+        targets: [...readyTargets],
+        pendingTargets: [...readyTargets],
+        respondedTargets: [],
+        sourceRevision: sourceState.currentRevision,
+        failedTargets: [],
+      };
+      this.runtime.activeHandoffBatchBySource.set(sourceAgentId, batch);
     }
 
     return readyTargets.length > 0
@@ -212,7 +228,7 @@ export class GatingScheduler {
         };
       }
 
-      if (batch.targets.length === 1) {
+      if (batch.dispatchKind === "handoff" && batch.targets.length === 1) {
         const staleTargets = this.getHandoffTargetsForBatch(sourceAgentId, batch).filter(
           (targetName) => sourceState.reviewerPassRevision.get(targetName) !== batch.sourceRevision,
         );

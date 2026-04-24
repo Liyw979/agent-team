@@ -233,8 +233,6 @@ function buildSpawnRules(input: CreateTopologyDslInput): SpawnRule[] {
   });
 }
 
-export function createTopology(input: CreateTopologyLegacyInput): TopologyRecord;
-export function createTopology(input: CreateTopologyDslInput): TopologyRecord;
 export function createTopology(
   input: CreateTopologyDslInput | CreateTopologyLegacyInput,
 ): TopologyRecord {

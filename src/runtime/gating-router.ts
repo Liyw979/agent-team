@@ -3,6 +3,7 @@ import {
   getActionRequiredEdgeLoopLimit,
   getSpawnRules,
   type AgentStatus,
+  type TopologyRecord,
   type TopologyEdgeTrigger,
 } from "@shared/types";
 
@@ -255,6 +256,20 @@ export function applyAgentResultToGraphState(
   };
 }
 
+export function resolveRestrictedRepairTargetsForSource(
+  topology: TopologyRecord,
+  sourceAgentId: string,
+  requestedTargets: string[],
+): string[] {
+  const topologyIndex = compileTopology(topology);
+  const directHandoffTargets = new Set(topologyIndex.handoffTargetsBySource[sourceAgentId] ?? []);
+  if (directHandoffTargets.size === 0) {
+    return [];
+  }
+
+  return requestedTargets.filter((target) => directHandoffTargets.has(target));
+}
+
 function handleActionRequired(
   state: GraphTaskState,
   result: GraphAgentResult,
@@ -310,9 +325,14 @@ function handleActionRequired(
         waitingReason: "missing_continue_request",
       };
     }
-    state.pendingHandoffRepairTargetsBySource[repairTargetAgentId] = [
-      continuation.repairReviewerAgentId,
-    ];
+    const restrictedRepairTargets = resolveRestrictedRepairTargetsForSource(
+      buildEffectiveTopology(state),
+      repairTargetAgentId,
+      [continuation.repairReviewerAgentId],
+    );
+    if (restrictedRepairTargets.length > 0) {
+      state.pendingHandoffRepairTargetsBySource[repairTargetAgentId] = restrictedRepairTargets;
+    }
     const revisionContent =
       storedReview.opinion?.trim()
       || storedReview.agentContextContent
@@ -413,9 +433,14 @@ function continueAfterHandoffBatchResponse(
         waitingReason: "missing_continue_request",
       };
     }
-    state.pendingHandoffRepairTargetsBySource[continuation.sourceAgentId] = [
-      continuation.repairReviewerAgentId,
-    ];
+    const restrictedRepairTargets = resolveRestrictedRepairTargetsForSource(
+      buildEffectiveTopology(state),
+      continuation.sourceAgentId,
+      [continuation.repairReviewerAgentId],
+    );
+    if (restrictedRepairTargets.length > 0) {
+      state.pendingHandoffRepairTargetsBySource[continuation.sourceAgentId] = restrictedRepairTargets;
+    }
     const revisionContent =
       storedReview.opinion?.trim()
       || storedReview.agentContextContent
@@ -973,7 +998,14 @@ function continueAfterReviewerLoopLimit(
       };
     }
 
-    state.pendingHandoffRepairTargetsBySource[repairTargetAgentId] = [nextReviewerAgentId];
+    const restrictedRepairTargets = resolveRestrictedRepairTargetsForSource(
+      buildEffectiveTopology(state),
+      repairTargetAgentId,
+      [nextReviewerAgentId],
+    );
+    if (restrictedRepairTargets.length > 0) {
+      state.pendingHandoffRepairTargetsBySource[repairTargetAgentId] = restrictedRepairTargets;
+    }
     delete state.pendingActionRequiredRequestsByAgent[nextReviewerAgentId];
     return triggerActionRequiredRequestDownstream(
       state,
