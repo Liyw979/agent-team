@@ -110,6 +110,7 @@
 - Agent 自动触发下游 Agent 时，只有首次自动流转会封装 `[Initial Task]` 与 `[From <AgentId> Agent]` 结构化段落；后续 Agent 间继续流转时只保留 `[From <AgentId> Agent]`，其中 `[Initial Task]` 固定承载当前 Task 的首条用户任务。orchestrator[consumeInitialTaskForwardingAllowanceFromGraphState, buildAgentExecutionPrompt]、message-forwarding[buildDownstreamForwardedContextFromMessages, getInitialUserMessageContent]
 - 对非 `Build` 且非审查类的下游，系统会在 `[Project Git Diff Summary]` 段附带当前 Project Git Diff 的精简摘要，帮助下游 Agent 快速感知最新改动；发给 `Build` 或审查类 Agent 时不附带该段，避免把辅助上下文误判为待审正文。orchestrator[buildProjectGitDiffSummary, createLangGraphBatchRunners]、types[usesOpenCodeBuiltinPrompt, isReviewAgentInTopology]
 - Agent 自动派发下游时，不会额外补充整段群聊历史，但会携带本轮需要的首条用户任务与当前上游结果；若上游结果已完整包含用户消息，会自动去重。message-forwarding[buildDownstreamForwardedContextFromMessages, contentContainsNormalized]、orchestrator[createLangGraphBatchRunners]
+- 当边的 `message_type = all` 时，下游转发语义以“群聊语义层”作为真源：必须先经过 `chat-messages[mergeTaskChatMessages]` 合并出用户实际看到的消息卡片，再基于该卡片生成 transcript；不能直接遍历原始 `MessageRecord[]` 拼接，否则会把 `agent-final` 中已经出现过的继续处理正文，再由后续 `continue-request` 原样追加第二遍。message-forwarding[buildDownstreamForwardedContextFromMessages]、chat-messages[mergeTaskChatMessages]
 - 群聊落库与 Agent 间转发只使用 OpenCode 返回消息里的公开 `text` part；`reasoning`、步骤和工具调用不会混入群聊正文或下游 prompt。opencode-client[extractVisibleMessageText, getSessionRuntime]、orchestrator[stripStructuredSignals]
 - 同一个 Agent 的最终回复后若紧接着自动向下游传递，群聊会把“最终回复 + 下游派发提示”合并成同一条消息；合并后只追加 `@目标Agent` 标记，避免连续出现两条重复的同名 Agent 卡片。chat-messages[mergeTaskChatMessages]、chat-message-format[buildMentionSuffix, formatAgentDispatchContent]
 - 审查 Agent 给出以 `<continue>` 开头的尾段后，群聊会把该 Agent 的结果正文与回应请求合并展示成同一条消息，并在消息末尾统一追加 `@目标Agent` 标记；右侧结束标签可选。chat-messages[mergeTaskChatMessages]、chat-message-format[formatActionRequiredRequestContent]、review-response[stripReviewResponseMarkup, stripLeadingReviewResponseLabel]
@@ -236,6 +237,7 @@ bun run dist:mac-x64
 - 新增或修改字段、函数入参、返回值时，尽量避免引入 `prop?: T`、`T | null`、`T | undefined` 这类宽松可空类型；优先通过更稳定的模型表达状态差异。确实需要“缺失值”语义时，也要先统一该字段在当前层级到底使用“必填值”“可选字段”还是“显式 `null`”，避免同一语义同时混用 optional、`undefined`、`null` 三套表达。
 - 涉及调度状态变化、回流顺序、裁决转发、spawn 对话推进等用户可见协作语义时，新增覆盖优先写进 `src/runtime/scheduler-script-emulator-migration.test.ts` 这类 script 测试，用对话脚本直接驱动 `src/runtime/scheduler-script-emulator.ts` 和真实调度核心验证流转；只有当该行为依赖内部暂存状态、且确实无法自然表达为一段用户可见对话脚本时，才保留在 `src/runtime/gating-router.test.ts` / `src/runtime/orchestrator.test.ts` 做纯状态测试。
 - 所有 Agent 对话顺序类单元测试，在排查和修复前都必须优先补成 `src/runtime/scheduler-script-emulator-migration.test.ts` 这类 script 脚本复现；先用脚本把真实对话顺序跑出失败，再继续修改实现与复验通过。
+- 群聊合并、`continue-request`、`message_type = all` 转发这类消息语义测试，测试夹具必须显式写出真实落库形态：例如 `agent-final` 中真实存在的正文与 `<continue>/<complete>` 尾段，以及 `continue-request` 独立落库后的正文与尾部 `@目标Agent`。禁止为了“制造重复”而在测试里手工把同一段正文复制两遍，再倒推出实现应该去重；断言目标必须直接对齐“用户实际看到的群聊语义卡片”或“基于该语义卡片生成的 transcript”。chat-messages[mergeTaskChatMessages]、message-forwarding[buildDownstreamForwardedContextFromMessages]
 
 打包注意事项：
 

@@ -171,6 +171,7 @@ function extractAgentFinalDisplayContent(message: MessageRecord): string {
 function buildMergedActionRequiredRequestContent(previous: ChatMessageItem, current: MessageRecord): string {
   const summary = previous.content.trim();
   const feedback = getActionRequiredRequestDisplayBody(current);
+  const previousLastMessage = previous.messageChain.at(-1);
   if (!feedback) {
     return formatDisplayContentWithStoredMentions(current.content, summary);
   }
@@ -180,6 +181,14 @@ function buildMergedActionRequiredRequestContent(previous: ChatMessageItem, curr
   const normalizedSummaryFeedback = stripRevisionFeedbackLabel(summary)
     .replace(/\s+/g, " ")
     .trim();
+  const normalizedPreviousFinalResponse =
+    previousLastMessage
+    && isAgentFinalMessageRecord(previousLastMessage)
+    && previousLastMessage.reviewDecision === "continue"
+      ? (extractLastReviewResponse(previousLastMessage.content) || "")
+        .replace(/\s+/g, " ")
+        .trim()
+      : "";
 
   if (!normalizedSummary) {
     return formatDisplayContentWithStoredMentions(current.content, feedback);
@@ -187,7 +196,8 @@ function buildMergedActionRequiredRequestContent(previous: ChatMessageItem, curr
 
   if (
     normalizedSummary === normalizedFeedback ||
-    normalizedSummaryFeedback === normalizedFeedback
+    normalizedSummaryFeedback === normalizedFeedback ||
+    normalizedPreviousFinalResponse === normalizedFeedback
   ) {
     return formatDisplayContentWithStoredMentions(current.content, summary);
   }

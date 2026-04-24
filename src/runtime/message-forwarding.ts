@@ -6,6 +6,7 @@ import {
   type TopologyEdgeMessageMode,
 } from "@shared/types";
 import { withOptionalString } from "@shared/object-utils";
+import { mergeTaskChatMessages, type ChatMessageItem } from "../lib/chat-messages";
 
 type MinimalMessage = MessageRecord;
 
@@ -113,32 +114,70 @@ function resolveForwardedAgentMessage(
 }
 
 function buildForwardableTranscript(messages: MinimalMessage[]): string {
-  return messages
-    .filter((message) => isForwardableMessage(message))
-    .map((message) => formatForwardableMessage(message))
+  return mergeTaskChatMessages(messages)
+    .filter((item) => isForwardableChatMessageItem(item))
+    .map((item) => formatForwardableChatMessageItem(item))
     .filter(Boolean)
     .join("\n\n");
 }
 
-function isForwardableMessage(message: MinimalMessage): boolean {
-  if (!message.content.trim()) {
+function isForwardableChatMessageItem(item: ChatMessageItem): boolean {
+  if (!item.content.trim()) {
     return false;
   }
-  return !isAgentDispatchMessageRecord(message);
+  if (item.sender === "system") {
+    return false;
+  }
+  return !item.messageChain.every((message) => isAgentDispatchMessageRecord(message));
 }
 
-function formatForwardableMessage(message: MinimalMessage): string {
-  const sender = message.sender.trim() || "Unknown";
-  const targetAgentId = getMessageTargetAgentIds(message)[0]?.trim();
-  const content = sender === "user" && targetAgentId
-    ? stripTargetMention(message.content, targetAgentId)
-    : message.content.trim();
+function formatForwardableChatMessageItem(item: ChatMessageItem): string {
+  const sender = item.sender.trim() || "Unknown";
+  const content = normalizeForwardableChatMessageItemContent(item);
 
   if (!content) {
     return "";
   }
 
   return `[${sender}] ${content}`;
+}
+
+function normalizeForwardableChatMessageItemContent(item: ChatMessageItem): string {
+  const trimmed = item.content.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  if (item.sender === "user") {
+    const targetAgentId = item.messageChain
+      .flatMap((message) => getMessageTargetAgentIds(message))
+      .map((value) => value.trim())
+      .find(Boolean);
+    const stripped = targetAgentId
+      ? stripTargetMention(trimmed, targetAgentId)
+      : trimmed;
+    return stripTrailingStandaloneMentions(stripped);
+  }
+
+  return stripTrailingStandaloneMentions(trimmed);
+}
+
+function stripTrailingStandaloneMentions(content: string): string {
+  const trimmed = content.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const lines = trimmed.split(/\r?\n/);
+  while (lines.length > 0) {
+    const lastLine = lines.at(-1)?.trim() ?? "";
+    if (!/^(?:@\S+\s*)+$/u.test(lastLine)) {
+      break;
+    }
+    lines.pop();
+  }
+
+  return lines.join("\n").trim();
 }
 
 function stripLeadingTargetMention(content: string, targetAgentId: string): string {
