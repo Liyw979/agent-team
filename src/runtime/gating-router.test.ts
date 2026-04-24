@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
 import test from "node:test";
 
 import type { TopologyRecord } from "@shared/types";
@@ -11,22 +9,11 @@ import {
   createUserDispatchDecision,
   resolveRestrictedRepairTargetsForSource,
 } from "./gating-router";
+import { compileBuiltinVulnerabilityTopology } from "./builtin-topology-test-helpers";
 import { resolveExecutionReviewAgent } from "./review-agent-context";
-import { compileTeamDsl } from "./team-dsl";
-
-function readBuiltinTopology(fileName: string) {
-  return JSON.parse(
-    fs.readFileSync(
-      path.resolve("config", "team-topologies", fileName),
-      "utf8",
-    ),
-  ) as Parameters<typeof compileTeamDsl>[0];
-}
 
 function createBuiltinVulnerabilityTopology(): TopologyRecord {
-  return compileTeamDsl(
-    readBuiltinTopology("vulnerability-team.topology.json"),
-  ).topology;
+  return compileBuiltinVulnerabilityTopology().topology;
 }
 
 function createTopology(): TopologyRecord {
@@ -963,7 +950,8 @@ test("spawn 子图全部完成后，会把 spawn 节点视为完成并按普通 
     spawnRules: [
       {
         id: "spawn-rule:辩论",
-        sourceTemplateName: "辩论",
+        spawnNodeName: "辩论",
+        sourceTemplateName: "线索发现",
         entryRole: "漏洞论证",
         spawnedAgents: [
           { role: "漏洞论证", templateName: "漏洞论证" },
@@ -973,6 +961,8 @@ test("spawn 子图全部完成后，会把 spawn 节点视为完成并按普通 
           { sourceRole: "漏洞论证", targetRole: "讨论总结", triggerOn: "complete", messageMode: "last" },
         ],
         exitWhen: "all_completed",
+        reportToTemplateName: "线索发现",
+        reportToTriggerOn: "transfer",
       },
     ],
   };
@@ -1026,7 +1016,7 @@ test("spawn 子图全部完成后，会把 spawn 节点视为完成并按普通 
   });
 
   assert.equal(afterSummary.decision.type, "execute_batch");
-  assert.equal(afterSummary.decision.batch.sourceAgentId, "辩论");
+  assert.equal(afterSummary.decision.batch.sourceAgentId, "讨论总结-1");
   assert.deepEqual(afterSummary.decision.batch.jobs.map((job) => job.agentId), ["线索发现"]);
 });
 

@@ -14,6 +14,7 @@ import {
 import type { OpenCodeExecutionResult } from "./opencode-client";
 import { Orchestrator, isTerminalTaskStatus } from "./orchestrator";
 import { buildAgentSystemPrompt } from "./agent-system-prompt";
+import { compileBuiltinVulnerabilityTopology } from "./builtin-topology-test-helpers";
 import { buildDownstreamForwardedContextFromMessages } from "./message-forwarding";
 import { compileTeamDsl, type TeamDslDefinition } from "./team-dsl";
 import { isOpenCodeServeCommand } from "./opencode-process-cleanup";
@@ -350,12 +351,6 @@ async function waitForValue<T>(
   throw new Error(`Value did not satisfy the predicate in ${timeoutMs}ms.`);
 }
 
-function readBuiltinTopologyJson(fileName: string) {
-  return JSON.parse(
-    fs.readFileSync(path.join("config", "team-topologies", fileName), "utf8"),
-  ) as TeamDslDefinition;
-}
-
 test("task init 会补齐 OpenCode 运行态", async () => {
   const userDataPath = createTempDir();
   const projectPath = createTempDir();
@@ -384,7 +379,7 @@ test("漏洞团队任务初始化时不会为仅作为 spawn 模板存在的静�
   });
   stubOpenCodeSessions(orchestrator);
 
-  const compiled = compileTeamDsl(readBuiltinTopologyJson("vulnerability-team.topology.json"));
+  const compiled = compileBuiltinVulnerabilityTopology();
   await orchestrator.applyTeamDsl({
     cwd: projectPath,
     compiled,
@@ -679,7 +674,7 @@ test("漏洞团队里漏洞挑战返回 complete 后会继续派发到讨论总�
     });
   };
 
-  const compiled = compileTeamDsl(readBuiltinTopologyJson("vulnerability-team.topology.json"));
+  const compiled = compileBuiltinVulnerabilityTopology();
   await orchestrator.applyTeamDsl({
     cwd: projectPath,
     compiled,
@@ -797,7 +792,7 @@ test("漏洞团队里讨论总结以 transfer + none 回到线索发现时，会
     });
   };
 
-  const compiled = compileTeamDsl(readBuiltinTopologyJson("vulnerability-team.topology.json"));
+  const compiled = compileBuiltinVulnerabilityTopology();
   await orchestrator.applyTeamDsl({
     cwd: projectPath,
     compiled,
@@ -932,7 +927,7 @@ test("漏洞团队第二轮 finding 已经派发到 漏洞挑战-2 时，UI 仍�
     });
   };
 
-  const compiled = compileTeamDsl(readBuiltinTopologyJson("vulnerability-team.topology.json"));
+  const compiled = compileBuiltinVulnerabilityTopology();
   await orchestrator.applyTeamDsl({
     cwd: projectPath,
     compiled,
@@ -1040,7 +1035,7 @@ test("漏洞团队 spawn runtime agent 尚未落库时，getTaskSnapshot 不会�
     throw new Error("测试在验证 dispatch 窗口后主动终止后续执行。");
   };
 
-  const compiled = compileTeamDsl(readBuiltinTopologyJson("vulnerability-team.topology.json"));
+  const compiled = compileBuiltinVulnerabilityTopology();
   await orchestrator.applyTeamDsl({
     cwd: projectPath,
     compiled,
