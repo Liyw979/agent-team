@@ -8,7 +8,7 @@ import {
 
 export interface TopologyAgentStatusBadgePresentation {
   label: string;
-  icon: "idle" | "running" | "success" | "failed";
+  icon: "idle" | "running" | "success" | "continue" | "failed";
   className: string;
   effectClassName: string;
 }
@@ -48,15 +48,17 @@ export function getTopologyAgentStatusBadgePresentation(
         label: reviewAgent
           ? (isFinalLoopFailedReviewer ? "继续处理，最后一次" : "继续处理")
           : "执行失败",
-        icon: "failed",
-        className: "border border-[#d66b63]/45 bg-[#fff1ef] text-[#a33f38]",
+        icon: reviewAgent ? "continue" : "failed",
+        className: reviewAgent
+          ? "border border-[#d6a14a]/55 bg-[#fff7e8] text-[#8a5a12]"
+          : "border border-[#d66b63]/45 bg-[#fff1ef] text-[#a33f38]",
         effectClassName: "",
       };
     case "continue":
       return {
         label: "继续处理",
-        icon: "failed",
-        className: "border border-[#d66b63]/45 bg-[#fff1ef] text-[#a33f38]",
+        icon: "continue",
+        className: "border border-[#d6a14a]/55 bg-[#fff7e8] text-[#8a5a12]",
         effectClassName: "",
       };
     case "running":

@@ -66,7 +66,7 @@ test("getTopologyAgentStatusBadgePresentation 会把普通 agent 状态映射为
   );
 });
 
-test("getTopologyAgentStatusBadgePresentation 会把审查 agent 映射为审查类状态文案和失败图标", () => {
+test("getTopologyAgentStatusBadgePresentation 会把审查 agent 映射为 continue/complete 语义对应的状态徽标", () => {
   const topology = {
     edges: [
       {
@@ -92,8 +92,8 @@ test("getTopologyAgentStatusBadgePresentation 会把审查 agent 映射为审查
     getTopologyAgentStatusBadgePresentation(topology, "CodeReview", "continue"),
     {
       label: "继续处理",
-      icon: "failed",
-      className: "border border-[#d66b63]/45 bg-[#fff1ef] text-[#a33f38]",
+      icon: "continue",
+      className: "border border-[#d6a14a]/55 bg-[#fff7e8] text-[#8a5a12]",
       effectClassName: "",
     },
   );
@@ -104,8 +104,8 @@ test("getTopologyAgentStatusBadgePresentation 会把审查 agent 映射为审查
     }),
     {
       label: "继续处理，最后一次",
-      icon: "failed",
-      className: "border border-[#d66b63]/45 bg-[#fff1ef] text-[#a33f38]",
+      icon: "continue",
+      className: "border border-[#d6a14a]/55 bg-[#fff7e8] text-[#8a5a12]",
       effectClassName: "",
     },
   );
