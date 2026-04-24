@@ -70,7 +70,10 @@ import { LangGraphRuntime } from "./langgraph-runtime";
 import type { LangGraphTaskLoopHost } from "./langgraph-host";
 import type { GraphDispatchBatch, GraphAgentResult } from "./gating-router";
 import type { GraphTaskState } from "./gating-state";
-import { buildTaskCompletionMessageContent } from "./task-completion-message";
+import {
+  buildTaskCompletionMessageContent,
+  buildTaskRoundFinishedMessageContent,
+} from "./task-completion-message";
 import { buildEffectiveTopology, getRuntimeTemplateName } from "./runtime-topology-graph";
 import type { CompiledTeamDsl } from "./team-dsl";
 import { shouldScheduleEventStreamReconnect } from "./event-stream-lifecycle";
@@ -683,7 +686,7 @@ export class Orchestrator {
     });
 
     if (nextTaskStatus === "finished") {
-      await this.completeTask(task.cwd, task.id, "finished");
+      await this.completeTask(task.cwd, task.id, "finished", "standalone_round_finished");
       return;
     }
 
@@ -692,7 +695,6 @@ export class Orchestrator {
       return;
     }
 
-    this.moveTaskToWaiting(task.cwd, task.id, agentId);
   }
 
   private shouldSuppressDuplicateDispatchMessage(
@@ -770,7 +772,7 @@ export class Orchestrator {
       return;
     }
 
-    await this.completeTask(task.cwd, taskId, "finished");
+    await this.completeTask(task.cwd, taskId, "finished", "persisted_round_finished");
   }
 
   private async reconcilePersistedWorkspaceTasks(cwd: string) {
@@ -1395,14 +1397,8 @@ export class Orchestrator {
     const host: LangGraphTaskLoopHost = {
       createBatchRunners: async ({ taskId, state, batch }) =>
         this.createLangGraphBatchRunners(cwd, taskId, state, batch),
-      moveTaskToWaiting: async ({ taskId, state }) =>
-        this.moveTaskToWaiting(
-          cwd,
-          taskId,
-          this.resolveWaitingSourceAgentId(cwd, taskId, state),
-        ),
-      completeTask: async ({ taskId, status, failureReason }) =>
-        this.completeTask(cwd, taskId, status, failureReason),
+      completeTask: async ({ taskId, status, finishReason, failureReason }) =>
+        this.completeTask(cwd, taskId, status, finishReason, failureReason),
     };
     runtime = new LangGraphRuntime({
       host,
@@ -1413,13 +1409,6 @@ export class Orchestrator {
 
   private async deleteTaskGraphRuntime(task: Pick<TaskRecord, "id" | "cwd">) {
     await this.getLangGraphRuntime(task.cwd).deleteTask(task.id);
-  }
-
-  private resolveWaitingSourceAgentId(cwd: string, taskId: string, state: GraphTaskState): string {
-    const latestAgentMessage = [...this.store.listMessages(cwd, taskId)]
-      .reverse()
-      .find((message) => message.kind === "agent-final");
-    return latestAgentMessage?.sender ?? state.topology.nodes[0] ?? "Orchestrator";
   }
 
   private consumeInitialTaskForwardingAllowanceFromGraphState(state: GraphTaskState): boolean {
@@ -1782,6 +1771,7 @@ export class Orchestrator {
     cwd: string,
     taskId: string,
     status: Extract<TaskRecord["status"], "finished" | "failed">,
+    finishReason?: string | null,
     failureReason?: string | null,
   ) {
     const currentTask = this.store.getTask(cwd, taskId);
@@ -1790,39 +1780,32 @@ export class Orchestrator {
     }
 
     const completedAt = status === "finished" || status === "failed" ? new Date().toISOString() : null;
-    if (status === "finished") {
-      for (const agent of this.store.listTaskAgents(cwd, taskId)) {
-        if (agent.status === "completed") {
-          continue;
-        }
-        this.store.updateTaskAgentStatus(cwd, taskId, agent.id, "completed");
-        this.emit({
-          type: "agent-status-changed",
-          cwd,
-          payload: {
-            taskId,
-            agentId: agent.id,
-            status: "completed",
-            runCount: agent.runCount,
-          },
-        });
-      }
-    }
     this.store.updateTaskStatus(cwd, taskId, status, completedAt);
     const snapshot = this.hydrateTask(cwd, taskId);
     const completionTimestamp = this.createTrailingMessageTimestamp(cwd, taskId);
-    const completionMessage: MessageRecord = {
-      id: randomUUID(),
-      taskId,
-      sender: "system",
-      timestamp: completionTimestamp,
-      content: buildTaskCompletionMessageContent(withOptionalValue({
-        status,
-        taskTitle: snapshot.task.title,
-      }, "failureReason", failureReason)),
-      kind: "task-completed",
-      status,
-    };
+    const completionMessage: MessageRecord =
+      status === "finished"
+        ? {
+            id: randomUUID(),
+            taskId,
+            sender: "system",
+            timestamp: completionTimestamp,
+            content: buildTaskRoundFinishedMessageContent(),
+            kind: "task-round-finished",
+            finishReason: finishReason ?? "round_finished",
+          }
+        : {
+            id: randomUUID(),
+            taskId,
+            sender: "system",
+            timestamp: completionTimestamp,
+            content: buildTaskCompletionMessageContent(withOptionalValue({
+              status,
+              taskTitle: snapshot.task.title,
+            }, "failureReason", failureReason)),
+            kind: "task-completed",
+            status: "failed",
+          };
     this.store.insertMessage(cwd, completionMessage);
     this.emit({
       type: "message-created",
@@ -1889,36 +1872,6 @@ export class Orchestrator {
     throw new Error(
       `拓扑边不存在，无法解析 messageMode：${sourceAgentId} -> ${targetAgentId} (${normalizedTriggerOn})`,
     );
-  }
-
-  private moveTaskToWaiting(cwd: string, taskId: string, sourceAgentId: string) {
-    const currentTask = this.store.getTask(cwd, taskId);
-    if (currentTask.status === "waiting") {
-      return;
-    }
-
-    if (!this.updateTaskStatusIfActive(cwd, taskId, "waiting", null)) {
-      return;
-    }
-    const waitingMessage = {
-      id: randomUUID(),
-      taskId,
-      content: `Orchestrator 已收到 ${sourceAgentId} 的结果，但当前拓扑下没有可自动继续推进的下游节点，Task 保持等待状态。`,
-      sender: "system",
-      timestamp: new Date().toISOString(),
-      kind: "orchestrator-waiting",
-    } satisfies MessageRecord;
-    this.store.insertMessage(cwd, waitingMessage);
-    this.emit({
-      type: "message-created",
-      cwd,
-      payload: waitingMessage,
-    });
-    this.emit({
-      type: "task-updated",
-      cwd,
-      payload: this.hydrateTask(cwd, taskId),
-    });
   }
 
   private getAgentDisplayName(id: string) {

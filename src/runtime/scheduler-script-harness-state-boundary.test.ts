@@ -17,7 +17,7 @@ test("scheduler script harness 仍保留 expectedDecisions 能力供对照", () 
   assert.equal(
     source.includes("expectedDecisions"),
     true,
-    "scheduler-script-harness.ts 仍需保留 expectedDecisions，作为旧 harness 行为对照基线",
+    "scheduler-script-harness.ts 需要支持 expectedDecisions，作为旧 harness 行为对照，并承接 finished/execute_batch 这类状态流转断言",
   );
 });
 

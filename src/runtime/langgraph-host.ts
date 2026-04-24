@@ -19,13 +19,10 @@ export interface LangGraphTaskLoopHost {
     state: GraphTaskState;
     batch: GraphDispatchBatch;
   }): Promise<LangGraphBatchRunner[]>;
-  moveTaskToWaiting(input: {
-    taskId: string;
-    state: GraphTaskState;
-  }): Promise<void>;
   completeTask(input: {
     taskId: string;
     status: "finished" | "failed";
+    finishReason?: string | null;
     failureReason?: string | null;
   }): Promise<void>;
 }

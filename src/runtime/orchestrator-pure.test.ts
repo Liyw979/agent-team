@@ -18,7 +18,8 @@ type TestMessageInput = {
   kind?: MessageRecord["kind"];
   targetAgentIds?: string[];
   agentFinalStatus?: "completed" | "error";
-  taskCompletedStatus?: "finished" | "failed";
+  taskCompletedStatus?: "failed";
+  finishReason?: string;
   reviewDecision?: "complete" | "continue" | "invalid";
   senderDisplayName?: string;
 };
@@ -134,7 +135,17 @@ function createMessage(input: TestMessageInput): MessageRecord {
         content: input.content,
         timestamp,
         kind: "task-completed",
-        status: input.taskCompletedStatus ?? "finished",
+        status: "failed",
+      };
+    case "task-round-finished":
+      return {
+        id,
+        taskId,
+        sender: "system",
+        content: input.content,
+        timestamp,
+        kind: "task-round-finished",
+        finishReason: input.finishReason ?? "round_finished",
       };
     case "task-created":
       return {
@@ -144,15 +155,6 @@ function createMessage(input: TestMessageInput): MessageRecord {
         content: input.content,
         timestamp,
         kind: "task-created",
-      };
-    case "orchestrator-waiting":
-      return {
-        id,
-        taskId,
-        sender: "system",
-        content: input.content,
-        timestamp,
-        kind: "orchestrator-waiting",
       };
     case "system-message":
       return {
@@ -627,7 +629,7 @@ test("reviewer 缺少强制标签时应标记为 failed", () => {
   assert.equal(status, "failed");
 });
 
-test("非拓扑驱动的单次执行后，仍有未完成 Agent 时任务进入 waiting", () => {
+test("非拓扑驱动的单次执行后，仍有未完成 Agent 时任务进入 finished", () => {
   const status = resolveStandaloneTaskStatusAfterAgentRun({
     latestAgentStatus: "completed",
     agentStatuses: [
@@ -636,7 +638,7 @@ test("非拓扑驱动的单次执行后，仍有未完成 Agent 时任务进入 
     ],
   });
 
-  assert.equal(status, "waiting");
+  assert.equal(status, "finished");
 });
 
 test("非拓扑驱动的单次执行后，全部 Agent 已完成时任务进入 finished", () => {

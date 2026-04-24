@@ -35,9 +35,17 @@ function createUiSnapshotPayload(input: {
   unitTestStatus: "idle" | "running" | "completed";
   buildStatus?: "idle" | "running" | "completed";
   messageCount?: number;
+  taskStatus?: "running" | "finished" | "failed";
+  completedAt?: string | null;
+  baRunCount?: number;
+  unitTestRunCount?: number;
+  buildRunCount?: number;
 }): UiSnapshotPayload {
   const buildStatus = input.buildStatus ?? "idle";
   const messageCount = input.messageCount ?? 0;
+  const baRunCount = input.baRunCount ?? (input.baStatus === "idle" ? 0 : 1);
+  const unitTestRunCount = input.unitTestRunCount ?? (input.unitTestStatus === "idle" ? 0 : 1);
+  const buildRunCount = input.buildRunCount ?? (buildStatus === "idle" ? 0 : 1);
   return {
     workspace: null,
     launchTaskId: "task-1",
@@ -48,12 +56,12 @@ function createUiSnapshotPayload(input: {
       task: {
         id: "task-1",
         title: "demo",
-        status: "running" as const,
+        status: input.taskStatus ?? "running",
         cwd: "/Users/liyw/code/empty",
         opencodeSessionId: null,
         agentCount: 2,
         createdAt: "2026-04-21T03:22:09.404Z",
-        completedAt: null,
+        completedAt: input.completedAt ?? null,
         initializedAt: "2026-04-21T03:22:11.615Z",
       },
       agents: [
@@ -63,7 +71,7 @@ function createUiSnapshotPayload(input: {
           opencodeSessionId: null,
           opencodeAttachBaseUrl: null,
           status: input.baStatus,
-          runCount: input.baStatus === "idle" ? 0 : 1,
+          runCount: baRunCount,
         },
         {
           taskId: "task-1",
@@ -71,7 +79,7 @@ function createUiSnapshotPayload(input: {
           opencodeSessionId: null,
           opencodeAttachBaseUrl: null,
           status: input.unitTestStatus,
-          runCount: input.unitTestStatus === "idle" ? 0 : 1,
+          runCount: unitTestRunCount,
         },
         {
           taskId: "task-1",
@@ -79,7 +87,7 @@ function createUiSnapshotPayload(input: {
           opencodeSessionId: null,
           opencodeAttachBaseUrl: null,
           status: buildStatus,
-          runCount: buildStatus === "idle" ? 0 : 1,
+          runCount: buildRunCount,
         },
       ],
       messages: Array.from({ length: messageCount }).map((value, index) => {
@@ -198,4 +206,37 @@ test("较大的请求号若带回更旧的任务快照，必须被拒绝，避�
   assert.equal(rejectedSemanticallyOlder.accepted, false);
   assert.equal(rejectedSemanticallyOlder.latestAcceptedRequestId, acceptedFresh.latestAcceptedRequestId);
   assert.equal(rejectedSemanticallyOlder.payload, null);
+});
+
+test("较新的请求号把任务从 finished 重新带回 running 时，门禁必须接受这次合法 reopen", () => {
+  const acceptedFinished = decideUiSnapshotRefreshAcceptance({
+    latestAcceptedRequestId: 0,
+    requestId: 7,
+    latestAcceptedPayload: null,
+    payload: createUiSnapshotPayload({
+      baStatus: "completed",
+      unitTestStatus: "idle",
+      taskStatus: "finished",
+      completedAt: "2026-04-21T03:22:20.000Z",
+      messageCount: 2,
+    }),
+  });
+  assert.equal(acceptedFinished.accepted, true);
+
+  const reopenedRunning = decideUiSnapshotRefreshAcceptance({
+    latestAcceptedRequestId: acceptedFinished.latestAcceptedRequestId,
+    requestId: 8,
+    latestAcceptedPayload: acceptedFinished.payload,
+    payload: createUiSnapshotPayload({
+      baStatus: "running",
+      unitTestStatus: "idle",
+      taskStatus: "running",
+      completedAt: null,
+      messageCount: 3,
+      baRunCount: 2,
+    }),
+  });
+
+  assert.equal(reopenedRunning.accepted, true);
+  assert.equal(reopenedRunning.payload?.task?.task.status, "running");
 });

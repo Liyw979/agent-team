@@ -72,7 +72,7 @@
 ### 3.2 Task 初始化与状态流转
 
 - CLI 通过 `task headless`、`task ui` 管理当前工作区 Task 会话；GUI 负责展示当前 Task，Task 初始化与配置变更由 CLI 和编排层处理。cli[validateTaskHeadlessCommand, validateTaskUiCommand, ensureJsonTopologyApplied]、orchestrator[initializeTask, submitTask]、App[App]
-- 若当前节点执行完成后，拓扑里不存在可自动继续推进的下游节点，Task 会进入 `waiting` 状态；左侧 Task 列表与群聊系统消息必须同步反映该状态。gating-router[applyAgentResultToGraphState]、langgraph-runtime[resumeTask, runTaskLoop]、orchestrator[moveTaskToWaiting]
+- 若当前节点执行完成后，拓扑里不存在可自动继续推进的下游节点，Task 会进入 `finished` 状态，并追加“本轮已完成，可继续 @Agent 发起下一轮。”系统消息；后续用户再次 `@Agent` 时，当前 Task 会从 `finished` 回到 `running` 继续推进。gating-router[applyAgentResultToGraphState]、langgraph-runtime[resumeTask, runTaskLoop]、orchestrator[completeTask]
 - 当 Task 进入 `finished` 状态时，右侧拓扑面板中的每个 Agent 节点都统一显示为 `已完成`；聊天区会追加一条“任务已经结束”的系统消息。orchestrator[completeTask]、task-completion-message[buildTaskCompletionMessageContent]、task-lifecycle-rules[reconcileTaskSnapshotFromMessages]、topology-graph-helpers[getTopologyAgentStatusBadgePresentation]
 - Agent 运行态成功码统一使用 `completed`。gating-rules[resolveAgentStatusFromReview]、task-lifecycle-rules[reconcileTaskSnapshotFromMessages, resolveStandaloneTaskStatusAfterAgentRun]
 - 审查 Agent 若显式返回标签段，系统只识别以 `<continue>` 或 `<complete>` 开头的尾段，右侧结束标签可选；其中 `<continue>` 表示需要继续回应，若当前拓扑存在可用的 `continue` 下游，系统会继续按失败链路把意见回流给对应下游；只有不存在可继续派发的失败链路时，才会把当前 Task 结束并标记为“不通过”。若审查 Agent 没有返回正确的 `<continue>` 或 `<complete>` 标签，系统默认按通过处理。review-parser[parseReview, stripStructuredSignals]、review-response[extractTrailingReviewSignalBlock]、gating-rules[resolveAgentStatusFromReview]、gating-router[applyAgentResultToGraphState, handleActionRequired]、orchestrator[createLangGraphBatchRunners, completeTask]

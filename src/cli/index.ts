@@ -79,7 +79,7 @@ function printTaskRunDiagnostics(diagnostics: TaskRunDiagnostics, taskUrl?: stri
 }
 
 function isSettledTaskStatus(status: TaskSnapshot["task"]["status"]) {
-  return status === "waiting" || status === "finished" || status === "failed";
+  return status === "finished" || status === "failed";
 }
 
 async function disposeCliContext(context: CliContext, options: CliDisposeOptions) {

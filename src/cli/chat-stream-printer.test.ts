@@ -15,6 +15,7 @@ function createMessage(input: {
   content: string;
   kind: MessageRecord["kind"];
   targetAgentIds?: string[];
+  finishReason?: string;
 }): MessageRecord {
   if (input.kind === "user") {
     return {
@@ -74,7 +75,18 @@ function createMessage(input: {
       timestamp: input.timestamp,
       content: input.content,
       kind: "task-completed",
-      status: "finished",
+      status: "failed",
+    };
+  }
+  if (input.kind === "task-round-finished") {
+    return {
+      id: input.id,
+      taskId: "task-1",
+      sender: "system",
+      timestamp: input.timestamp,
+      content: input.content,
+      kind: "task-round-finished",
+      finishReason: input.finishReason ?? "round_finished",
     };
   }
   if (input.kind === "task-created") {
@@ -85,16 +97,6 @@ function createMessage(input: {
       timestamp: input.timestamp,
       content: input.content,
       kind: "task-created",
-    };
-  }
-  if (input.kind === "orchestrator-waiting") {
-    return {
-      id: input.id,
-      taskId: "task-1",
-      sender: "system",
-      timestamp: input.timestamp,
-      content: input.content,
-      kind: "orchestrator-waiting",
     };
   }
   return {
@@ -227,13 +229,13 @@ test("renderChatStreamEntries 不再输出状态行样式文本", () => {
       id: "m2",
       sender: "system",
       timestamp: "2026-04-19T10:00:03.000Z",
-      content: "所有Agent任务已完成",
+      content: "本轮已完成，可继续 @Agent 发起下一轮。",
       kinds: ["system-message"],
       messageChain: [],
     },
   ]);
 
-  assert.doesNotMatch(output, /\[状态\]\s*(pending|running|waiting|finished|failed)/);
+  assert.doesNotMatch(output, /\[状态\]\s*(pending|running|finished|failed)/);
 });
 
 test("measureDisplayWidth 会把中文按终端双列宽处理，避免消息框右边界错位", () => {

@@ -54,11 +54,8 @@ export type GraphRoutingDecision =
       batch: GraphDispatchBatch;
     }
   | {
-      type: "waiting";
-      waitingReason: string;
-    }
-  | {
       type: "finished";
+      finishReason: string;
     }
   | {
       type: "failed";
@@ -156,7 +153,7 @@ export function applyAgentResultToGraphState(
   nextState.agentStatusesByName[result.agentId] = result.agentStatus;
   nextState.agentContextByName[result.agentId] = result.agentContextContent;
   nextState.taskStatus = "running";
-  nextState.waitingReason = null;
+  nextState.finishReason = null;
 
   if (result.status === "failed") {
     nextState.taskStatus = "failed";
@@ -178,20 +175,34 @@ export function applyAgentResultToGraphState(
   applySchedulerRuntimeToGraphState(nextState, runtime);
 
   if (shouldFinishGraphTaskFromEndEdge(nextState, result)) {
-    nextState.taskStatus = "finished";
-    nextState.waitingReason = null;
     return {
-      state: nextState,
+      state: {
+        ...nextState,
+        taskStatus: "finished",
+        finishReason: "end_edge_complete",
+      },
       decision: {
         type: "finished",
+        finishReason: "end_edge_complete",
       },
     };
   }
 
   if (result.reviewDecision === "continue") {
+    const actionRequiredDecision = handleActionRequired(nextState, result, batchContinuation);
+    if (actionRequiredDecision.type === "finished") {
+      return {
+        state: {
+          ...nextState,
+          taskStatus: "finished",
+          finishReason: actionRequiredDecision.finishReason,
+        },
+        decision: actionRequiredDecision,
+      };
+    }
     return {
       state: nextState,
-      decision: handleActionRequired(nextState, result, batchContinuation),
+      decision: actionRequiredDecision,
     };
   }
 
@@ -235,23 +246,28 @@ export function applyAgentResultToGraphState(
   }
 
   if (shouldFinishGraphTask(nextState)) {
-    nextState.taskStatus = "finished";
-    nextState.waitingReason = null;
     return {
-      state: nextState,
+      state: {
+        ...nextState,
+        taskStatus: "finished",
+        finishReason: "all_agents_completed",
+      },
       decision: {
         type: "finished",
+        finishReason: "all_agents_completed",
       },
     };
   }
 
-  nextState.taskStatus = "waiting";
-  nextState.waitingReason = "no_runnable_agents";
   return {
-    state: nextState,
+    state: {
+      ...nextState,
+      taskStatus: "finished",
+      finishReason: "no_runnable_agents",
+    },
     decision: {
-      type: "waiting",
-      waitingReason: "no_runnable_agents",
+      type: "finished",
+      finishReason: "no_runnable_agents",
     },
   };
 }
@@ -292,10 +308,9 @@ function handleActionRequired(
   }
 
   if (continuationAction === "wait_pending_reviewers") {
-    state.waitingReason = "wait_pending_reviewers";
     return {
-      type: "waiting",
-      waitingReason: "wait_pending_reviewers",
+      type: "finished",
+      finishReason: "wait_pending_reviewers",
     };
   }
 
@@ -321,8 +336,8 @@ function handleActionRequired(
     const storedReview = state.pendingActionRequiredRequestsByAgent[continuation.repairReviewerAgentId];
     if (!storedReview) {
       return {
-        type: "waiting",
-        waitingReason: "missing_continue_request",
+        type: "finished",
+        finishReason: "missing_continue_request",
       };
     }
     const restrictedRepairTargets = resolveRestrictedRepairTargetsForSource(
@@ -398,8 +413,8 @@ function handleActionRequired(
   }
 
   return {
-    type: "waiting",
-    waitingReason: continuationAction,
+    type: "finished",
+    finishReason: continuationAction,
   };
 }
 
@@ -429,8 +444,8 @@ function continueAfterHandoffBatchResponse(
     const storedReview = state.pendingActionRequiredRequestsByAgent[continuation.repairReviewerAgentId];
     if (!storedReview) {
       return {
-        type: "waiting",
-        waitingReason: "missing_continue_request",
+        type: "finished",
+        finishReason: "missing_continue_request",
       };
     }
     const restrictedRepairTargets = resolveRestrictedRepairTargetsForSource(
@@ -465,14 +480,14 @@ function continueAfterHandoffBatchResponse(
 
   if (action === "wait_pending_reviewers") {
     return {
-      type: "waiting",
-      waitingReason: "wait_pending_reviewers",
+      type: "finished",
+      finishReason: "wait_pending_reviewers",
     };
   }
 
   return {
-    type: "waiting",
-    waitingReason: "no_followup",
+    type: "finished",
+    finishReason: "no_followup",
   };
 }
 
@@ -614,8 +629,8 @@ function planToDecision(
 ): GraphRoutingDecision {
   if (!plan || plan.triggerTargets.length === 0) {
     return {
-      type: "waiting",
-      waitingReason: "no_dispatch_targets",
+      type: "finished",
+      finishReason: "no_dispatch_targets",
     };
   }
 
@@ -828,24 +843,24 @@ function continueCompletedSpawnActivations(
   );
   if (!bundle) {
     return {
-      type: "waiting",
-      waitingReason: "no_completed_spawn_activation",
+      type: "finished",
+      finishReason: "no_completed_spawn_activation",
     };
   }
 
   const bundleCompleted = bundle.nodes.every((node) => state.agentStatusesByName[node.id] === "completed");
   if (!bundleCompleted) {
     return {
-      type: "waiting",
-      waitingReason: "spawn_bundle_pending",
+      type: "finished",
+      finishReason: "spawn_bundle_pending",
     };
   }
 
   const activation = state.spawnActivations.find((candidate) => candidate.id === bundle.activationId);
   if (!activation) {
     return {
-      type: "waiting",
-      waitingReason: "spawn_activation_missing",
+      type: "finished",
+      finishReason: "spawn_activation_missing",
     };
   }
 
@@ -855,8 +870,8 @@ function continueCompletedSpawnActivations(
 
   if (activation.dispatched || activation.completedBundleGroupIds.length < activation.bundleGroupIds.length) {
     return {
-      type: "waiting",
-      waitingReason: "spawn_activation_pending",
+      type: "finished",
+      finishReason: "spawn_activation_pending",
     };
   }
 

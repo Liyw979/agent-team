@@ -1,14 +1,14 @@
 import type { TaskRecord } from "@shared/types";
 
+export function buildTaskRoundFinishedMessageContent(): string {
+  return "本轮已完成，可继续 @Agent 发起下一轮。";
+}
+
 export function buildTaskCompletionMessageContent(input: {
   status: TaskRecord["status"];
   taskTitle: string;
   failureReason?: string | null;
 }): string {
-  if (input.status === "finished") {
-    return "所有Agent任务已完成";
-  }
-
   const failureReason = input.failureReason?.trim();
   if (failureReason) {
     return failureReason;

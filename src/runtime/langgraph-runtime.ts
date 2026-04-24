@@ -64,21 +64,15 @@ export class LangGraphRuntime {
 
     const builder = new StateGraph(RuntimeAnnotation)
       .addNode("task_loop", async (state: RuntimeEnvelope) => this.runTaskLoop(state))
-      .addNode("task_waiting", async (state: RuntimeEnvelope) => state)
       .addNode("task_finished", async (state: RuntimeEnvelope) => state)
       .addNode("task_failed", async (state: RuntimeEnvelope) => state)
       .addEdge(START, "task_loop")
       .addConditionalEdges("task_loop", (state: RuntimeEnvelope) => {
-        const decisionType = state.lastDecision?.type ?? "waiting";
-        if (decisionType === "finished") {
-          return "task_finished";
-        }
-        if (decisionType === "failed") {
+        if (state.lastDecision?.type === "failed") {
           return "task_failed";
         }
-        return "task_waiting";
+        return "task_finished";
       })
-      .addEdge("task_waiting", END)
       .addEdge("task_finished", END)
       .addEdge("task_failed", END);
 
@@ -182,48 +176,31 @@ export class LangGraphRuntime {
         for (const runner of runners) {
           inflight.set(runner.id, runner);
         }
-        currentDecision = {
-          type: "waiting",
-          waitingReason: "inflight",
-        };
+        currentDecision = null;
       }
 
       if (inflight.size === 0) {
-        if (!currentDecision || currentDecision.type === "waiting") {
-          currentState.taskStatus = "waiting";
-          currentState.waitingReason = currentDecision?.waitingReason ?? "idle";
-          await this.options.host.moveTaskToWaiting({
+        if (!currentDecision || currentDecision.type === "finished") {
+          currentState.taskStatus = "finished";
+          currentState.finishReason = currentDecision?.finishReason ?? currentState.finishReason ?? "idle";
+          await this.options.host.completeTask({
             taskId: currentState.taskId,
-            state: currentState,
+            status: "finished",
+            finishReason: currentState.finishReason,
           });
           return {
             graphState: currentState,
             pendingInput: null,
-            lastDecision: {
-              type: "waiting",
-              waitingReason: currentState.waitingReason ?? "idle",
+            lastDecision: currentDecision ?? {
+              type: "finished",
+              finishReason: currentState.finishReason,
             },
             lastError: null,
           };
         }
 
-        if (currentDecision.type === "finished") {
-          currentState.taskStatus = "finished";
-          currentState.waitingReason = null;
-          await this.options.host.completeTask({
-            taskId: currentState.taskId,
-            status: "finished",
-          });
-          return {
-            graphState: currentState,
-            pendingInput: null,
-            lastDecision: currentDecision,
-            lastError: null,
-          };
-        }
-
         currentState.taskStatus = "failed";
-        currentState.waitingReason = null;
+        currentState.finishReason = null;
         await this.options.host.completeTask({
           taskId: currentState.taskId,
           status: "failed",

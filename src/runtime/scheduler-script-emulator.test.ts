@@ -16,7 +16,7 @@ import {
   collectRequiredConsumerMessages,
   collectRequiredDispatchAssertions,
   dispatchAssertionTargetsCovered,
-  getAllowedWaitingSendersFromCore,
+  getAllowedPendingSendersFromFinishedDecision,
   isImplicitEmptyDispatchAssertionLine,
   matchesExpectedTransition,
   preferCompleteReviewCandidatesForPendingNextSender,
@@ -261,13 +261,13 @@ test("scheduler script emulator 纯函数解析会把紧贴句号的 @target 识
   assert.deepEqual(parsed.targets, ["build"]);
 });
 
-test("scheduler script emulator 纯函数会直接从核心 waiting 状态读取允许继续发言的 sender", () => {
+test("scheduler script emulator 纯函数会从 finished 原因里读取允许继续发言的 sender", () => {
   const topology: TopologyRecord = {
     nodes: ["Build", "CodeReview", "UnitTest", "TaskReview"],
     edges: [],
   };
   const state = createGraphTaskState({
-    taskId: "scheduler-script-emulator-waiting-senders",
+    taskId: "scheduler-script-emulator-pending-senders",
     topology,
   });
   state.activeHandoffBatchBySource = {
@@ -283,15 +283,15 @@ test("scheduler script emulator 纯函数会直接从核心 waiting 状态读取
     },
   };
 
-  const allowedSenders = getAllowedWaitingSendersFromCore(state, {
-    type: "waiting",
-    waitingReason: "wait_pending_reviewers",
+  const allowedSenders = getAllowedPendingSendersFromFinishedDecision(state, {
+    type: "finished",
+    finishReason: "wait_pending_reviewers",
   });
 
   assert.deepEqual(allowedSenders, ["UnitTest", "TaskReview"]);
 });
 
-test("scheduler script emulator 纯函数会在核心仍等待同批 reviewer 时优先把静默 reviewer 视为 complete", () => {
+test("scheduler script emulator 纯函数会在核心 finished 但仍待 reviewer 回复时优先把静默 reviewer 视为 complete", () => {
   const topology: TopologyRecord = {
     nodes: ["Build", "TaskReview", "CodeReview"],
     edges: [],
@@ -345,8 +345,8 @@ test("scheduler script emulator 纯函数会在核心仍等待同批 reviewer �
         },
         state: continueState,
         decision: {
-          type: "waiting" as const,
-          waitingReason: "wait_pending_reviewers",
+          type: "finished" as const,
+          finishReason: "wait_pending_reviewers",
         },
       },
       {
@@ -363,8 +363,8 @@ test("scheduler script emulator 纯函数会在核心仍等待同批 reviewer �
         },
         state: completeState,
         decision: {
-          type: "waiting" as const,
-          waitingReason: "wait_pending_reviewers",
+          type: "finished" as const,
+          finishReason: "wait_pending_reviewers",
         },
       },
     ],
@@ -548,15 +548,18 @@ test("scheduler script emulator 纯函数会把空的 source 行识别为缺失�
 
 test("scheduler script emulator 纯函数只允许脚本在 finished 时自然结束", () => {
   assert.equal(
-    canImplicitlyFinishScript({ type: "finished" }),
+    canImplicitlyFinishScript({
+      type: "finished",
+      finishReason: "all_agents_completed",
+    }),
     true,
   );
   assert.equal(
     canImplicitlyFinishScript({
-      type: "waiting",
-      waitingReason: "wait_pending_reviewers",
+      type: "finished",
+      finishReason: "wait_pending_reviewers",
     }),
-    false,
+    true,
   );
   assert.equal(
     canImplicitlyFinishScript({
@@ -575,8 +578,17 @@ test("scheduler script emulator 纯函数只允许脚本在 finished 时自然�
 });
 
 test("scheduler script emulator 纯函数不允许最后一条显式 dispatch 断言直接作为脚本终点", () => {
+  const topology: TopologyRecord = {
+    nodes: ["Build", "UnitTest", "TaskReview"],
+    edges: [],
+  };
+
   assert.equal(
     canScriptEndAfterLastLine({
+      state: createGraphTaskState({
+        taskId: "scheduler-script-end-execute-batch",
+        topology,
+      }),
       lastLine: parseSchedulerScriptLine("Build: @UnitTest @TaskReview"),
       decision: {
         type: "execute_batch",
@@ -594,10 +606,29 @@ test("scheduler script emulator 纯函数不允许最后一条显式 dispatch �
   );
   assert.equal(
     canScriptEndAfterLastLine({
+      state: (() => {
+        const state = createGraphTaskState({
+          taskId: "scheduler-script-end-no-runnable-agents",
+          topology,
+        });
+        state.activeHandoffBatchBySource = {
+          Build: {
+            dispatchKind: "handoff",
+            sourceAgentId: "Build",
+            sourceContent: "Build 最终结果",
+            targets: ["UnitTest", "TaskReview"],
+            pendingTargets: ["UnitTest"],
+            respondedTargets: ["TaskReview"],
+            sourceRevision: 1,
+            failedTargets: [],
+          },
+        };
+        return state;
+      })(),
       lastLine: parseSchedulerScriptLine("TaskReview: 通过"),
       decision: {
-        type: "waiting",
-        waitingReason: "no_runnable_agents",
+        type: "finished",
+        finishReason: "no_runnable_agents",
       },
     }),
     false,
@@ -630,11 +661,11 @@ test("scheduler script emulator 纯函数会在脚本提前结束时带出核心
     buildUnexpectedScriptEndMessage({
       state,
       decision: {
-        type: "waiting",
-        waitingReason: "no_runnable_agents",
+        type: "finished",
+        finishReason: "no_runnable_agents",
       },
     }),
-    "脚本提前结束，当前仍在等待 [UnitTest]，调度状态为 waiting -> no_runnable_agents",
+    "脚本提前结束，当前仍在等待 [UnitTest]，调度状态为 finished -> no_runnable_agents",
   );
 });
 
@@ -811,7 +842,7 @@ test("scheduler script emulator 要求 reviewer 的 continue 行即使处于等�
   );
 });
 
-test("scheduler script emulator 支持 reviewer 在 waiting 前就把 deferred continue target 写在当前行", async () => {
+test("scheduler script emulator 支持 reviewer 在 finished 前就把 deferred continue target 写在当前行", async () => {
   const topology: TopologyRecord = {
     nodes: ["Build", "CodeReview", "UnitTest", "TaskReview"],
     edges: [

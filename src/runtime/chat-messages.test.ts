@@ -77,7 +77,17 @@ function createMessage(overrides: Partial<MessageRecord> & { kind: MessageRecord
         sender: "system",
         timestamp,
         kind: "task-completed",
-        status: overrides.status === "failed" ? "failed" : "finished",
+        status: "failed",
+      };
+    case "task-round-finished":
+      return {
+        id,
+        taskId,
+        content,
+        sender: "system",
+        timestamp,
+        kind: "task-round-finished",
+        finishReason: overrides.finishReason ?? "round_finished",
       };
     case "task-created":
       return {
@@ -87,15 +97,6 @@ function createMessage(overrides: Partial<MessageRecord> & { kind: MessageRecord
         sender: "system",
         timestamp,
         kind: "task-created",
-      };
-    case "orchestrator-waiting":
-      return {
-        id,
-        taskId,
-        content,
-        sender: "system",
-        timestamp,
-        kind: "orchestrator-waiting",
       };
     case "system-message":
       return {

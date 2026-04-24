@@ -121,8 +121,8 @@ export function buildUnexpectedScriptEndMessage(input: {
     return `脚本提前结束，当前还缺少 ${formatTargetList(getScriptVisibleDecisionTargets(input.state, input.decision))} 这批调度断言，调度状态为 ${describeDecision(input.decision)}`;
   }
 
-  if (input.decision.type === "waiting") {
-    const pendingTargets = getAllowedWaitingSendersFromCore(input.state, input.decision);
+  if (isPendingReviewerFinishedDecision(input.decision)) {
+    const pendingTargets = getAllowedPendingSendersFromFinishedDecision(input.state, input.decision);
     if (pendingTargets.length > 0) {
       return `脚本提前结束，当前仍在等待 ${formatTargetList(pendingTargets)}，调度状态为 ${describeDecision(input.decision)}`;
     }
@@ -147,10 +147,18 @@ export function canImplicitlyFinishScript(decision: GraphRoutingDecision): boole
 }
 
 export function canScriptEndAfterLastLine(input: {
+  state: ReturnType<typeof createGraphTaskState>;
   lastLine: ParsedScriptLine;
   decision: GraphRoutingDecision;
 }): boolean {
-  return canImplicitlyFinishScript(input.decision);
+  if (!canImplicitlyFinishScript(input.decision)) {
+    return false;
+  }
+
+  return !(
+    isPendingReviewerFinishedDecision(input.decision)
+    && getAllowedPendingSendersFromFinishedDecision(input.state, input.decision).length > 0
+  );
 }
 
 export function shouldRequireSourceDispatchAssertion(input: {
@@ -187,9 +195,16 @@ function collectActualTransitionTargets(input: {
   ];
 }
 
-export function getAllowedWaitingSendersFromCore(
+function isPendingReviewerFinishedDecision(
+  decision: GraphRoutingDecision,
+): decision is Extract<GraphRoutingDecision, { type: "finished" }> {
+  return decision.type === "finished"
+    && (decision.finishReason === "wait_pending_reviewers" || decision.finishReason === "no_runnable_agents");
+}
+
+export function getAllowedPendingSendersFromFinishedDecision(
   state: ReturnType<typeof createGraphTaskState>,
-  _decision: Extract<GraphRoutingDecision, { type: "waiting" }>,
+  _decision: Extract<GraphRoutingDecision, { type: "finished" }>,
 ): string[] {
   return [
     ...new Set(
@@ -206,18 +221,18 @@ export function preferCompleteReviewCandidatesForPendingNextSender<T extends {
   candidates: T[];
   nextSenderId: string;
 }): T[] {
-  const waitingCandidates = input.candidates.filter((candidate) =>
-    candidate.decision.type === "waiting"
-    && getAllowedWaitingSendersFromCore(candidate.state, candidate.decision).includes(input.nextSenderId)
+  const pendingReviewerCandidates = input.candidates.filter((candidate) =>
+    isPendingReviewerFinishedDecision(candidate.decision)
+    && getAllowedPendingSendersFromFinishedDecision(candidate.state, candidate.decision).includes(input.nextSenderId)
   );
-  if (waitingCandidates.length === 0) {
+  if (pendingReviewerCandidates.length === 0) {
     return input.candidates;
   }
 
-  const preferredComplete = waitingCandidates.filter((candidate) =>
+  const preferredComplete = pendingReviewerCandidates.filter((candidate) =>
     candidate.result.reviewDecision === "complete"
   );
-  return preferredComplete.length > 0 ? preferredComplete : waitingCandidates;
+  return preferredComplete.length > 0 ? preferredComplete : pendingReviewerCandidates;
 }
 
 function createTraceBatchIdFactory() {
@@ -318,7 +333,7 @@ async function runSchedulerScriptInternal(
       && beforeDecision.batch.jobs.some((job) => job.agentId === senderId)
       ? beforeBatchId
       : null;
-    if (consumedBatchId === null && beforeDecision.type === "waiting") {
+    if (consumedBatchId === null && isPendingReviewerFinishedDecision(beforeDecision)) {
       const matchedSourceIds = Object.values(beforeState.activeHandoffBatchBySource)
         .filter((batch) => batch.pendingTargets.includes(senderId))
         .map((batch) => batch.sourceAgentId);
@@ -446,6 +461,7 @@ async function runSchedulerScriptInternal(
   const lastLine = lines[lines.length - 1]!;
   assert.equal(
     canScriptEndAfterLastLine({
+      state,
       lastLine,
       decision: currentDecision,
     }),
@@ -712,8 +728,8 @@ function assertSenderAllowed(
     return;
   }
 
-  if (decision.type === "waiting") {
-    const pendingTargets = getAllowedWaitingSendersFromCore(state, decision);
+  if (isPendingReviewerFinishedDecision(decision)) {
+    const pendingTargets = getAllowedPendingSendersFromFinishedDecision(state, decision);
     assert.ok(
       pendingTargets.includes(senderId),
       buildUnexpectedNextSenderMessage({
@@ -751,13 +767,10 @@ function describeDecision(decision: GraphRoutingDecision): string {
   if (decision.type === "execute_batch") {
     return `execute_batch -> [${decision.batch.jobs.map((job) => job.agentId).join(", ")}]`;
   }
-  if (decision.type === "waiting") {
-    return `waiting -> ${decision.waitingReason}`;
+  if (decision.type === "finished") {
+    return `finished -> ${decision.finishReason}`;
   }
-  if (decision.type === "failed") {
-    return `failed -> ${decision.errorMessage}`;
-  }
-  return decision.type;
+  return `failed -> ${decision.errorMessage}`;
 }
 
 function describeDecisionWithVisibleTargets(
@@ -906,8 +919,7 @@ function applyMessageLineAndMatchDecision(input: {
       input.nextLine?.kind === "message"
       && attemptedTransitions.length > 0
       && attemptedTransitions.every((transition) =>
-        transition.decision.type === "finished"
-        || (transition.decision.type === "waiting" && transition.decision.waitingReason !== "wait_pending_reviewers")
+        transition.decision.type === "finished" && transition.decision.finishReason !== "wait_pending_reviewers"
       )
     ) {
       assert.fail(
@@ -928,7 +940,7 @@ function applyMessageLineAndMatchDecision(input: {
   const chosen = disambiguatedCandidates[0]!;
   if (
     chosen.result.reviewDecision === "continue"
-    && chosen.decision.type === "waiting"
+    && isPendingReviewerFinishedDecision(chosen.decision)
     && input.line.targets.length === 0
   ) {
     const deferredTargets = resolveDeferredReviewTargets(
@@ -1076,7 +1088,7 @@ export function matchesExpectedTransition(input: {
       const actualTargets = getScriptVisibleDecisionTargets(input.state, input.decision);
       return arraysEqual(actualTargets, expectedTargets);
     }
-    return input.decision.type === "waiting"
+    return isPendingReviewerFinishedDecision(input.decision)
       && deferredReviewTargets.length > 0
       && arraysEqual(expectedTargets, deferredReviewTargets);
   }
@@ -1121,8 +1133,8 @@ export function matchesExpectedTransition(input: {
 
   if (input.nextLine?.kind === "message") {
     const nextSenderId = resolveScriptAgentId(input.state, input.nextLine.sender);
-    if (input.decision.type === "waiting") {
-      return getAllowedWaitingSendersFromCore(input.state, input.decision).includes(nextSenderId);
+    if (isPendingReviewerFinishedDecision(input.decision)) {
+      return getAllowedPendingSendersFromFinishedDecision(input.state, input.decision).includes(nextSenderId);
     }
     if (
       input.decision.type === "execute_batch"
@@ -1134,8 +1146,7 @@ export function matchesExpectedTransition(input: {
   }
 
   if (input.nextLine === null) {
-    return input.decision.type === "finished"
-      || (input.decision.type === "waiting" && input.decision.waitingReason === "no_runnable_agents");
+    return input.decision.type === "finished";
   }
 
   return false;

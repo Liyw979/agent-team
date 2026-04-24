@@ -30,7 +30,7 @@ function createTaskCompletedMessage(input: {
   id: string;
   content: string;
   timestamp: string;
-  status: "finished" | "failed";
+  status: "failed";
 }): MessageRecord {
   return {
     id: input.id,

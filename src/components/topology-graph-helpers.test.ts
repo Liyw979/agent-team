@@ -11,7 +11,7 @@ import type { MessageRecord } from "@shared/types";
 function createTaskCompletedMessage(input: {
   id: string;
   content: string;
-  status: "finished" | "failed";
+  status: "failed";
 }): MessageRecord {
   return {
     id: input.id,
@@ -21,6 +21,21 @@ function createTaskCompletedMessage(input: {
     content: input.content,
     kind: "task-completed",
     status: input.status,
+  };
+}
+
+function createTaskRoundFinishedMessage(input: {
+  id: string;
+  content: string;
+}): MessageRecord {
+  return {
+    id: input.id,
+    taskId: "task-1",
+    sender: "system",
+    timestamp: "2026-04-23T10:00:00.000Z",
+    content: input.content,
+    kind: "task-round-finished",
+    finishReason: "round_finished",
   };
 }
 
@@ -110,10 +125,9 @@ test("getTopologyLoopLimitFailedReviewerName 会从任务失败原因里识别�
 
   assert.equal(
     getTopologyLoopLimitFailedReviewerName([
-      createTaskCompletedMessage({
+      createTaskRoundFinishedMessage({
         id: "completion-2",
-        content: "所有Agent任务已完成",
-        status: "finished",
+        content: "本轮已完成，可继续 @Agent 发起下一轮。",
       }),
     ]),
     null,

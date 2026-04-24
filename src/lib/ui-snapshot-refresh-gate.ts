@@ -28,7 +28,7 @@ function getAgentProgressRank(status: string) {
 }
 
 function isTerminalTaskStatus(status: string) {
-  return status === "finished" || status === "failed";
+  return status === "failed";
 }
 
 function isSemanticallyOlderUiSnapshot(
@@ -58,7 +58,11 @@ function isSemanticallyOlderUiSnapshot(
     return true;
   }
 
-  if (baselineTask.task.completedAt && !candidateTask.task.completedAt) {
+  if (
+    baselineTask.task.completedAt &&
+    !candidateTask.task.completedAt &&
+    isTerminalTaskStatus(candidateTask.task.status)
+  ) {
     return true;
   }
 

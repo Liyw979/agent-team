@@ -63,7 +63,7 @@ export interface GraphTaskState {
   spawnBundles: SpawnBundleInstantiation[];
   spawnActivations: SpawnActivationRecord[];
   taskStatus: TaskStatus;
-  waitingReason: string | null;
+  finishReason: string | null;
   agentStatusesByName: Record<string, AgentStatus>;
   agentContextByName: Record<string, string>;
   completedEdges: string[];
@@ -92,7 +92,7 @@ export function createEmptyGraphTaskState(input: {
     spawnBundles: [],
     spawnActivations: [],
     taskStatus: "pending",
-    waitingReason: null,
+    finishReason: null,
     agentStatusesByName: Object.fromEntries(input.topology.nodes.map((name) => [name, "idle"])),
     agentContextByName: {},
     completedEdges: [],

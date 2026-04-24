@@ -5,6 +5,7 @@ import {
   isAgentFinalMessageRecord,
   isActionRequiredRequestMessageRecord,
   isTaskCompletedMessageRecord,
+  isTaskRoundFinishedMessageRecord,
   isUserMessageRecord,
   resolveBuildAgentId,
 } from "@shared/types";
@@ -25,15 +26,12 @@ function normalizeTaskAgents<T>(agents: T[] | undefined): T[] {
 export function resolveStandaloneTaskStatusAfterAgentRun(input: {
   latestAgentStatus: Pick<TaskAgentRecord, "status">["status"];
   agentStatuses: Array<Pick<TaskAgentRecord, "status">>;
-}): Extract<TaskRecord["status"], "waiting" | "finished" | "failed"> {
+}): Extract<TaskRecord["status"], "finished" | "failed"> {
   if (input.latestAgentStatus === "failed") {
     return "failed";
   }
 
-  const allCompleted =
-    input.agentStatuses.length > 0 &&
-    input.agentStatuses.every((agent) => agent.status === "completed");
-  return allCompleted ? "finished" : "waiting";
+  return "finished";
 }
 
 export function getPersistedCompletionSeedAgentIds(input: {
@@ -138,7 +136,7 @@ export function shouldFinishTaskFromPersistedState(input: {
   messages: MinimalMessage[];
 }): boolean {
   const agents = normalizeTaskAgents(input.agents);
-  if (input.taskStatus !== "running" && input.taskStatus !== "waiting") {
+  if (input.taskStatus !== "running") {
     return false;
   }
 
@@ -260,20 +258,27 @@ export function reconcileTaskSnapshotFromMessages(input: {
   messages: MessageRecord[];
 }) {
   const agents = normalizeTaskAgents(input.agents);
-  const latestCompletionMessage = [...input.messages]
+  const latestStatusMessage = [...input.messages]
     .reverse()
-    .find((message) => isTaskCompletedMessageRecord(message));
+    .find((message) => isTaskRoundFinishedMessageRecord(message) || isTaskCompletedMessageRecord(message));
+  const latestMessage = input.messages.at(-1);
 
   const task: TaskRecord =
-    latestCompletionMessage &&
-    (latestCompletionMessage.status === "finished" ||
-      latestCompletionMessage.status === "failed")
+    latestStatusMessage &&
+    latestStatusMessage.id === latestMessage?.id &&
+    isTaskRoundFinishedMessageRecord(latestStatusMessage)
       ? {
           ...input.task,
-          status: latestCompletionMessage.status,
-          completedAt: latestCompletionMessage.timestamp,
+          status: "finished",
+          completedAt: latestStatusMessage.timestamp,
         }
-      : input.task;
+      : latestStatusMessage && latestStatusMessage.id === latestMessage?.id && isTaskCompletedMessageRecord(latestStatusMessage)
+        ? {
+            ...input.task,
+            status: latestStatusMessage.status,
+            completedAt: latestStatusMessage.timestamp,
+          }
+        : input.task;
 
   const latestAgentFinalByName = new Map<string, MessageRecord>();
   for (const message of input.messages) {
@@ -283,15 +288,7 @@ export function reconcileTaskSnapshotFromMessages(input: {
     latestAgentFinalByName.set(message.sender, message);
   }
 
-  const taskFinished = task.status === "finished";
   const reconciledAgents = agents.map((agent) => {
-    if (taskFinished) {
-      return {
-        ...agent,
-        status: "completed" as const,
-      };
-    }
-
     const latestFinalMessage = latestAgentFinalByName.get(agent.id);
     if (!latestFinalMessage) {
       return agent;

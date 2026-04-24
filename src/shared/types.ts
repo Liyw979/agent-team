@@ -8,7 +8,6 @@ export type AgentStatus =
 export type TaskStatus =
   | "pending"
   | "running"
-  | "waiting"
   | "finished"
   | "failed"
   | "continue";
@@ -270,12 +269,13 @@ export interface ActionRequiredRequestMessageRecord extends BaseMessageRecord {
 export interface TaskCompletedMessageRecord extends BaseMessageRecord {
   kind: "task-completed";
   sender: "system";
-  status: "finished" | "failed";
+  status: "failed";
 }
 
-export interface OrchestratorWaitingMessageRecord extends BaseMessageRecord {
-  kind: "orchestrator-waiting";
+export interface TaskRoundFinishedMessageRecord extends BaseMessageRecord {
+  kind: "task-round-finished";
   sender: "system";
+  finishReason: string;
 }
 
 export type MessageRecord =
@@ -286,7 +286,7 @@ export type MessageRecord =
   | AgentDispatchMessageRecord
   | ActionRequiredRequestMessageRecord
   | TaskCompletedMessageRecord
-  | OrchestratorWaitingMessageRecord;
+  | TaskRoundFinishedMessageRecord;
 
 export function isUserMessageRecord(message: MessageRecord): message is UserMessageRecord {
   return message.kind === "user";
@@ -306,6 +306,10 @@ export function isActionRequiredRequestMessageRecord(message: MessageRecord): me
 
 export function isTaskCompletedMessageRecord(message: MessageRecord): message is TaskCompletedMessageRecord {
   return message.kind === "task-completed";
+}
+
+export function isTaskRoundFinishedMessageRecord(message: MessageRecord): message is TaskRoundFinishedMessageRecord {
+  return message.kind === "task-round-finished";
 }
 
 export function getMessageTargetAgentIds(message: MessageRecord): string[] {
