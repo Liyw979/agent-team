@@ -83,7 +83,7 @@
 - LangGraph 是唯一调度运行时核心；`TopologyRecord` 是产品真源，运行时会在主进程内把它编译为图状态与调度索引。langgraph-runtime[resumeTask]、gating-router[createGraphTaskState, applyAgentResultToGraphState]、topology-compiler[compileTopology]
 - 拓扑边持久化 `source / target / triggerOn`；`triggerOn` 只允许 `transfer`、`complete`、`continue`。其中 `transfer` 表示普通协作流转，节点完成后直接触发下游；`complete` 表示审查通过后才触发下游；`continue` 表示审查不通过后的回流或继续回应链路。store[readWorkspaceState, writeWorkspaceState]、orchestrator[normalizeTopology]、topology-compiler[compileTopology]
 - 递归式 DSL 中，`spawn` 仍会被当成拓扑中的正常节点；当父图里存在唯一的 `spawn -> 某节点` 回流边时，编译阶段会把这条边的 `triggerOn` 一并记到 `spawn rule` 上，再由子图唯一终局角色按这条触发类型直接回到外层节点，同时把 `spawn` 节点自身标记为已完成，避免激活残留卡住后续流程。漏洞团队当前写的是 `["疑点辩论", "线索发现", "transfer"]`，所以它的 `讨论总结` 会按 `transfer` 回到 `线索发现`。team-dsl[compileTeamDsl]、runtime-topology[instantiateSpawnBundle]、gating-router[applyAgentResultToGraphState]
-- 漏洞挖掘团队的默认对抗拓扑里，`线索发现` 会先把 finding 交给 `漏洞挑战`，而不是先交给 `漏洞论证`；这是一条刻意保留的拓扑设计技巧，用来先由漏洞挑战暴露证据链缺口，再进入论证与挑战对抗，避免漏洞论证开场直接同意导致对抗性不足。config/team-topologies/vulnerability-team.topology.json、team-dsl[compileTeamDsl]、scheduler-script-harness[assertSchedulerScript]
+- 漏洞挖掘团队的默认对抗拓扑里，`线索发现` 会先把 finding 交给 `漏洞挑战`，而不是先交给 `漏洞论证`；这是一条刻意保留的拓扑设计技巧，用来先由漏洞挑战暴露证据链缺口，再进入论证与挑战对抗，避免漏洞论证开场直接同意导致对抗性不足。config/team-topologies/vulnerability-team.topology.json、team-dsl[compileTeamDsl]、scheduler-script-emulator-migration.test.ts
 - 静态 `spawn` 节点属于调度节点，会保留在拓扑数据中供运行时识别，但前端拓扑图不会直接展示这类工厂节点；只有 `spawn` 实际展开出来的运行时 Agent 实例会作为可见节点显示。topology-spawn-drafts[getTopologyDisplayNodeIds]、TopologyGraph[TopologyGraph]、runtime-topology-graph[buildEffectiveTopology]
 - 当某个 Agent 存在“直接下游通过 `transfer` 触发、且该下游会用 `continue` 直接回流给自己、同时该下游没有 `complete` 下游”的审查回路时，系统会先只放行这类直接审查回路；只有这些回路全部通过后，才会继续放行该 Agent 其余直接 `transfer` 下游，避免 Build 与单个审查 Agent 多轮对话时反复提前触发无关下游。gating-scheduler[planHandoffDispatch, recordHandoffBatchResponse]、gating-router[handleActionRequired, continueAfterHandoffBatchResponse]
 - 同一轮里若某个 Agent 需要同时触发多个直接 `transfer` 下游 reviewer，这批 reviewer 会并发启动；只有当前整批 reviewer 都返回后，系统才会决定是否回流给上游修复，或继续补跑这一轮尚未确认通过的 reviewer，避免把并发批次错误串成“一次只放行一个”。gating-scheduler[planHandoffDispatch, recordHandoffBatchResponse]、orchestrator[createLangGraphBatchRunners]
@@ -234,7 +234,8 @@ bun run dist:mac-x64
 - 每次交付前必须在仓库根目录运行 `bun tsc --noEmit`，并以类型检查通过作为交付前置条件。
 - 每次交付前必须在仓库根目录运行 `bun test --only-failures; bun run knip --fix`，并确认没有遗留失败用例与可自动修复的未使用项。
 - 新增或修改字段、函数入参、返回值时，尽量避免引入 `prop?: T`、`T | null`、`T | undefined` 这类宽松可空类型；优先通过更稳定的模型表达状态差异。确实需要“缺失值”语义时，也要先统一该字段在当前层级到底使用“必填值”“可选字段”还是“显式 `null`”，避免同一语义同时混用 optional、`undefined`、`null` 三套表达。
-- 涉及调度状态变化、回流顺序、裁决转发、spawn 对话推进等用户可见协作语义时，新增覆盖优先写进 `src/runtime/scheduler-script-harness.test.ts` 这类 script 测试，用对话脚本验证真实流转；只有当该行为依赖内部暂存状态或 synthetic dispatch、无法自然表达为一段用户可见对话脚本时，才保留在 `src/runtime/gating-router.test.ts` / `src/runtime/orchestrator.test.ts` 做纯状态测试。
+- 涉及调度状态变化、回流顺序、裁决转发、spawn 对话推进等用户可见协作语义时，新增覆盖优先写进 `src/runtime/scheduler-script-emulator-migration.test.ts` 这类 script 测试，用对话脚本直接驱动 `src/runtime/scheduler-script-emulator.ts` 和真实调度核心验证流转；旧的 `src/runtime/scheduler-script-harness.test.ts` 仅保留作行为对照。只有当该行为依赖内部暂存状态、且确实无法自然表达为一段用户可见对话脚本时，才保留在 `src/runtime/gating-router.test.ts` / `src/runtime/orchestrator.test.ts` 做纯状态测试。
+- 所有 Agent 对话顺序类单元测试，在排查和修复前都必须优先补成 `src/runtime/scheduler-script-emulator-migration.test.ts` 这类 script 脚本复现；先用脚本把真实对话顺序跑出失败，再继续修改实现与复验通过。旧 harness 文件保留作对照，但新的顺序测试不得再间接经过 `scheduler-script-harness.ts`。
 
 打包注意事项：
 

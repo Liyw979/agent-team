@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { extractTrailingReviewSignalBlock } from "@shared/review-response";
 
 import {DEFAULT_ACTION_REQUIRED_MAX_ROUNDS, type TopologyEdgeTrigger, type TopologyRecord,} from "@shared/types";
 
@@ -116,6 +117,7 @@ interface SpawnRuleState {
 interface AgentRefResolver {
   resolve(name: string): string;
   isKnown(agentId: string): boolean;
+  getDynamicRef(agentId: string): DynamicSpawnAgentRef | null;
   getHandoffTargets(agentId: string): string[];
   getTriggeredTargets(agentId: string, triggerOn: "continue" | "complete"): string[];
   hasAnyOutgoingTargets(agentId: string): boolean;
@@ -163,6 +165,7 @@ export async function assertSchedulerScript(
   const replyIndexByAgent = new Map<string, number>();
   const activeBatches: ActiveBatch[] = [];
   const actionRequiredLoopCountByEdge = new Map<string, number>();
+  const spawnEntryDispatchCountBySourceAndNode = new Map<string, number>();
 
   const appendLine = (line: string) => {
     actualScript.push(line);
@@ -178,6 +181,51 @@ export async function assertSchedulerScript(
     assert.notEqual(expected, undefined, `第 ${actualDecisions.length} 个调度决策超出了 expectedDecisions`);
     assert.deepEqual(decision, expected, `第 ${actualDecisions.length} 个调度决策不匹配`);
   };
+  const canonicalizeDispatchTargets = (sourceAgentId: string, actualTargets: string[]): string[] => {
+    const sourceState = ensureSourceState(sourceAgentId);
+    const directReviewFailTargets = parsed.resolver.getTriggeredTargets(sourceAgentId, "continue");
+    const directReviewPassTargets = parsed.resolver.getTriggeredTargets(sourceAgentId, "complete");
+    return parsed.resolver.matchCanonicalTargets(
+      sourceAgentId,
+      actualTargets,
+      sourceState.defaultTargets,
+      "transfer",
+    )
+      ?? parsed.resolver.matchCanonicalTargets(
+        sourceAgentId,
+        actualTargets,
+        directReviewFailTargets,
+        "continue",
+      )
+      ?? parsed.resolver.matchCanonicalTargets(
+        sourceAgentId,
+        actualTargets,
+        directReviewPassTargets,
+        "complete",
+      )
+      ?? actualTargets;
+  };
+  const assertSpawnEntryDispatchOrder = (
+    sourceAgentId: string,
+    actualTargets: string[],
+    canonicalTargets: string[],
+  ): void => {
+    for (const [index, target] of actualTargets.entries()) {
+      const dynamicRef = parsed.resolver.getDynamicRef(target);
+      const canonicalTarget = canonicalTargets[index] ?? "";
+      if (!dynamicRef || !dynamicRef.isEntry || canonicalTarget !== dynamicRef.spawnNodeName) {
+        continue;
+      }
+      const dispatchKey = `${sourceAgentId}::${dynamicRef.spawnNodeName}`;
+      const nextExpectedIndex = (spawnEntryDispatchCountBySourceAndNode.get(dispatchKey) ?? 0) + 1;
+      assert.equal(
+        dynamicRef.index,
+        nextExpectedIndex,
+        `${sourceAgentId} 第 ${nextExpectedIndex} 次派发 ${dynamicRef.spawnNodeName} 时，应启动 ${dynamicRef.templateName}-${nextExpectedIndex}，实际却是 ${dynamicRef.templateName}-${dynamicRef.index}`,
+      );
+      spawnEntryDispatchCountBySourceAndNode.set(dispatchKey, nextExpectedIndex);
+    }
+  };
 
   const getNextReply = (agentId: string): ParsedReply => {
     const currentIndex = replyIndexByAgent.get(agentId) ?? 0;
@@ -187,7 +235,7 @@ export async function assertSchedulerScript(
     replyIndexByAgent.set(agentId, currentIndex + 1);
     return reply!;
   };
-  const buildNextDecision = (lastResponder: string): SchedulerScriptDecision => {
+  const buildNextDecision = (lastResponder: string, lastReplyContent?: string): SchedulerScriptDecision => {
     if (activeBatches.length > 0) {
       return {
         type: "waiting",
@@ -214,6 +262,12 @@ export async function assertSchedulerScript(
         type: "execute_batch",
         sourceAgentId: nextSource,
         targets: [...(expectedAction?.targets ?? [])],
+      };
+    }
+
+    if (shouldFinishFromEndEdge(options.topology, lastResponder, lastReplyContent)) {
+      return {
+        type: "finished",
       };
     }
 
@@ -379,7 +433,7 @@ export async function assertSchedulerScript(
       sourceState.expectedNextAction = null;
 
       if (normalizedReplyTargets.length === 0) {
-        appendDecision(buildNextDecision(agentId));
+        appendDecision(buildNextDecision(agentId, reply.content));
         return;
       }
 
@@ -394,22 +448,10 @@ export async function assertSchedulerScript(
         );
       }
 
-      const directReviewFailTargets = parsed.resolver.getTriggeredTargets(agentId, "continue");
       const canonicalTargets = expectedNextAction
         ? expectedNextAction.targets
-        : parsed.resolver.matchCanonicalTargets(
-          agentId,
-          normalizedReplyTargets,
-          sourceState.defaultTargets,
-          "transfer",
-        )
-        ?? parsed.resolver.matchCanonicalTargets(
-          agentId,
-          normalizedReplyTargets,
-          directReviewFailTargets,
-          "continue",
-        )
-        ?? normalizedReplyTargets;
+        : canonicalizeDispatchTargets(agentId, normalizedReplyTargets);
+      assertSpawnEntryDispatchOrder(agentId, normalizedReplyTargets, canonicalTargets);
 
       activeBatches.push({
         source: agentId,
@@ -505,12 +547,16 @@ export async function assertSchedulerScript(
         nestedSourceState.currentRevision += 1;
       }
       nestedSourceState.expectedNextAction = null;
+      const canonicalTargets = canonicalizeDispatchTargets(agentId, normalizedReplyTargets);
+      assertSpawnEntryDispatchOrder(agentId, normalizedReplyTargets, canonicalTargets);
 
       activeBatches.push({
         source: agentId,
         targets: [...normalizedReplyTargets],
-        canonicalTargets: [...normalizedReplyTargets],
-        canonicalTargetByActual: new Map(normalizedReplyTargets.map((target) => [target, target])),
+        canonicalTargets: [...canonicalTargets],
+        canonicalTargetByActual: new Map(
+          normalizedReplyTargets.map((target, index) => [target, canonicalTargets[index] ?? target]),
+        ),
         remainingTargets: [...normalizedReplyTargets],
         responses: [],
         sourceRevision: nestedSourceState.currentRevision,
@@ -524,7 +570,7 @@ export async function assertSchedulerScript(
     }
 
     finalizeBatchIfPossible();
-    appendDecision(nextDecision ?? buildNextDecision(agentId));
+    appendDecision(nextDecision ?? buildNextDecision(agentId, reply.content));
   };
 
   const firstLine = parsed.lines[0];
@@ -1037,6 +1083,7 @@ function createAgentRefResolver(topology: TopologyRecord): AgentRefResolver {
   return {
     resolve,
     isKnown,
+    getDynamicRef,
     getHandoffTargets,
     getTriggeredTargets,
     hasAnyOutgoingTargets,
@@ -1134,4 +1181,31 @@ function clearReviewFailLoopCountsForReviewer(
       actionRequiredLoopCountByEdge.delete(edgeKey);
     }
   }
+}
+
+function shouldFinishFromEndEdge(
+  topology: TopologyRecord,
+  agentId: string,
+  replyContent: string | undefined,
+): boolean {
+  const endNode = topology.langgraph?.end;
+  if (!endNode?.sources.includes(agentId)) {
+    return false;
+  }
+  const incoming = endNode.incoming?.filter((edge) => edge.source === agentId) ?? [];
+  if (incoming.length === 0) {
+    return false;
+  }
+
+  const signal = extractTrailingReviewSignalBlock(replyContent ?? "");
+  if (!signal) {
+    return false;
+  }
+
+  return incoming.some((edge) => {
+    if (!edge.triggerOn) {
+      return true;
+    }
+    return edge.triggerOn === signal.kind;
+  });
 }

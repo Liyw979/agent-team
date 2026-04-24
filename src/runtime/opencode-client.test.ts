@@ -488,3 +488,137 @@ test("buildRuntimeSnapshot 会保留同一条消息内 thinking 和 tool 的原�
     ],
   );
 });
+
+test("buildRuntimeSnapshot 会在同一条 OpenCode 工具消息超过 4 个 part 时保留 thinking", () => {
+  const { client } = createClient();
+  const typed = client as OpenCodeClient & {
+    buildRuntimeSnapshot: (sessionId: string, messages: unknown[]) => {
+      activities: Array<{ kind: string; detail: string; label: string }>;
+    };
+  };
+
+  const snapshot = typed.buildRuntimeSnapshot("session-1", [
+    {
+      info: {
+        id: "msg-tool-round",
+        role: "assistant",
+        time: {
+          created: 1776960271926,
+          completed: 1776960280541,
+        },
+      },
+      parts: [
+        { type: "step-start" },
+        {
+          type: "reasoning",
+          text: "**Prioritizing instructions**\n\nI need to inspect the repository before returning a finding.",
+        },
+        {
+          type: "tool",
+          tool: "glob",
+          state: {
+            input: { pattern: "**/*Http2*.java", path: "code/tomcat-vul" },
+          },
+        },
+        {
+          type: "tool",
+          tool: "glob",
+          state: {
+            input: { pattern: "**/*Authority*.java", path: "code/tomcat-vul" },
+          },
+        },
+        {
+          type: "tool",
+          tool: "glob",
+          state: {
+            input: { pattern: "**/*Host*.java", path: "code/tomcat-vul" },
+          },
+        },
+        { type: "step-finish", reason: "tool-calls" },
+      ],
+    },
+  ]);
+
+  assert.deepEqual(
+    snapshot.activities.map((activity) => ({
+      kind: activity.kind,
+      label: activity.label,
+      detail: activity.detail,
+    })),
+    [
+      {
+        kind: "thinking",
+        label: "**Prioritizing instructions** I need to inspect…",
+        detail: "**Prioritizing instructions**\n\nI need to inspect the repository before returning a finding.",
+      },
+      {
+        kind: "tool",
+        label: "glob",
+        detail: "参数: pattern=**/*Http2*.java, path=code/tomcat-vul",
+      },
+      {
+        kind: "tool",
+        label: "glob",
+        detail: "参数: pattern=**/*Authority*.java, path=code/tomcat-vul",
+      },
+      {
+        kind: "tool",
+        label: "glob",
+        detail: "参数: pattern=**/*Host*.java, path=code/tomcat-vul",
+      },
+    ],
+  );
+});
+
+test("buildRuntimeSnapshot 不会因为后续活动超过全局显示窗口而丢掉早期 OpenCode thinking", () => {
+  const { client } = createClient();
+  const typed = client as OpenCodeClient & {
+    buildRuntimeSnapshot: (sessionId: string, messages: unknown[]) => {
+      activities: Array<{ kind: string; detail: string; label: string }>;
+    };
+  };
+  const laterToolMessages = Array.from({ length: 25 }, (_, index) => ({
+    info: {
+      id: `msg-later-${index}`,
+      role: "assistant",
+      time: {
+        created: 1776960281000 + index,
+        completed: 1776960281000 + index,
+      },
+    },
+    parts: [
+      {
+        type: "tool",
+        tool: "grep",
+        state: {
+          input: { pattern: `later-${index}` },
+        },
+      },
+    ],
+  }));
+
+  const snapshot = typed.buildRuntimeSnapshot("session-1", [
+    {
+      info: {
+        id: "msg-first-thinking",
+        role: "assistant",
+        time: {
+          created: 1776960271926,
+          completed: 1776960280541,
+        },
+      },
+      parts: [
+        {
+          type: "reasoning",
+          text: "**Prioritizing instructions**\n\nI need to inspect the repository before returning a finding.",
+        },
+      ],
+    },
+    ...laterToolMessages,
+  ]);
+
+  assert.equal(
+    snapshot.activities.some((activity) => activity.detail.includes("Prioritizing instructions")),
+    true,
+  );
+});

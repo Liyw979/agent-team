@@ -7,7 +7,6 @@ import { toOpenCodeAgentId } from "./opencode-agent-id";
 import { appendAppLog } from "./app-log";
 import { extractOpenCodeServeBaseUrl } from "./opencode-serve-launch";
 import { resolveOpenCodeRequestTimeoutMs } from "./opencode-request-timeout";
-import { pickRecentPartIndexes } from "./runtime-activity-order";
 import { resolveWindowsCmdPath } from "./windows-shell";
 
 interface ServeHandle {
@@ -65,7 +64,6 @@ export interface OpenCodeSessionRuntime {
 }
 
 const MAX_RUNTIME_MESSAGES = 100;
-const MAX_RUNTIME_ACTIVITIES = 24;
 const SERVE_BASE_URL_TIMEOUT_MS = 10_000;
 interface SessionWaiter {
   sessionId: string;
@@ -1254,9 +1252,8 @@ export class OpenCodeClient {
       }
     }
 
-    const recentActivities = activities.slice(-MAX_RUNTIME_ACTIVITIES);
-    const latestActivity = recentActivities.at(-1) ?? null;
-    const recentToolNames = recentActivities
+    const latestActivity = activities.at(-1) ?? null;
+    const recentToolNames = activities
       .filter((activity) => activity.kind === "tool")
       .map((activity) => activity.label.replace(/^tool:\s*/i, "").trim())
       .filter((toolName, index, all) => Boolean(toolName) && all.indexOf(toolName) === index)
@@ -1269,7 +1266,7 @@ export class OpenCodeClient {
       updatedAt: latestActivity?.timestamp ?? null,
       headline: latestActivity?.detail ?? null,
       activeToolNames: recentToolNames.length > 0 ? recentToolNames : toolNames.slice(-2).reverse(),
-      activities: recentActivities,
+      activities,
     };
   }
 
@@ -1280,7 +1277,7 @@ export class OpenCodeClient {
   ): OpenCodeRuntimeActivity[] {
     const activities: OpenCodeRuntimeActivity[] = [];
 
-    for (const partIndex of pickRecentPartIndexes(parts.length, 4)) {
+    for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
       const part = parts[partIndex];
       if (!part) {
         continue;

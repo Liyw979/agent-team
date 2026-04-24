@@ -122,7 +122,7 @@ function buildFinalHistoryItems(input: {
         previewDetail: buildHistoryPreviewDetail(detail),
         detail,
         timestamp: message.timestamp,
-        sortTimestamp: message.timestamp,
+        sortTimestamp: `${message.timestamp}#z-final`,
         tone: presentation.tone,
       } satisfies AgentHistoryItem;
     });
@@ -138,7 +138,7 @@ function buildRuntimeHistoryItems(input: {
   }
 
   const finalMessageSignatures = new Set(
-    (input.finalHistoryItems ?? []).map((item) => `${item.sortTimestamp}:::${item.detail}`),
+    (input.finalHistoryItems ?? []).map((item) => `${item.timestamp}:::${item.detail}`),
   );
   const finalMessageIds = new Set((input.finalHistoryItems ?? []).map((item) => item.id));
   const belongsToFinalMessage = (activityId: string) =>
@@ -156,7 +156,7 @@ function buildRuntimeHistoryItems(input: {
       previewDetail: buildHistoryPreviewDetail(detail),
       detail,
       timestamp: activity.timestamp,
-      sortTimestamp: activity.timestamp,
+      sortTimestamp: `${activity.timestamp}#a-runtime-${String(index).padStart(6, "0")}`,
       tone: presentation.tone,
     } satisfies AgentHistoryItem;
     return {
@@ -164,7 +164,7 @@ function buildRuntimeHistoryItems(input: {
       activityId: activity.id,
     };
   }).filter((item) => {
-    if (belongsToFinalMessage(item.activityId)) {
+    if (item.runtimeItem.tone === "runtime-message" && belongsToFinalMessage(item.activityId)) {
       return false;
     }
 
@@ -173,7 +173,7 @@ function buildRuntimeHistoryItems(input: {
     }
 
     return !finalMessageSignatures.has(
-      `${item.runtimeItem.sortTimestamp}:::${item.runtimeItem.detail}`,
+      `${item.runtimeItem.timestamp}:::${item.runtimeItem.detail}`,
     );
   }).map((item) => item.runtimeItem);
 }

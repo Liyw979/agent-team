@@ -24,6 +24,7 @@ import {
 } from "@/components/topology-graph-helpers";
 import { getTopologyDisplayNodeIds } from "@/components/topology-spawn-drafts";
 import { buildTopologyCanvasLayout } from "@/lib/topology-canvas";
+import { selectTopologyHistoryItemsForDisplay } from "@/lib/topology-history-items";
 import { getTopologyPanelBodyClassName } from "@/lib/topology-panel-layout";
 import type {
   AgentRuntimeSnapshot,
@@ -45,7 +46,6 @@ interface TopologyGraphProps {
 
 const NODE_WIDTH = 248;
 const NODE_HEIGHT = 308;
-const HISTORY_VISIBLE_ITEMS = 6;
 
 interface SelectedHistoryItemState {
   agentId: string;
@@ -289,11 +289,11 @@ export function TopologyGraph({
     return new Map(
       visibleNodeIds.map((agentId) => [
         agentId,
-        buildAgentHistoryItems(withOptionalValue({
+        selectTopologyHistoryItemsForDisplay(buildAgentHistoryItems(withOptionalValue({
           agentId: agentId,
           messages: task.messages,
           topology,
-        }, "runtimeSnapshot", runtimeSnapshots[agentId])).slice(-HISTORY_VISIBLE_ITEMS),
+        }, "runtimeSnapshot", runtimeSnapshots[agentId]))),
       ]),
     );
   }, [runtimeSnapshots, task, topology, visibleNodeIds]);
