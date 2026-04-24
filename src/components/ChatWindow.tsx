@@ -4,6 +4,7 @@ import { resolvePrimaryTopologyStartTarget, type TaskSnapshot, type WorkspaceSna
 import { resolveTaskSubmissionTarget } from "@shared/task-submission";
 import { cn } from "@/lib/utils";
 import { getAgentColorToken } from "@/lib/agent-colors";
+import { resolveChatMessageAttachButtonState } from "@/lib/chat-attach-button";
 import { mergeTaskChatMessages, type ChatMessageItem } from "@/lib/chat-messages";
 import {
   getMentionContext,
@@ -30,6 +31,8 @@ interface ChatWindowProps {
   taskUrl: string | null;
   isMaximized?: boolean;
   onToggleMaximize?: () => void;
+  openingAgentTerminalId?: string | null;
+  onOpenAgentTerminal?: (agentId: string) => void;
   onSubmit: (payload: { content: string; mentionAgentId?: string }) => Promise<void>;
 }
 
@@ -111,8 +114,14 @@ function getDefaultAgentId(
 
 function MessageBubble({
   message,
+  taskAgentEntries,
+  openingAgentTerminalId,
+  onOpenAgentTerminal,
 }: {
   message: ChatMessageItem;
+  taskAgentEntries: ReadonlyArray<Pick<TaskSnapshot["agents"][number], "id" | "opencodeSessionId">>;
+  openingAgentTerminalId: string | null;
+  onOpenAgentTerminal: ((agentId: string) => void) | undefined;
 }) {
   const isUser = message.sender === "user";
   const isSystem = message.sender === "system";
@@ -163,6 +172,11 @@ function MessageBubble({
             color: "rgba(247, 251, 249, 0.8)",
           }
       : undefined;
+  const attachButtonState = resolveChatMessageAttachButtonState({
+    sender: message.sender,
+    taskAgents: taskAgentEntries,
+    openingAgentTerminalId,
+  });
 
   return (
     <article
@@ -197,6 +211,37 @@ function MessageBubble({
           <span className="shrink-0 text-[13px] leading-[1.2] opacity-80" style={metaTextStyle}>
             {new Date(message.timestamp).toLocaleString()}
           </span>
+          {attachButtonState.visible ? (
+            <button
+              type="button"
+              aria-label={`打开 ${attachButtonState.agentId} 的 attach 终端`}
+              title={attachButtonState.title}
+              disabled={attachButtonState.disabled}
+              onClick={() => {
+                if (attachButtonState.disabled || !onOpenAgentTerminal) {
+                  return;
+                }
+                onOpenAgentTerminal(attachButtonState.agentId);
+              }}
+              className="inline-flex h-7 items-center justify-center gap-1 rounded-full border border-[#d8cdbd] bg-[#fffaf2] px-2.5 text-[11px] font-semibold text-foreground/76 shadow-[0_1px_0_rgba(255,255,255,0.45)] transition hover:border-[#cda27d] hover:bg-white disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:border-[#d8cdbd] disabled:hover:bg-[#fffaf2]"
+            >
+              <svg
+                viewBox="0 0 16 16"
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <rect x="2.3" y="3.1" width="11.4" height="7.8" rx="1.7" />
+                <path d="M5.2 12.9h5.6" />
+                <path d="M8 10.9v2" />
+              </svg>
+              <span>{attachButtonState.label}</span>
+            </button>
+          ) : null}
         </div>
         {isAgent ? (
           <MarkdownMessage content={message.content} />
@@ -218,6 +263,8 @@ export function ChatWindow({
   taskUrl = null,
   isMaximized = false,
   onToggleMaximize,
+  openingAgentTerminalId = null,
+  onOpenAgentTerminal,
   onSubmit,
 }: ChatWindowProps) {
   const defaultAgentId = getDefaultAgentId(workspace, task);
@@ -253,6 +300,13 @@ export function ChatWindow({
       [...(task?.messages ?? [])].sort((left, right) => left.timestamp.localeCompare(right.timestamp)),
     ),
     [task],
+  );
+  const taskAgentEntries = useMemo(
+    () => task.agents.map((agent) => ({
+      id: agent.id,
+      opencodeSessionId: agent.opencodeSessionId,
+    })),
+    [task.agents],
   );
   const mentionOptions = useMemo(() => {
     if (mentionQuery === null) {
@@ -476,7 +530,13 @@ export function ChatWindow({
       >
         {messages.length > 0 ? (
           messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
+            <MessageBubble
+              key={message.id}
+              message={message}
+              taskAgentEntries={taskAgentEntries}
+              openingAgentTerminalId={openingAgentTerminalId}
+              onOpenAgentTerminal={onOpenAgentTerminal}
+            />
           ))
         ) : (
           <div className="rounded-[8px] border border-dashed border-border/70 bg-card/60 px-4 py-4 text-sm text-muted-foreground">

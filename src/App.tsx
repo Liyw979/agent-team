@@ -359,6 +359,10 @@ function App() {
               onToggleMaximize={() => {
                 setPanelMode((current) => (current === "chat-only" ? "default" : "chat-only"));
               }}
+              openingAgentTerminalId={openingAgentTerminalId}
+              onOpenAgentTerminal={(agentId) => {
+                void handleOpenAgentTerminal(agentId);
+              }}
               onSubmit={async ({ content, mentionAgentId }) => {
                 await submitTask(withOptionalString({
                   cwd: workspace.cwd,
@@ -406,6 +410,10 @@ function App() {
                   isMaximized={panelMode === "chat-only"}
                   onToggleMaximize={() => {
                     setPanelMode((current) => (current === "chat-only" ? "default" : "chat-only"));
+                  }}
+                  openingAgentTerminalId={openingAgentTerminalId}
+                  onOpenAgentTerminal={(agentId) => {
+                    void handleOpenAgentTerminal(agentId);
                   }}
                   onSubmit={async ({ content, mentionAgentId }) => {
                     await submitTask(withOptionalString({
