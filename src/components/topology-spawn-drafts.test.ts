@@ -93,6 +93,56 @@ test("getTopologyDisplayNodeIds 会用 runtime 实例替换已展开的静态模
   );
 });
 
+test("getTopologyDisplayNodeIds 在同模板多次 spawn 时只保留最新实例，固定复用原列位置", () => {
+  const topology: TopologyRecord = {
+    nodes: ["线索发现", "漏洞挖掘", "漏洞挑战", "讨论总结", "疑点辩论"],
+    nodeRecords: [
+      { id: "线索发现", kind: "agent", templateName: "线索发现" },
+      { id: "漏洞挖掘", kind: "agent", templateName: "漏洞挖掘" },
+      { id: "漏洞挑战", kind: "agent", templateName: "漏洞挑战" },
+      { id: "讨论总结", kind: "agent", templateName: "讨论总结" },
+      { id: "疑点辩论", kind: "spawn", templateName: "疑点辩论", spawnRuleId: "spawn-rule:疑点辩论" },
+    ],
+    edges: [],
+    spawnRules: [
+      {
+        id: "spawn-rule:疑点辩论",
+        spawnNodeName: "疑点辩论",
+        sourceTemplateName: "线索发现",
+        entryRole: "漏洞挖掘",
+        spawnedAgents: [
+          { role: "漏洞挖掘", templateName: "漏洞挖掘" },
+          { role: "漏洞挑战", templateName: "漏洞挑战" },
+          { role: "讨论总结", templateName: "讨论总结" },
+        ],
+        edges: [],
+        exitWhen: "all_completed",
+        reportToTemplateName: "线索发现",
+        reportToTriggerOn: "transfer",
+      },
+    ],
+  };
+
+  assert.deepEqual(
+    getTopologyDisplayNodeIds(
+      topology,
+      [
+        "线索发现",
+        "漏洞挖掘",
+        "漏洞挖掘-1",
+        "漏洞挖掘-2",
+        "漏洞挑战",
+        "漏洞挑战-1",
+        "漏洞挑战-2",
+        "讨论总结",
+        "讨论总结-1",
+        "讨论总结-2",
+      ],
+    ),
+    ["线索发现", "漏洞挖掘-2", "漏洞挑战-2", "讨论总结-2"],
+  );
+});
+
 test("upsertDebateSpawnDraft 会生成 GUI 需要保存的 spawn 节点、spawnRule 和 source->spawn 边", () => {
   const topology: TopologyRecord = {
     nodes: ["线索发现", "漏洞论证模板", "漏洞挑战模板", "Summary模板"],

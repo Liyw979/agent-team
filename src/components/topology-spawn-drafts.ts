@@ -65,7 +65,7 @@ export function getTopologyDisplayNodeIds(
     }
 
     const staticNodeIds = new Set(orderedVisibleNodeIds);
-    const runtimeNodeIdsByTemplate = new Map<string, string[]>();
+    const latestRuntimeNodeIdByTemplate = new Map<string, string>();
     const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const resolveRuntimeNodeIndex = (templateName: string, runtimeNodeId: string) => {
       const match = new RegExp(`^${escapeRegExp(templateName)}-(\\d+)$`).exec(runtimeNodeId);
@@ -78,16 +78,17 @@ export function getTopologyDisplayNodeIds(
         .filter((nodeId) => new RegExp(`^${escapeRegExp(templateName)}-(\\d+)$`).test(nodeId))
         .sort((left, right) =>
           resolveRuntimeNodeIndex(templateName, left) - resolveRuntimeNodeIndex(templateName, right));
-      if (runtimeNodeIds.length > 0) {
-        runtimeNodeIdsByTemplate.set(templateName, runtimeNodeIds);
+      const latestRuntimeNodeId = runtimeNodeIds.at(-1);
+      if (latestRuntimeNodeId) {
+        latestRuntimeNodeIdByTemplate.set(templateName, latestRuntimeNodeId);
       }
     }
 
     if (topology.nodes.length > 0) {
-      return orderedVisibleNodeIds.flatMap((nodeId) => runtimeNodeIdsByTemplate.get(nodeId) ?? [nodeId]);
+      return orderedVisibleNodeIds.map((nodeId) => latestRuntimeNodeIdByTemplate.get(nodeId) ?? nodeId);
     }
 
-    return orderedVisibleNodeIds.flatMap((nodeId) => runtimeNodeIdsByTemplate.get(nodeId) ?? [nodeId]);
+    return orderedVisibleNodeIds.map((nodeId) => latestRuntimeNodeIdByTemplate.get(nodeId) ?? nodeId);
   }
   return topology.nodes.length > 0 ? topology.nodes : candidateNodeIds;
 }
