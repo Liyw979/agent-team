@@ -24,7 +24,10 @@ import {
 } from "@/components/topology-graph-helpers";
 import { getTopologyDisplayNodeIds } from "@/components/topology-spawn-drafts";
 import { buildTopologyCanvasLayout } from "@/lib/topology-canvas";
-import { selectTopologyHistoryItemsForDisplay } from "@/lib/topology-history-items";
+import {
+  filterTopologyAgentIdsWithDisplayableHistory,
+  selectTopologyHistoryItemsForDisplay,
+} from "@/lib/topology-history-items";
 import { getTopologyPanelBodyClassName } from "@/lib/topology-panel-layout";
 import type {
   AgentRuntimeSnapshot,
@@ -284,9 +287,33 @@ export function TopologyGraph({
     };
   }, [topology?.nodes.length, topology?.nodeRecords?.length]);
 
-  const visibleNodeIds = useMemo(
+  const orderedNodeIds = useMemo(
     () => (topology ? getTopologyDisplayNodeIds(topology, visibleTopologyCandidateNodeIds) : []),
     [topology, visibleTopologyCandidateNodeIds],
+  );
+  const rawHistoryByAgent = useMemo(() => {
+    if (!topology) {
+      return new Map<string, AgentHistoryItem[]>();
+    }
+
+    if (!task || orderedNodeIds.length === 0) {
+      return new Map<string, AgentHistoryItem[]>();
+    }
+
+    return new Map(
+      orderedNodeIds.map((agentId) => [
+        agentId,
+        selectTopologyHistoryItemsForDisplay(buildAgentHistoryItems(withOptionalValue({
+          agentId: agentId,
+          messages: task.messages,
+          topology,
+        }, "runtimeSnapshot", runtimeSnapshots[agentId]))),
+      ]),
+    );
+  }, [orderedNodeIds, runtimeSnapshots, task, topology]);
+  const visibleNodeIds = useMemo(
+    () => filterTopologyAgentIdsWithDisplayableHistory(orderedNodeIds, rawHistoryByAgent),
+    [orderedNodeIds, rawHistoryByAgent],
   );
   const canvasLayout = useMemo(() => {
     if (!topology || visibleNodeIds.length === 0) {
@@ -309,25 +336,10 @@ export function TopologyGraph({
     });
   }, [canvasViewport?.height, canvasViewport?.width, topology, visibleNodeIds]);
   const historyByAgent = useMemo(() => {
-    if (!topology) {
-      return new Map<string, AgentHistoryItem[]>();
-    }
-
-    if (!task || visibleNodeIds.length === 0) {
-      return new Map<string, AgentHistoryItem[]>();
-    }
-
     return new Map(
-      visibleNodeIds.map((agentId) => [
-        agentId,
-        selectTopologyHistoryItemsForDisplay(buildAgentHistoryItems(withOptionalValue({
-          agentId: agentId,
-          messages: task.messages,
-          topology,
-        }, "runtimeSnapshot", runtimeSnapshots[agentId]))),
-      ]),
+      visibleNodeIds.map((agentId) => [agentId, rawHistoryByAgent.get(agentId) ?? []]),
     );
-  }, [runtimeSnapshots, task, topology, visibleNodeIds]);
+  }, [rawHistoryByAgent, visibleNodeIds]);
   const finalLoopDecisionAgentName = useMemo(
     () => (task ? getTopologyLoopLimitFailedDecisionAgentName(task.messages) : null),
     [task],

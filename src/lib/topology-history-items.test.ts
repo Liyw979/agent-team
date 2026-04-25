@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { AgentHistoryItem } from "./agent-history";
-import { selectTopologyHistoryItemsForDisplay } from "./topology-history-items";
+import {
+  filterTopologyAgentIdsWithDisplayableHistory,
+  selectTopologyHistoryItemsForDisplay,
+} from "./topology-history-items";
 
 function createHistoryItem(index: number): AgentHistoryItem {
   return {
@@ -42,5 +45,23 @@ test("selectTopologyHistoryItemsForDisplay 会过滤掉空消息生成的占位�
   assert.deepEqual(
     selectTopologyHistoryItemsForDisplay(items).map((item) => item.id),
     ["history-1"],
+  );
+});
+
+test("filterTopologyAgentIdsWithDisplayableHistory 会隐藏没有可展示消息记录的 agent 列", () => {
+  const historyByAgent = new Map<string, AgentHistoryItem[]>([
+    ["线索发现", [createHistoryItem(0)]],
+    ["线索完备性评估", []],
+    ["漏洞挑战-1", [createHistoryItem(1)]],
+    ["漏洞论证", []],
+    ["讨论总结", []],
+  ]);
+
+  assert.deepEqual(
+    filterTopologyAgentIdsWithDisplayableHistory(
+      ["线索发现", "线索完备性评估", "漏洞挑战-1", "漏洞论证", "讨论总结"],
+      historyByAgent,
+    ),
+    ["线索发现", "漏洞挑战-1"],
   );
 });

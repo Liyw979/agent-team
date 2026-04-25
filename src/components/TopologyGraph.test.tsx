@@ -83,6 +83,14 @@ test("拓扑里的空历史节点不应再展示待启动占位记录", () => {
   assert.doesNotMatch(TOPOLOGY_GRAPH_SOURCE, /待启动/);
 });
 
+test("拓扑只展示有可展示消息记录的 agent，并基于过滤后的节点重新布局", () => {
+  assert.match(TOPOLOGY_GRAPH_SOURCE, /const orderedNodeIds = useMemo\(/);
+  assert.match(TOPOLOGY_GRAPH_SOURCE, /const rawHistoryByAgent = useMemo\(/);
+  assert.match(TOPOLOGY_GRAPH_SOURCE, /filterTopologyAgentIdsWithDisplayableHistory\(orderedNodeIds, rawHistoryByAgent\)/);
+  assert.match(TOPOLOGY_GRAPH_SOURCE, /nodes: visibleNodeIds/);
+  assert.doesNotMatch(TOPOLOGY_GRAPH_SOURCE, /const visibleNodeIds = useMemo\(\s*\(\) => \(topology \? getTopologyDisplayNodeIds\(topology, visibleTopologyCandidateNodeIds\) : \[\]\)/);
+});
+
 test("拓扑节点头部的 attach 按钮需要保持更小的胶囊尺寸", () => {
   assert.match(
     TOPOLOGY_GRAPH_SOURCE,

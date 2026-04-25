@@ -110,3 +110,65 @@ test("buildTopologyCanvasLayout 在高度比默认卡片更小时也必须压回
   assert.ok(layout.nodes.every((node) => node.x + node.width <= 1254));
   assert.ok(layout.nodes.every((node) => node.y + node.height <= 300));
 });
+
+test("buildTopologyCanvasLayout 在只剩两个节点时也必须继续横向铺满整个拓扑区域", () => {
+  const layout = buildTopologyCanvasLayout({
+    nodes: ["线索发现", "漏洞挑战"],
+    edges: [],
+    availableWidth: 2048,
+    availableHeight: 360,
+    columnWidth: 248,
+    minNodeWidth: 248,
+    minNodeHeight: 308,
+    columnGap: 18,
+    sidePadding: 0,
+    topPadding: 0,
+    bottomPadding: 0,
+    nodeHeight: 308,
+  });
+
+  assert.equal(layout.width, 2048);
+  assert.equal(layout.height, 360);
+  assert.deepEqual(
+    layout.nodes.map((node) => ({
+      id: node.id,
+      x: node.x,
+      y: node.y,
+      width: node.width,
+      height: node.height,
+    })),
+    [
+      { id: "线索发现", x: 0, y: 0, width: 1015, height: 360 },
+      { id: "漏洞挑战", x: 1033, y: 0, width: 1015, height: 360 },
+    ],
+  );
+});
+
+test("buildTopologyCanvasLayout 在只剩一个节点时也必须横向纵向同时铺满整个拓扑区域", () => {
+  const layout = buildTopologyCanvasLayout({
+    nodes: ["线索发现"],
+    edges: [],
+    availableWidth: 2048,
+    availableHeight: 360,
+    columnWidth: 248,
+    minNodeWidth: 248,
+    minNodeHeight: 308,
+    columnGap: 18,
+    sidePadding: 0,
+    topPadding: 0,
+    bottomPadding: 0,
+    nodeHeight: 308,
+  });
+
+  assert.equal(layout.width, 2048);
+  assert.equal(layout.height, 360);
+  assert.deepEqual(layout.nodes, [
+    {
+      id: "线索发现",
+      x: 0,
+      y: 0,
+      width: 2048,
+      height: 360,
+    },
+  ]);
+});
