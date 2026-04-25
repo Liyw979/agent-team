@@ -5,14 +5,14 @@ import { parseReview, stripStructuredSignals } from "./review-parser";
 
 test("review agent 未返回合法标签时默认按 continue 处理", () => {
   const parsedReview = parseReview(
-    "这是普通审查正文，标签写错了。\n\n<chalenge>请继续补充实现依据。</chalenge>",
+    "这是普通审查正文，标签写错了。\n\n<invalid>请继续补充实现依据。</invalid>",
     true,
   );
 
   assert.deepEqual(parsedReview, {
-    cleanContent: "这是普通审查正文，标签写错了。\n\n<chalenge>请继续补充实现依据。</chalenge>",
+    cleanContent: "这是普通审查正文，标签写错了。\n\n<invalid>请继续补充实现依据。</invalid>",
     decision: "continue",
-    opinion: "这是普通审查正文，标签写错了。\n\n<chalenge>请继续补充实现依据。</chalenge>",
+    opinion: "这是普通审查正文，标签写错了。\n\n<invalid>请继续补充实现依据。</invalid>",
     rawDecisionBlock: null,
     validationError: null,
   });

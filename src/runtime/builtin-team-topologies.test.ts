@@ -226,11 +226,12 @@ test("漏洞团队的讨论总结 prompt 直接输出总结正文，不再要求
 
   assert.equal(typeof summaryNode?.prompt, "string");
   assert.equal(summaryNode?.writable, true);
-  assert.match(summaryNode?.prompt ?? "", /真实漏洞.*正式漏洞报告/u);
+  assert.match(summaryNode?.prompt ?? "", /综合当前可疑点已经形成的材料/u);
   assert.match(summaryNode?.prompt ?? "", /result\//u);
   assert.match(summaryNode?.prompt ?? "", /写入的相对路径/u);
-  assert.match(summaryNode?.prompt ?? "", /误报.*写入.*result\//u);
   assert.match(summaryNode?.prompt ?? "", /总结正文/u);
+  assert.match(summaryNode?.prompt ?? "", /支持判断的关键依据/u);
+  assert.match(summaryNode?.prompt ?? "", /仍未解决的不确定点/u);
   assert.doesNotMatch(summaryNode?.prompt ?? "", /回复开头必须先输出 <continue>/u);
   assert.doesNotMatch(summaryNode?.prompt ?? "", /回复开头必须先输出 <complete>/u);
 });
