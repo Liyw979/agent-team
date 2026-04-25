@@ -45,6 +45,22 @@ export function extractTrailingReviewSignalBlock(content: string): {
     };
   }
 
+  const leadingStart = findLeadingSignalStart(trimmed);
+  if (leadingStart) {
+    const response = stripTrailingBareReviewSignal(
+      stripLeadingReviewResponseLabel(trimmed),
+      leadingStart.kind,
+    );
+    if (response) {
+      return {
+        body: "",
+        response,
+        rawBlock: trimmed,
+        kind: leadingStart.kind,
+      };
+    }
+  }
+
   const trailingStart = findLastSignalStart(trimmed);
   if (!trailingStart) {
     return null;
@@ -53,6 +69,15 @@ export function extractTrailingReviewSignalBlock(content: string): {
   const rawBlock = trimmed.slice(trailingStart.index).trim();
   const response = stripLeadingReviewResponseLabel(rawBlock);
   if (!response) {
+    const body = trimmed.slice(0, trailingStart.index).trim();
+    if (body && isBareReviewSignal(rawBlock, trailingStart.kind)) {
+      return {
+        body,
+        response: body,
+        rawBlock,
+        kind: trailingStart.kind,
+      };
+    }
     return null;
   }
 
@@ -73,6 +98,12 @@ export function stripReviewResponseMarkup(content: string): string {
   const parsed = extractTrailingReviewSignalBlock(trimmed);
   if (!parsed) {
     return stripLeadingReviewResponseLabel(trimmed);
+  }
+
+  const normalizedBody = parsed.body.replace(/\s+/g, " ").trim();
+  const normalizedResponse = parsed.response.replace(/\s+/g, " ").trim();
+  if (normalizedBody && normalizedBody === normalizedResponse) {
+    return parsed.body.trim();
   }
 
   return [parsed.body, parsed.response].filter(Boolean).join("\n\n").trim();
@@ -97,4 +128,33 @@ function findLastSignalStart(content: string): { index: number; kind: ReviewSign
   }
 
   return last;
+}
+
+function findLeadingSignalStart(content: string): { kind: ReviewSignalKind } | null {
+  if (content.startsWith(REVIEW_CONTINUE_LABEL)) {
+    return { kind: "continue" };
+  }
+  if (content.startsWith(REVIEW_COMPLETE_LABEL)) {
+    return { kind: "complete" };
+  }
+  return null;
+}
+
+function isBareReviewSignal(rawBlock: string, kind: ReviewSignalKind): boolean {
+  return rawBlock === (kind === "continue" ? REVIEW_CONTINUE_LABEL : REVIEW_COMPLETE_LABEL);
+}
+
+function stripTrailingBareReviewSignal(content: string, kind: ReviewSignalKind): string {
+  let normalized = content.trim();
+  const label = kind === "continue" ? REVIEW_CONTINUE_LABEL : REVIEW_COMPLETE_LABEL;
+
+  while (normalized.endsWith(label)) {
+    const next = normalized.slice(0, -label.length).trimEnd();
+    if (!next) {
+      break;
+    }
+    normalized = next.trim();
+  }
+
+  return normalized;
 }

@@ -43,9 +43,9 @@ export function parseReview(content: string, reviewAgent: boolean): ParsedReview
 
   return {
     cleanContent,
-    decision: "invalid",
-    opinion: null,
+    decision: "continue",
+    opinion: cleanContent || null,
     rawDecisionBlock: null,
-    validationError: "审查 Agent 必须用 <complete> 或 <continue> 标签明确给出结论。",
+    validationError: null,
   };
 }
