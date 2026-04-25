@@ -1,4 +1,5 @@
 import {
+  DEFAULT_ACTION_REQUIRED_MAX_ROUNDS,
   LANGGRAPH_END_NODE_ID,
   type AgentRecord,
   createTopologyLangGraphRecord,
@@ -38,7 +39,7 @@ interface GraphDslLink {
   from: string;
   to: string;
   trigger_type: TopologyEdgeTrigger;
-  message_type: TopologyEdgeMessageMode | "all";
+  message_type: TopologyEdgeMessageMode;
   maxRevisionRounds?: number | undefined;
 }
 
@@ -66,12 +67,7 @@ const GraphDslLinkSchema: z.ZodType<GraphDslLink> = z.object({
   from: z.string(),
   to: z.string(),
   trigger_type: z.enum(["transfer", "complete", "continue"]),
-  message_type: z.union([
-    z.literal("none"),
-    z.literal("last"),
-    z.literal("last-all"),
-    z.literal("all").transform(() => "last-all" as const),
-  ]),
+  message_type: z.enum(["none", "last", "last-all"]),
   maxRevisionRounds: z.number().finite().optional(),
 }).strict();
 
@@ -126,7 +122,10 @@ function normalizeComparableTopology(topology: TopologyRecord): TopologyRecord {
         messageMode: edge.messageMode,
         ...(edge.triggerOn === "continue"
           ? {
-              maxRevisionRounds: normalizeActionRequiredMaxRounds(edge.maxRevisionRounds),
+              maxRevisionRounds:
+                edge.maxRevisionRounds === undefined
+                  ? DEFAULT_ACTION_REQUIRED_MAX_ROUNDS
+                  : normalizeActionRequiredMaxRounds(edge.maxRevisionRounds),
             }
           : {}),
       }))
@@ -359,7 +358,7 @@ function parseGraphDsl(input: unknown): GraphDslGraph {
 }
 
 function normalizeGraphDslMessageMode(messageMode: GraphDslLink["message_type"]): TopologyEdgeMessageMode {
-  return messageMode === "all" ? "last-all" : messageMode;
+  return messageMode;
 }
 
 function mapGraphDslLinkToTopologyEdge(link: GraphDslLink) {
