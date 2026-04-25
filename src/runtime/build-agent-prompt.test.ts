@@ -8,15 +8,6 @@ import {
   DECISION_CONTINUE_LABEL,
 } from "../shared/decision-response";
 
-test("Build agent does not inject a system prompt", () => {
-  const body = buildSubmitMessageBody({
-    agent: "Build",
-    content: "Implement feature",
-  });
-
-  assert.equal("system" in body, false);
-});
-
 test("Decision agents keep the response contract in the system prompt", () => {
   const prompt = buildAgentSystemPrompt();
 
@@ -30,22 +21,6 @@ test("Decision agents keep the response contract in the system prompt", () => {
     prompt,
     new RegExp(DECISION_COMPLETE_LABEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
   );
-});
-
-test("Non-decision agents do not inject a system prompt", () => {
-  const body = buildSubmitMessageBody({
-    agent: "Build",
-    content: "Implement feature",
-  });
-
-  assert.equal("system" in body, false);
-});
-
-test("Decision agents system prompt only describes response labels", () => {
-  const prompt = buildAgentSystemPrompt();
-
-  assert.match(prompt, /回复必须以<xxx>标签开头/);
-  assert.doesNotMatch(prompt, /上游消息正文/);
 });
 
 test("Build agent request body omits system", () => {

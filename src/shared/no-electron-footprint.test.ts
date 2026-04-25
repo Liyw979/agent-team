@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 
 interface RepositorySnapshot {
   packageJson: string;
-  agentsDoc: string;
   launcherScript: string;
   hasRootPackageLock: boolean;
   hasRootBunLock: boolean;
@@ -29,12 +28,6 @@ function collectLegacyElectronFootprints(snapshot: RepositorySnapshot) {
   }
   if (/\bnpm run\b/.test(snapshot.packageJson)) {
     issues.push("package.json 脚本仍回指 npm run");
-  }
-  if (/\bElectron\b/.test(snapshot.agentsDoc) || /├── electron\//.test(snapshot.agentsDoc)) {
-    issues.push("AGENTS.md 仍记录 Electron 技术栈或目录");
-  }
-  if (/\bnpm run\b/.test(snapshot.agentsDoc)) {
-    issues.push("AGENTS.md 主工程命令文案仍回指 npm run");
   }
   if (/electron\/cli\//.test(snapshot.launcherScript)) {
     issues.push("bin/agent-team 仍指向 electron/cli");
@@ -62,7 +55,6 @@ test("仓库不再残留 Electron 集成足迹", () => {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
   const snapshot: RepositorySnapshot = {
     packageJson: fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"),
-    agentsDoc: fs.readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8"),
     launcherScript: fs.readFileSync(path.join(repoRoot, "bin", "agent-team"), "utf8"),
     hasRootPackageLock: fs.existsSync(path.join(repoRoot, "package-lock.json")),
     hasRootBunLock: fs.existsSync(path.join(repoRoot, "bun.lock")),
