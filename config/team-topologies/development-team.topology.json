@@ -34,7 +34,7 @@
   ],
   "links": [
     {
-      "from": "BA",
+      "from": "任务分析",
       "to": "Build",
       "trigger_type": "transfer",
       "message_type": "last"

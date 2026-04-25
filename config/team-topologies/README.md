@@ -233,7 +233,7 @@
 
 ```json
 [
-  { "from": "BA", "to": "Build", "trigger_type": "transfer", "message_type": "last" },
+  { "from": "任务分析", "to": "Build", "trigger_type": "transfer", "message_type": "last" },
   { "from": "Build", "to": "CodeReview", "trigger_type": "transfer", "message_type": "last" },
   { "from": "CodeReview", "to": "Build", "trigger_type": "continue", "message_type": "last" }
 ]
@@ -254,22 +254,22 @@
 
 ```json
 {
-  "entry": "BA",
+  "entry": "任务分析",
   "nodes": [
-    { "type": "agent", "id": "BA", "prompt": "...", "writable": false },
+    { "type": "agent", "id": "任务分析", "prompt": "...", "writable": false },
     { "type": "agent", "id": "Build", "prompt": "", "writable": true },
     { "type": "agent", "id": "CodeReview", "prompt": "...", "writable": false },
     { "type": "agent", "id": "UnitTest", "prompt": "...", "writable": false },
-    { "type": "agent", "id": "TaskReview", "prompt": "...", "writable": false }
+    { "type": "agent", "id": "SecurityReview", "prompt": "...", "writable": false }
   ],
   "links": [
-    { "from": "BA", "to": "Build", "trigger_type": "transfer", "message_type": "last" },
+    { "from": "任务分析", "to": "Build", "trigger_type": "transfer", "message_type": "last" },
     { "from": "Build", "to": "CodeReview", "trigger_type": "transfer", "message_type": "last" },
     { "from": "Build", "to": "UnitTest", "trigger_type": "transfer", "message_type": "last" },
-    { "from": "Build", "to": "TaskReview", "trigger_type": "transfer", "message_type": "last" },
+    { "from": "Build", "to": "SecurityReview", "trigger_type": "transfer", "message_type": "last" },
     { "from": "CodeReview", "to": "Build", "trigger_type": "continue", "message_type": "last" },
     { "from": "UnitTest", "to": "Build", "trigger_type": "continue", "message_type": "last" },
-    { "from": "TaskReview", "to": "Build", "trigger_type": "continue", "message_type": "last" }
+    { "from": "SecurityReview", "to": "Build", "trigger_type": "continue", "message_type": "last" }
   ]
 }
 ```

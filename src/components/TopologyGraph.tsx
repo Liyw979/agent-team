@@ -24,6 +24,7 @@ import {
 } from "@/components/topology-graph-helpers";
 import { getTopologyDisplayNodeIds } from "@/components/topology-spawn-drafts";
 import { buildTopologyCanvasLayout } from "@/lib/topology-canvas";
+import { getTopologyCanvasViewportMeasurementKey } from "@/lib/topology-canvas-viewport-measure";
 import {
   filterTopologyAgentIdsWithDisplayableHistory,
   selectTopologyHistoryItemsForDisplay,
@@ -249,6 +250,43 @@ export function TopologyGraph({
     [runtimeSnapshots, task?.agents],
   );
 
+  const orderedNodeIds = useMemo(
+    () => (topology ? getTopologyDisplayNodeIds(topology, visibleTopologyCandidateNodeIds) : []),
+    [topology, visibleTopologyCandidateNodeIds],
+  );
+  const rawHistoryByAgent = useMemo(() => {
+    if (!topology) {
+      return new Map<string, AgentHistoryItem[]>();
+    }
+
+    if (!task || orderedNodeIds.length === 0) {
+      return new Map<string, AgentHistoryItem[]>();
+    }
+
+    return new Map(
+      orderedNodeIds.map((agentId) => [
+        agentId,
+        selectTopologyHistoryItemsForDisplay(buildAgentHistoryItems(withOptionalValue({
+          agentId: agentId,
+          messages: task.messages,
+          topology,
+        }, "runtimeSnapshot", runtimeSnapshots[agentId]))),
+      ]),
+    );
+  }, [orderedNodeIds, runtimeSnapshots, task, topology]);
+  const visibleNodeIds = useMemo(
+    () => filterTopologyAgentIdsWithDisplayableHistory(orderedNodeIds, rawHistoryByAgent),
+    [orderedNodeIds, rawHistoryByAgent],
+  );
+  const canvasViewportMeasurementKey = useMemo(
+    () => getTopologyCanvasViewportMeasurementKey({
+      topologyNodeCount: topology?.nodes.length ?? 0,
+      topologyNodeRecordCount: topology?.nodeRecords?.length ?? 0,
+      hasRenderableCanvas: Boolean(topology && visibleNodeIds.length > 0),
+    }),
+    [topology, visibleNodeIds.length],
+  );
+
   useEffect(() => {
     const element = canvasViewportRef.current;
     if (!element) {
@@ -285,36 +323,7 @@ export function TopologyGraph({
     return () => {
       observer.disconnect();
     };
-  }, [topology?.nodes.length, topology?.nodeRecords?.length]);
-
-  const orderedNodeIds = useMemo(
-    () => (topology ? getTopologyDisplayNodeIds(topology, visibleTopologyCandidateNodeIds) : []),
-    [topology, visibleTopologyCandidateNodeIds],
-  );
-  const rawHistoryByAgent = useMemo(() => {
-    if (!topology) {
-      return new Map<string, AgentHistoryItem[]>();
-    }
-
-    if (!task || orderedNodeIds.length === 0) {
-      return new Map<string, AgentHistoryItem[]>();
-    }
-
-    return new Map(
-      orderedNodeIds.map((agentId) => [
-        agentId,
-        selectTopologyHistoryItemsForDisplay(buildAgentHistoryItems(withOptionalValue({
-          agentId: agentId,
-          messages: task.messages,
-          topology,
-        }, "runtimeSnapshot", runtimeSnapshots[agentId]))),
-      ]),
-    );
-  }, [orderedNodeIds, runtimeSnapshots, task, topology]);
-  const visibleNodeIds = useMemo(
-    () => filterTopologyAgentIdsWithDisplayableHistory(orderedNodeIds, rawHistoryByAgent),
-    [orderedNodeIds, rawHistoryByAgent],
-  );
+  }, [canvasViewportMeasurementKey]);
   const canvasLayout = useMemo(() => {
     if (!topology || visibleNodeIds.length === 0) {
       return null;

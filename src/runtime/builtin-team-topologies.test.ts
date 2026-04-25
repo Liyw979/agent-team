@@ -66,7 +66,14 @@ test("开发团队拓扑包含 CodeReview 判定回路", () => {
   const nodeIds = developmentTeamTopology.nodes.map((node: BuiltinNode) => node.id);
 
   assert.deepEqual(nodeIds.includes("CodeReview"), true);
-  assert.equal(developmentTeamTopology.entry, "BA");
+  assert.equal(developmentTeamTopology.entry, "任务分析");
+  assert.equal(
+    developmentTeamTopology.links.some(
+      (link: BuiltinLink) =>
+        link.from === "任务分析" && link.to === "Build" && link.trigger_type === "transfer",
+    ),
+    true,
+  );
   assert.equal(
     developmentTeamTopology.links.some(
       (link: BuiltinLink) => link.from === "Build" && link.to === "CodeReview" && link.trigger_type === "transfer",
@@ -81,25 +88,25 @@ test("开发团队拓扑包含 CodeReview 判定回路", () => {
   );
 });
 
-test("开发团队拓扑文件内直接提供 BA / CodeReview / UnitTest / TaskReview 的 prompt", () => {
+test("开发团队拓扑文件内直接提供 任务分析 / CodeReview / UnitTest / SecurityReview 的 prompt", () => {
   const developmentTeamTopology = readBuiltinTopology("development-team.topology.json");
   const nodes = developmentTeamTopology.nodes;
 
   const build = nodes.find((node: unknown) => typeof node === "object" && node !== null && (node as { id?: string }).id === "Build") as { writable?: boolean } | undefined;
-  const ba = nodes.find((node: unknown) => typeof node === "object" && node !== null && (node as { id?: string }).id === "BA") as { prompt?: string } | undefined;
+  const taskAnalyst = nodes.find((node: unknown) => typeof node === "object" && node !== null && (node as { id?: string }).id === "任务分析") as { prompt?: string } | undefined;
   const codeDecision = nodes.find((node: unknown) => typeof node === "object" && node !== null && (node as { id?: string }).id === "CodeReview") as { prompt?: string } | undefined;
   const unitTest = nodes.find((node: unknown) => typeof node === "object" && node !== null && (node as { id?: string }).id === "UnitTest") as { prompt?: string } | undefined;
-  const taskDecision = nodes.find((node: unknown) => typeof node === "object" && node !== null && (node as { id?: string }).id === "TaskReview") as { prompt?: string } | undefined;
+  const securityReview = nodes.find((node: unknown) => typeof node === "object" && node !== null && (node as { id?: string }).id === "SecurityReview") as { prompt?: string } | undefined;
 
   assert.equal(build?.writable, true);
-  assert.equal(typeof ba?.prompt, "string");
-  assert.equal((ba?.prompt ?? "").trim().length > 0, true);
+  assert.equal(typeof taskAnalyst?.prompt, "string");
+  assert.equal((taskAnalyst?.prompt ?? "").trim().length > 0, true);
   assert.equal(typeof codeDecision?.prompt, "string");
   assert.equal((codeDecision?.prompt ?? "").trim().length > 0, true);
   assert.equal(typeof unitTest?.prompt, "string");
   assert.equal((unitTest?.prompt ?? "").trim().length > 0, true);
-  assert.equal(typeof taskDecision?.prompt, "string");
-  assert.equal((taskDecision?.prompt ?? "").trim().length > 0, true);
+  assert.equal(typeof securityReview?.prompt, "string");
+  assert.equal((securityReview?.prompt ?? "").trim().length > 0, true);
 });
 
 test("JSON 团队拓扑可以直接编译为运行时 DSL", () => {
@@ -110,7 +117,7 @@ test("JSON 团队拓扑可以直接编译为运行时 DSL", () => {
   assert.deepEqual(compiled.topology.langgraph, {
     start: {
       id: "__start__",
-      targets: ["BA"],
+      targets: ["任务分析"],
     },
     end: null,
   });
