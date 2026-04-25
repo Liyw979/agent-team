@@ -20,15 +20,6 @@ export function usesOpenCodeBuiltinPrompt(agentId: string): boolean {
   return agentId.trim().toLowerCase() === BUILD_AGENT_ID.toLowerCase();
 }
 
-export type AgentRole =
-  | "business_analyst"
-  | "implementation"
-  | "task_review"
-  | "code_review"
-  | "unit_test"
-  | "integration_test"
-  | string;
-
 export function getWorkspaceNameFromPath(workspacePath: string): string {
   const normalized = workspacePath.trim().replace(/[\\/]+$/, "");
   if (!normalized) {
