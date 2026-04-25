@@ -11,14 +11,25 @@ test("聊天消息头部会为 agent 消息补充 attach 按钮", () => {
   assert.match(CHAT_WINDOW_SOURCE, /onOpenAgentTerminal=\{onOpenAgentTerminal\}/);
 });
 
-test("聊天消息头部的 attach 按钮需要比 agent 名称更紧凑", () => {
+test("聊天气泡头部的名称、时间、状态图标、attach 文案字号统一为 13px", () => {
   assert.match(
     CHAT_WINDOW_SOURCE,
-    /className="inline-flex h-6 items-center justify-center gap-1 rounded-full border border-\[#d8cdbd\] bg-\[#fffaf2\] px-2 text-\[10px\] font-semibold text-foreground\/76/,
+    /className=\{cn\(\s*"inline-flex h-6 max-w-full shrink-0 items-center rounded-\[8px\] px-2 text-center text-\[13px\] font-semibold leading-\[1\.2\] tracking-\[0\.02em\]"/,
   );
-  assert.match(CHAT_WINDOW_SOURCE, /className="h-3 w-3"/);
-  assert.doesNotMatch(CHAT_WINDOW_SOURCE, /className="inline-flex h-7 items-center justify-center gap-1 rounded-full border border-\[#d8cdbd\] bg-\[#fffaf2\] px-2\.5 text-\[11px\] font-semibold text-foreground\/76/);
-  assert.doesNotMatch(CHAT_WINDOW_SOURCE, /className="h-3\.5 w-3\.5"/);
+  assert.match(
+    CHAT_WINDOW_SOURCE,
+    /className="inline-flex h-6 shrink-0 items-center text-\[13px\] leading-\[1\.2\] opacity-80"/,
+  );
+  assert.match(
+    CHAT_WINDOW_SOURCE,
+    /className="inline-flex h-6 items-center justify-center gap-1 rounded-full border border-\[#d8cdbd\] bg-\[#fffaf2\] px-2 text-\[13px\] font-semibold text-foreground\/76/,
+  );
+  assert.match(
+    CHAT_WINDOW_SOURCE,
+    /className="inline-flex h-6 w-6 items-center justify-center rounded-full text-\[13px\] font-semibold shadow-\[0_1px_0_rgba\(255,255,255,0\.45\)\] border border-\[#d8b14a\]\/70 bg-\[linear-gradient\(180deg,#fff7d8_0%,#ffedb8_100%\)\] text-\[#6b5208\] topology-status-badge-running"/,
+  );
+  assert.doesNotMatch(CHAT_WINDOW_SOURCE, /text-\[14px\]/);
+  assert.doesNotMatch(CHAT_WINDOW_SOURCE, /text-\[10px\]/);
 });
 
 test("聊天区会把可见 @ 派发构造成执行气泡，并接入 runtimeSnapshots", () => {
@@ -38,21 +49,22 @@ test("聊天执行气泡会限制最大高度，并在内部独立滚动", () =>
   assert.match(CHAT_WINDOW_SOURCE, /viewport\.scrollTop = viewport\.scrollHeight/);
 });
 
-test("聊天执行气泡头部的名称、运行中、时间、attach 按钮高度保持一致", () => {
-  assert.match(
-    CHAT_WINDOW_SOURCE,
-    /className="inline-flex h-6 max-w-full shrink-0 items-center rounded-\[8px\] px-2 text-center text-\[14px\] font-semibold leading-\[1\.2\] tracking-\[0\.02em\]"/,
-  );
-  assert.match(
-    CHAT_WINDOW_SOURCE,
-    /className="inline-flex h-6 items-center rounded-full border border-current\/10 bg-white\/55 px-2 text-\[11px\] font-semibold"/,
-  );
+test("聊天执行气泡头部会按名称、时间、运行图标、attach 顺序排布，并且不再单独显示运行中文案", () => {
   assert.match(
     CHAT_WINDOW_SOURCE,
     /className="inline-flex h-6 shrink-0 items-center text-\[13px\] leading-\[1\.2\] opacity-80"/,
   );
   assert.match(
     CHAT_WINDOW_SOURCE,
-    /className="inline-flex h-6 items-center justify-center gap-1 rounded-full border border-\[#d8cdbd\] bg-\[#fffaf2\] px-2 text-\[10px\] font-semibold text-foreground\/76/,
+    /className="inline-flex h-6 w-6 items-center justify-center rounded-full text-\[13px\] font-semibold shadow-\[0_1px_0_rgba\(255,255,255,0\.45\)\] border border-\[#d8b14a\]\/70 bg-\[linear-gradient\(180deg,#fff7d8_0%,#ffedb8_100%\)\] text-\[#6b5208\] topology-status-badge-running"/,
   );
+  assert.match(
+    CHAT_WINDOW_SOURCE,
+    /className="h-3\.5 w-3\.5 animate-spin motion-reduce:animate-none origin-center \[transform-box:fill-box\]"/,
+  );
+  assert.match(
+    CHAT_WINDOW_SOURCE,
+    /className="inline-flex h-6 items-center justify-center gap-1 rounded-full border border-\[#d8cdbd\] bg-\[#fffaf2\] px-2 text-\[13px\] font-semibold text-foreground\/76/,
+  );
+  assert.doesNotMatch(CHAT_WINDOW_SOURCE, />\s*运行中\s*</);
 });

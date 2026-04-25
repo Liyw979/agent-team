@@ -219,7 +219,7 @@ function MessageBubble({
           {senderLabel ? (
             <span
               className={cn(
-                "inline-flex max-w-full shrink-0 rounded-[8px] px-2 py-px text-center text-[14px] font-semibold leading-[1.2] tracking-[0.02em]",
+                "inline-flex h-6 max-w-full shrink-0 items-center rounded-[8px] px-2 text-center text-[13px] font-semibold leading-[1.2] tracking-[0.02em]",
                 !isAgent && !isUser && !isSystem && "bg-black/8 text-current",
               )}
               style={senderBadgeStyle}
@@ -227,7 +227,10 @@ function MessageBubble({
               {senderLabel}
             </span>
           ) : null}
-          <span className="shrink-0 text-[13px] leading-[1.2] opacity-80" style={metaTextStyle}>
+          <span
+            className="inline-flex h-6 shrink-0 items-center text-[13px] leading-[1.2] opacity-80"
+            style={metaTextStyle}
+          >
             {new Date(message.timestamp).toLocaleString()}
           </span>
           {attachButtonState.visible ? (
@@ -242,7 +245,7 @@ function MessageBubble({
                 }
                 onOpenAgentTerminal(attachButtonState.agentId);
               }}
-              className="inline-flex h-6 items-center justify-center gap-1 rounded-full border border-[#d8cdbd] bg-[#fffaf2] px-2 text-[10px] font-semibold text-foreground/76 shadow-[0_1px_0_rgba(255,255,255,0.45)] transition hover:border-[#cda27d] hover:bg-white disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:border-[#d8cdbd] disabled:hover:bg-[#fffaf2]"
+              className="inline-flex h-6 items-center justify-center gap-1 rounded-full border border-[#d8cdbd] bg-[#fffaf2] px-2 text-[13px] font-semibold text-foreground/76 shadow-[0_1px_0_rgba(255,255,255,0.45)] transition hover:border-[#cda27d] hover:bg-white disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:border-[#d8cdbd] disabled:hover:bg-[#fffaf2]"
             >
               <svg
                 viewBox="0 0 16 16"
@@ -326,7 +329,7 @@ function RunningExecutionBubble({
       <div className="flex flex-col gap-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span
-            className="inline-flex h-6 max-w-full shrink-0 items-center rounded-[8px] px-2 text-center text-[14px] font-semibold leading-[1.2] tracking-[0.02em]"
+            className="inline-flex h-6 max-w-full shrink-0 items-center rounded-[8px] px-2 text-center text-[13px] font-semibold leading-[1.2] tracking-[0.02em]"
             style={{
               background: agentColor.solid,
               color: agentColor.badgeText,
@@ -334,14 +337,30 @@ function RunningExecutionBubble({
           >
             {getChatSenderLabel(item.agentId)}
           </span>
-          <span className="inline-flex h-6 items-center rounded-full border border-current/10 bg-white/55 px-2 text-[11px] font-semibold">
-            运行中
-          </span>
           <span
             className="inline-flex h-6 shrink-0 items-center text-[13px] leading-[1.2] opacity-80"
             style={{ color: agentColor.mutedText }}
           >
             {new Date(item.startedAt).toLocaleString()}
+          </span>
+          <span
+            aria-label="运行中"
+            title="运行中"
+            className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[13px] font-semibold shadow-[0_1px_0_rgba(255,255,255,0.45)] border border-[#d8b14a]/70 bg-[linear-gradient(180deg,#fff7d8_0%,#ffedb8_100%)] text-[#6b5208] topology-status-badge-running"
+          >
+            <svg
+              viewBox="0 0 16 16"
+              className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none origin-center [transform-box:fill-box]"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M13 8a5 5 0 1 1-1.46-3.54" />
+              <path d="M10.8 2.7H13v2.2" />
+            </svg>
           </span>
           {attachButtonState.visible ? (
             <button
@@ -355,7 +374,7 @@ function RunningExecutionBubble({
                 }
                 onOpenAgentTerminal(attachButtonState.agentId);
               }}
-              className="inline-flex h-6 items-center justify-center gap-1 rounded-full border border-[#d8cdbd] bg-[#fffaf2] px-2 text-[10px] font-semibold text-foreground/76 shadow-[0_1px_0_rgba(255,255,255,0.45)] transition hover:border-[#cda27d] hover:bg-white disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:border-[#d8cdbd] disabled:hover:bg-[#fffaf2]"
+              className="inline-flex h-6 items-center justify-center gap-1 rounded-full border border-[#d8cdbd] bg-[#fffaf2] px-2 text-[13px] font-semibold text-foreground/76 shadow-[0_1px_0_rgba(255,255,255,0.45)] transition hover:border-[#cda27d] hover:bg-white disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:border-[#d8cdbd] disabled:hover:bg-[#fffaf2]"
             >
               <svg
                 viewBox="0 0 16 16"
