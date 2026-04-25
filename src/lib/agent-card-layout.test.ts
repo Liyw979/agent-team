@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   calculateAgentCardListGap,
+  calculateAgentCardPanelLayout,
   calculateAgentCardPromptLineCount,
 } from "./agent-card-layout";
 
@@ -70,5 +71,20 @@ test("calculateAgentCardListGap 会在卡片高度不变的前提下，把剩余
       emptyStateHeightPx: 20,
     }),
     6,
+  );
+});
+
+test("团队面板在 340px 可视高度内展示 4 张带 prompt 的卡片时，摘要至少应展示 2 行", () => {
+  assert.deepEqual(
+    calculateAgentCardPanelLayout({
+      viewportHeight: 340,
+      cardCount: 4,
+      promptCardCount: 4,
+      hasErrorBanner: false,
+    }),
+    {
+      promptLineCount: 2,
+      gapPx: 12,
+    },
   );
 });
