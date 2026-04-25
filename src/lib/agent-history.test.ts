@@ -113,6 +113,128 @@ test("buildAgentHistoryItems 会返回单个 agent 的完整历史记录", () =>
   );
 });
 
+test("buildAgentExecutionHistoryItems 会把连续工具调用合并成一条历史记录", () => {
+  const runtimeSnapshot: AgentRuntimeSnapshot = {
+    taskId: "task-1",
+    agentId: "Build",
+    sessionId: "session-build",
+    status: "running",
+    runtimeStatus: "running",
+    messageCount: 1,
+    updatedAt: "2026-04-20T09:02:30.000Z",
+    headline: "Build 正在排查问题",
+    activeToolNames: ["read", "grep"],
+    activities: [
+      {
+        id: "activity-thinking",
+        kind: "thinking",
+        label: "思考",
+        detail: "先定位和权限相关的控制器",
+        timestamp: "2026-04-20T09:01:00.000Z",
+      },
+      {
+        id: "activity-tool-1",
+        kind: "tool",
+        label: "read",
+        detail: "参数: src/main/java/com/si/demo/common/config/security/WebSecurityConfig.java",
+        timestamp: "2026-04-20T09:02:00.000Z",
+      },
+      {
+        id: "activity-tool-2",
+        kind: "tool",
+        label: "read",
+        detail: "参数: src/main/java/com/si/demo/common/util/dict/DictCache.java",
+        timestamp: "2026-04-20T09:02:01.000Z",
+      },
+      {
+        id: "activity-tool-3",
+        kind: "tool",
+        label: "grep",
+        detail: "参数: pattern=@PreAuthorize, path=src/main/java/com/si/demo",
+        timestamp: "2026-04-20T09:02:02.000Z",
+      },
+    ],
+  };
+
+  assert.deepEqual(
+    buildAgentExecutionHistoryItems({
+      agentId: "Build",
+      messages: [],
+      topology,
+      runtimeSnapshot,
+      startedAt: "2026-04-20T09:00:00.000Z",
+    }).map((item) => ({
+      label: item.label,
+      detail: item.detail,
+      tone: item.tone,
+    })),
+    [
+      {
+        label: "思考",
+        detail: "先定位和权限相关的控制器",
+        tone: "runtime-thinking",
+      },
+      {
+        label: "工具（3）",
+        detail: [
+          "- read · 参数: src/main/java/com/si/demo/common/config/security/WebSecurityConfig.java",
+          "- read · 参数: src/main/java/com/si/demo/common/util/dict/DictCache.java",
+          "- grep · 参数: pattern=@PreAuthorize, path=src/main/java/com/si/demo",
+        ].join("\n"),
+        tone: "runtime-tool",
+      },
+    ],
+  );
+});
+
+test("buildAgentExecutionHistoryItems 不会跨越思考记录合并工具调用", () => {
+  const runtimeSnapshot: AgentRuntimeSnapshot = {
+    taskId: "task-1",
+    agentId: "Build",
+    sessionId: "session-build",
+    status: "running",
+    runtimeStatus: "running",
+    messageCount: 1,
+    updatedAt: "2026-04-20T09:02:30.000Z",
+    headline: "Build 正在排查问题",
+    activeToolNames: ["read", "grep"],
+    activities: [
+      {
+        id: "activity-tool-1",
+        kind: "tool",
+        label: "read",
+        detail: "参数: src/runtime/opencode-client.ts",
+        timestamp: "2026-04-20T09:02:00.000Z",
+      },
+      {
+        id: "activity-thinking",
+        kind: "thinking",
+        label: "思考",
+        detail: "需要对比去重和展示层的边界",
+        timestamp: "2026-04-20T09:02:01.000Z",
+      },
+      {
+        id: "activity-tool-2",
+        kind: "tool",
+        label: "grep",
+        detail: "参数: pattern=buildAgentExecutionHistoryItems, path=src",
+        timestamp: "2026-04-20T09:02:02.000Z",
+      },
+    ],
+  };
+
+  assert.deepEqual(
+    buildAgentExecutionHistoryItems({
+      agentId: "Build",
+      messages: [],
+      topology,
+      runtimeSnapshot,
+      startedAt: "2026-04-20T09:00:00.000Z",
+    }).map((item) => item.label),
+    ["工具", "思考", "工具"],
+  );
+});
+
 test("buildAgentHistoryItems 会把判定标签去掉并标记为继续处理", () => {
   const messages: MessageRecord[] = [
     createAgentFinalMessage({

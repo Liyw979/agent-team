@@ -54,6 +54,50 @@ function normalizeToolHistory(toolName: string, detail: string) {
   );
 }
 
+function mergeAdjacentRuntimeToolHistoryItems(items: AgentHistoryItem[]) {
+  const mergedItems: AgentHistoryItem[] = [];
+  let pendingToolItems: AgentHistoryItem[] = [];
+
+  const flushPendingToolItems = () => {
+    if (pendingToolItems.length === 0) {
+      return;
+    }
+
+    if (pendingToolItems.length === 1) {
+      mergedItems.push(pendingToolItems[0]!);
+      pendingToolItems = [];
+      return;
+    }
+
+    const firstToolItem = pendingToolItems[0]!;
+    const lastToolItem = pendingToolItems[pendingToolItems.length - 1]!;
+    const detail = pendingToolItems.map((item) => `- ${item.detail}`).join("\n");
+
+    mergedItems.push({
+      ...firstToolItem,
+      id: `${firstToolItem.id}::tool-group::${lastToolItem.id}`,
+      label: `工具（${pendingToolItems.length}）`,
+      detailSnippet: buildHistoryDetailSnippet(detail),
+      detail,
+      timestamp: lastToolItem.timestamp,
+    });
+    pendingToolItems = [];
+  };
+
+  for (const item of items) {
+    if (item.tone === "runtime-tool") {
+      pendingToolItems.push(item);
+      continue;
+    }
+
+    flushPendingToolItems();
+    mergedItems.push(item);
+  }
+
+  flushPendingToolItems();
+  return mergedItems;
+}
+
 function getRuntimeItemPresentation(kind: AgentRuntimeSnapshot["activities"][number]["kind"]) {
   switch (kind) {
     case "tool":
@@ -174,40 +218,44 @@ function buildRuntimeHistoryItems(input: {
   const belongsToFinalMessage = (activityId: string) =>
     [...finalMessageIds].some((messageId) => activityId.startsWith(`${messageId}:`));
 
-  return input.runtimeSnapshot.activities
-    .filter((activity) => isTimestampWithinAgentHistoryRange(activity.timestamp, input.range ?? {}))
-    .map((activity, index) => {
-    const presentation = getRuntimeItemPresentation(activity.kind);
-    const detail =
-      activity.kind === "tool"
-        ? normalizeToolHistory(activity.label, activity.detail)
-        : normalizeHistoryDetail(activity.detail || activity.label);
-    const runtimeItem = {
-      id: `${input.agentId}-runtime-${activity.id}-${index}`,
-      label: presentation.label,
-      detailSnippet: buildHistoryDetailSnippet(detail),
-      detail,
-      timestamp: activity.timestamp,
-      sortTimestamp: `${activity.timestamp}#a-runtime-${String(index).padStart(6, "0")}`,
-      tone: presentation.tone,
-    } satisfies AgentHistoryItem;
-    return {
-      runtimeItem,
-      activityId: activity.id,
-    };
-  }).filter((item) => {
-    if (item.runtimeItem.tone === "runtime-message" && belongsToFinalMessage(item.activityId)) {
-      return false;
-    }
+  return mergeAdjacentRuntimeToolHistoryItems(
+    input.runtimeSnapshot.activities
+      .filter((activity) => isTimestampWithinAgentHistoryRange(activity.timestamp, input.range ?? {}))
+      .map((activity, index) => {
+        const presentation = getRuntimeItemPresentation(activity.kind);
+        const detail =
+          activity.kind === "tool"
+            ? normalizeToolHistory(activity.label, activity.detail)
+            : normalizeHistoryDetail(activity.detail || activity.label);
+        const runtimeItem = {
+          id: `${input.agentId}-runtime-${activity.id}-${index}`,
+          label: presentation.label,
+          detailSnippet: buildHistoryDetailSnippet(detail),
+          detail,
+          timestamp: activity.timestamp,
+          sortTimestamp: `${activity.timestamp}#a-runtime-${String(index).padStart(6, "0")}`,
+          tone: presentation.tone,
+        } satisfies AgentHistoryItem;
+        return {
+          runtimeItem,
+          activityId: activity.id,
+        };
+      })
+      .filter((item) => {
+        if (item.runtimeItem.tone === "runtime-message" && belongsToFinalMessage(item.activityId)) {
+          return false;
+        }
 
-    if (item.runtimeItem.tone !== "runtime-message") {
-      return true;
-    }
+        if (item.runtimeItem.tone !== "runtime-message") {
+          return true;
+        }
 
-    return !finalMessageSignatures.has(
-      `${item.runtimeItem.timestamp}:::${item.runtimeItem.detail}`,
-    );
-  }).map((item) => item.runtimeItem);
+        return !finalMessageSignatures.has(
+          `${item.runtimeItem.timestamp}:::${item.runtimeItem.detail}`,
+        );
+      })
+      .map((item) => item.runtimeItem),
+  );
 }
 
 export function buildAgentHistoryItems(input: {
