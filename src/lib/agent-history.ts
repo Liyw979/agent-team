@@ -4,6 +4,7 @@ import type {
   MessageRecord,
   TopologyRecord,
 } from "@shared/types";
+import { withOptionalValue } from "@shared/object-utils";
 import { isAgentFinalMessageRecord, isDecisionAgentInTopology } from "@shared/types";
 import { stripDecisionResponseMarkup } from "@shared/decision-response";
 import { getLoopLimitFailedDecisionAgentName } from "./decision-loop-limit";
@@ -25,6 +26,11 @@ export interface AgentHistoryItem {
 }
 
 export const EMPTY_AGENT_HISTORY_DETAIL = "暂无详细记录";
+
+interface AgentHistoryRange {
+  startedAt?: string;
+  endedAt?: string;
+}
 
 function normalizeHistoryDetail(content: string | null | undefined) {
   const normalized = stripDecisionResponseMarkup(content ?? "")
@@ -92,10 +98,25 @@ function getFinalItemPresentation(input: {
   };
 }
 
+function isTimestampWithinAgentHistoryRange(
+  timestamp: string,
+  range: AgentHistoryRange,
+) {
+  if (range.startedAt && timestamp.localeCompare(range.startedAt) < 0) {
+    return false;
+  }
+  if (range.endedAt && timestamp.localeCompare(range.endedAt) > 0) {
+    return false;
+  }
+  return true;
+}
+
 function buildFinalHistoryItems(input: {
   agentId: string;
   messages: MessageRecord[];
   topology: Pick<TopologyRecord, "edges">;
+  range?: AgentHistoryRange;
+  finalMessageId?: string;
 }) {
   const decisionAgent = isDecisionAgentInTopology(input.topology, input.agentId);
   const finalLoopDecisionAgentName = getLoopLimitFailedDecisionAgentName(input.messages);
@@ -105,6 +126,12 @@ function buildFinalHistoryItems(input: {
       (message): message is AgentFinalMessageRecord =>
         message.sender === input.agentId && isAgentFinalMessageRecord(message),
     )
+    .filter((message) => {
+      if (input.finalMessageId && message.id !== input.finalMessageId) {
+        return false;
+      }
+      return isTimestampWithinAgentHistoryRange(message.timestamp, input.range ?? {});
+    })
     .map((message) => {
       const status =
         message.decision === "continue"
@@ -134,6 +161,7 @@ function buildRuntimeHistoryItems(input: {
   agentId: string;
   runtimeSnapshot?: AgentRuntimeSnapshot;
   finalHistoryItems?: AgentHistoryItem[];
+  range?: AgentHistoryRange;
 }) {
   if (!input.runtimeSnapshot) {
     return [];
@@ -146,7 +174,9 @@ function buildRuntimeHistoryItems(input: {
   const belongsToFinalMessage = (activityId: string) =>
     [...finalMessageIds].some((messageId) => activityId.startsWith(`${messageId}:`));
 
-  return input.runtimeSnapshot.activities.map((activity, index) => {
+  return input.runtimeSnapshot.activities
+    .filter((activity) => isTimestampWithinAgentHistoryRange(activity.timestamp, input.range ?? {}))
+    .map((activity, index) => {
     const presentation = getRuntimeItemPresentation(activity.kind);
     const detail =
       activity.kind === "tool"
@@ -193,5 +223,34 @@ export function buildAgentHistoryItems(input: {
       ...input,
       finalHistoryItems,
     }),
+  ].sort((left, right) => left.sortTimestamp.localeCompare(right.sortTimestamp));
+}
+
+export function buildAgentExecutionHistoryItems(input: {
+  agentId: string;
+  messages: MessageRecord[];
+  topology: Pick<TopologyRecord, "edges">;
+  runtimeSnapshot?: AgentRuntimeSnapshot;
+  startedAt: string;
+  finalMessageId?: string;
+  completedAt?: string;
+}) {
+  const range = withOptionalValue({
+    startedAt: input.startedAt,
+  }, "endedAt", input.completedAt) satisfies AgentHistoryRange;
+  const finalHistoryItems = buildFinalHistoryItems(withOptionalValue({
+    agentId: input.agentId,
+    messages: input.messages,
+    topology: input.topology,
+    range,
+  }, "finalMessageId", input.finalMessageId));
+
+  return [
+    ...buildRuntimeHistoryItems(withOptionalValue({
+      agentId: input.agentId,
+      finalHistoryItems,
+      range,
+    }, "runtimeSnapshot", input.runtimeSnapshot)),
+    ...finalHistoryItems,
   ].sort((left, right) => left.sortTimestamp.localeCompare(right.sortTimestamp));
 }

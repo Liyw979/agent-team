@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { AgentRuntimeSnapshot, MessageRecord, TopologyRecord } from "@shared/types";
-import { buildAgentHistoryItems } from "./agent-history";
+import { buildAgentExecutionHistoryItems, buildAgentHistoryItems } from "./agent-history";
 
 function createAgentFinalMessage(input: {
   id: string;
@@ -314,6 +314,82 @@ test("buildAgentHistoryItems 会保留同一条最终回复里的 thinking，并
       {
         label: "已完成判定",
         detail: "这次我认可最终交付结论。",
+      },
+    ],
+  );
+});
+
+test("buildAgentExecutionHistoryItems 只返回本轮执行窗口内的 runtime 历史与对应最终消息", () => {
+  const messages: MessageRecord[] = [
+    createAgentFinalMessage({
+      id: "message-old",
+      sender: "Build",
+      content: "旧轮次结果",
+      timestamp: "2026-04-20T08:59:00.000Z",
+    }),
+    createAgentFinalMessage({
+      id: "message-current",
+      sender: "Build",
+      content: "当前轮次结果",
+      timestamp: "2026-04-20T09:03:00.000Z",
+    }),
+  ];
+  const runtimeSnapshot: AgentRuntimeSnapshot = {
+    taskId: "task-1",
+    agentId: "Build",
+    sessionId: "session-build",
+    status: "completed",
+    runtimeStatus: "completed",
+    messageCount: 4,
+    updatedAt: "2026-04-20T09:03:00.000Z",
+    headline: "Build 已完成",
+    activeToolNames: [],
+    activities: [
+      {
+        id: "old-thinking",
+        kind: "thinking",
+        label: "思考",
+        detail: "旧轮次思考",
+        timestamp: "2026-04-20T08:58:30.000Z",
+      },
+      {
+        id: "current-thinking",
+        kind: "thinking",
+        label: "思考",
+        detail: "当前轮次思考",
+        timestamp: "2026-04-20T09:01:00.000Z",
+      },
+      {
+        id: "message-current:0:1:message",
+        kind: "message",
+        label: "消息",
+        detail: "当前轮次结果",
+        timestamp: "2026-04-20T09:03:00.000Z",
+      },
+    ],
+  };
+
+  assert.deepEqual(
+    buildAgentExecutionHistoryItems({
+      agentId: "Build",
+      messages,
+      topology,
+      runtimeSnapshot,
+      startedAt: "2026-04-20T09:00:00.000Z",
+      finalMessageId: "message-current",
+      completedAt: "2026-04-20T09:03:00.000Z",
+    }).map((item) => ({
+      label: item.label,
+      detail: item.detail,
+    })),
+    [
+      {
+        label: "思考",
+        detail: "当前轮次思考",
+      },
+      {
+        label: "已完成",
+        detail: "当前轮次结果",
       },
     ],
   );

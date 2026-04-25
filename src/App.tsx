@@ -342,6 +342,7 @@ function App() {
               availableAgents={availableAgents}
               taskLogFilePath={uiSnapshot?.taskLogFilePath ?? null}
               taskUrl={uiSnapshot?.taskUrl ?? null}
+              runtimeSnapshots={runtimeSnapshots}
               isMaximized={panelMode === "chat-only"}
               onToggleMaximize={() => {
                 setPanelMode((current) => (current === "chat-only" ? "default" : "chat-only"));
@@ -394,6 +395,7 @@ function App() {
                   availableAgents={availableAgents}
                   taskLogFilePath={uiSnapshot?.taskLogFilePath ?? null}
                   taskUrl={uiSnapshot?.taskUrl ?? null}
+                  runtimeSnapshots={runtimeSnapshots}
                   isMaximized={panelMode === "chat-only"}
                   onToggleMaximize={() => {
                     setPanelMode((current) => (current === "chat-only" ? "default" : "chat-only"));

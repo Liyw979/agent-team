@@ -15,6 +15,7 @@ test("App 已裁成单 Task 展示面板", () => {
 
 test("App 保留聊天输入，但团队面板不再提供 attach 按钮", () => {
   assert.match(APP_SOURCE, /<ChatWindow/);
+  assert.match(APP_SOURCE, /runtimeSnapshots=\{runtimeSnapshots\}/);
   assert.match(APP_SOURCE, /resolveAppPanelVisibility/);
   assert.match(APP_SOURCE, /panelMode/);
   assert.doesNotMatch(APP_SOURCE, /buildAgentPanelAttachButtonState/);

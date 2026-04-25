@@ -1,16 +1,27 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import { withOptionalString } from "@shared/object-utils";
-import { resolvePrimaryTopologyStartTarget, type TaskSnapshot, type WorkspaceSnapshot } from "@shared/types";
+import {
+  resolvePrimaryTopologyStartTarget,
+  type AgentRuntimeSnapshot,
+  type TaskSnapshot,
+  type WorkspaceSnapshot,
+} from "@shared/types";
 import { resolveTaskSubmissionTarget } from "@shared/task-submission";
 import { cn } from "@/lib/utils";
 import { getAgentColorToken } from "@/lib/agent-colors";
 import { resolveChatMessageAttachButtonState } from "@/lib/chat-attach-button";
+import type { AgentHistoryItem } from "@/lib/agent-history";
 import { mergeTaskChatMessages, type ChatMessageItem } from "@/lib/chat-messages";
+import {
+  buildChatFeedItems,
+  type ChatFeedExecutionItem,
+} from "@/lib/chat-execution-feed";
 import {
   getMentionContext,
   getMentionOptionItems,
   type MentionContext,
 } from "@/lib/chat-mentions";
+import { AgentHistoryMarkdown } from "@/lib/agent-history-markdown";
 import { MarkdownMessage } from "@/lib/chat-markdown";
 import { PANEL_HEADER_ACTION_BUTTON_CLASS } from "@/lib/panel-header-action-button";
 import { getPanelFullscreenButtonCopy } from "@/lib/panel-fullscreen-label";
@@ -22,6 +33,10 @@ import {
   PANEL_SURFACE_CLASS,
 } from "@/lib/panel-header";
 import { formatChatTranscript, getChatSenderLabel } from "@/lib/chat-transcript";
+import {
+  shouldAutoScrollTopologyHistory,
+  shouldStickTopologyHistoryToBottom,
+} from "@/lib/topology-history-scroll";
 
 interface ChatWindowProps {
   workspace: WorkspaceSnapshot;
@@ -29,6 +44,7 @@ interface ChatWindowProps {
   availableAgents: string[];
   taskLogFilePath: string | null;
   taskUrl: string | null;
+  runtimeSnapshots?: Record<string, AgentRuntimeSnapshot>;
   isMaximized?: boolean;
   onToggleMaximize?: () => void;
   openingAgentTerminalId?: string | null;
@@ -43,6 +59,9 @@ const MENTION_MENU_HEADER_HEIGHT = 28;
 const MENTION_MENU_VERTICAL_PADDING = 16;
 const MENTION_MENU_GAP = 12;
 const MENTION_MENU_VIEWPORT_MARGIN = 12;
+const CHAT_EXECUTION_BUBBLE_MAX_HEIGHT_PX = 300;
+type RunningChatFeedExecutionItem = Extract<ChatFeedExecutionItem, { state: "running" }>;
+
 function getCaretCoordinates(textarea: HTMLTextAreaElement, position: number) {
   const div = document.createElement("div");
   const style = window.getComputedStyle(textarea);
@@ -255,12 +274,159 @@ function MessageBubble({
   );
 }
 
+function getExecutionHistoryItemClassName(item: AgentHistoryItem) {
+  switch (item.tone) {
+    case "failure":
+      return "border-rose-200 bg-rose-50 text-rose-900";
+    case "runtime-tool":
+      return "border-amber-200 bg-amber-50 text-amber-900";
+    case "runtime-thinking":
+      return "border-slate-200 bg-slate-50 text-slate-800";
+    case "runtime-step":
+      return "border-sky-200 bg-sky-50 text-sky-900";
+    case "runtime-message":
+      return "border-emerald-200 bg-emerald-50 text-emerald-900";
+    default:
+      return "border-emerald-200 bg-emerald-50 text-emerald-900";
+  }
+}
+
+function RunningExecutionBubble({
+  item,
+  taskAgentEntries,
+  openingAgentTerminalId,
+  onOpenAgentTerminal,
+  viewportRef,
+  onViewportScroll,
+}: {
+  item: RunningChatFeedExecutionItem;
+  taskAgentEntries: ReadonlyArray<Pick<TaskSnapshot["agents"][number], "id" | "opencodeSessionId">>;
+  openingAgentTerminalId: string | null;
+  onOpenAgentTerminal: ((agentId: string) => void) | undefined;
+  viewportRef: (element: HTMLDivElement | null) => void;
+  onViewportScroll: (event: UIEvent<HTMLDivElement>) => void;
+}) {
+  const agentColor = getAgentColorToken(item.agentId);
+  const attachButtonState = resolveChatMessageAttachButtonState({
+    sender: item.agentId,
+    taskAgents: taskAgentEntries,
+    openingAgentTerminalId,
+  });
+
+  return (
+    <article
+      className="max-w-[88%] rounded-[8px] border px-3 py-2 shadow-sm"
+      style={{
+        background: agentColor.soft,
+        borderColor: agentColor.border,
+        color: agentColor.text,
+        boxShadow: "0 10px 24px rgba(23,32,25,0.06)",
+      }}
+    >
+      <div className="flex flex-col gap-1">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span
+            className="inline-flex h-6 max-w-full shrink-0 items-center rounded-[8px] px-2 text-center text-[14px] font-semibold leading-[1.2] tracking-[0.02em]"
+            style={{
+              background: agentColor.solid,
+              color: agentColor.badgeText,
+            }}
+          >
+            {getChatSenderLabel(item.agentId)}
+          </span>
+          <span className="inline-flex h-6 items-center rounded-full border border-current/10 bg-white/55 px-2 text-[11px] font-semibold">
+            运行中
+          </span>
+          <span
+            className="inline-flex h-6 shrink-0 items-center text-[13px] leading-[1.2] opacity-80"
+            style={{ color: agentColor.mutedText }}
+          >
+            {new Date(item.startedAt).toLocaleString()}
+          </span>
+          {attachButtonState.visible ? (
+            <button
+              type="button"
+              aria-label={`打开 ${attachButtonState.agentId} 的 attach 终端`}
+              title={attachButtonState.title}
+              disabled={attachButtonState.disabled}
+              onClick={() => {
+                if (attachButtonState.disabled || !onOpenAgentTerminal) {
+                  return;
+                }
+                onOpenAgentTerminal(attachButtonState.agentId);
+              }}
+              className="inline-flex h-6 items-center justify-center gap-1 rounded-full border border-[#d8cdbd] bg-[#fffaf2] px-2 text-[10px] font-semibold text-foreground/76 shadow-[0_1px_0_rgba(255,255,255,0.45)] transition hover:border-[#cda27d] hover:bg-white disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:border-[#d8cdbd] disabled:hover:bg-[#fffaf2]"
+            >
+              <svg
+                viewBox="0 0 16 16"
+                className="h-3 w-3"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <rect x="2.3" y="3.1" width="11.4" height="7.8" rx="1.7" />
+                <path d="M5.2 12.9h5.6" />
+                <path d="M8 10.9v2" />
+              </svg>
+              <span>{attachButtonState.label}</span>
+            </button>
+          ) : null}
+        </div>
+
+        <div
+          ref={viewportRef}
+          onScroll={onViewportScroll}
+          className="min-h-0 space-y-1 overflow-y-auto rounded-[8px] border border-black/8 bg-white/55 px-2 py-2"
+          style={{
+            maxHeight: `${CHAT_EXECUTION_BUBBLE_MAX_HEIGHT_PX}px`,
+          }}
+        >
+          {item.historyItems.length > 0 ? (
+            item.historyItems.map((historyItem) => (
+              <article
+                key={historyItem.id}
+                className={`rounded-[10px] border px-2 py-1.5 ${getExecutionHistoryItemClassName(historyItem)}`}
+              >
+                <div className="min-w-0 flex-1 select-text">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold">{historyItem.label}</span>
+                    <span className="text-[11px] opacity-70">
+                      {new Date(historyItem.timestamp).toLocaleTimeString("zh-CN", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        second: "2-digit",
+                        hour12: false,
+                      })}
+                    </span>
+                  </div>
+                  <AgentHistoryMarkdown
+                    content={historyItem.detailSnippet}
+                    className="mt-1 text-[11px] leading-[1.35] opacity-90 select-text"
+                  />
+                </div>
+              </article>
+            ))
+          ) : (
+            <div className="flex h-9 items-center rounded-[10px] border border-dashed border-black/10 px-2 text-[12px] text-foreground/60">
+              正在等待第一条运行记录
+            </div>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}
+
 export function ChatWindow({
   workspace,
   task,
   availableAgents,
   taskLogFilePath = null,
   taskUrl = null,
+  runtimeSnapshots = {},
   isMaximized = false,
   onToggleMaximize,
   openingAgentTerminalId = null,
@@ -279,6 +445,9 @@ export function ChatWindow({
   const composerRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messageViewportRef = useRef<HTMLDivElement | null>(null);
+  const executionViewportRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const executionShouldStickToBottomRef = useRef<Record<string, boolean>>({});
+  const executionLastItemIdRef = useRef<Record<string, string | null>>({});
   const shouldStickToBottomRef = useRef(true);
   const copyResetTimerRef = useRef<number | null>(null);
   const mentionQuery = mentionContext?.query ?? null;
@@ -300,6 +469,14 @@ export function ChatWindow({
       [...(task?.messages ?? [])].sort((left, right) => left.timestamp.localeCompare(right.timestamp)),
     ),
     [task],
+  );
+  const feedItems = useMemo(
+    () => buildChatFeedItems({
+      messages: task?.messages ?? [],
+      topology: task.topology ?? workspace.topology,
+      runtimeSnapshots,
+    }),
+    [runtimeSnapshots, task?.messages, task?.topology, workspace?.topology],
   );
   const taskAgentEntries = useMemo(
     () => task.agents.map((agent) => ({
@@ -347,7 +524,69 @@ export function ChatWindow({
     return () => {
       cancelAnimationFrame(frame);
     };
-  }, [messages, task?.task.id]);
+  }, [feedItems, task?.task.id]);
+
+  useEffect(() => {
+    const activeRunningExecutionIds = new Set(
+      feedItems
+        .filter((item): item is RunningChatFeedExecutionItem =>
+          item.type === "execution" && item.state === "running")
+        .map((item) => item.id),
+    );
+
+    for (const executionId of Object.keys(executionViewportRefs.current)) {
+      if (!activeRunningExecutionIds.has(executionId)) {
+        delete executionViewportRefs.current[executionId];
+      }
+    }
+    for (const executionId of Object.keys(executionShouldStickToBottomRef.current)) {
+      if (!activeRunningExecutionIds.has(executionId)) {
+        delete executionShouldStickToBottomRef.current[executionId];
+      }
+    }
+    for (const executionId of Object.keys(executionLastItemIdRef.current)) {
+      if (!activeRunningExecutionIds.has(executionId)) {
+        delete executionLastItemIdRef.current[executionId];
+      }
+    }
+  }, [feedItems]);
+
+  useEffect(() => {
+    const frameIds: number[] = [];
+    for (const feedItem of feedItems) {
+      if (feedItem.type !== "execution" || feedItem.state !== "running") {
+        continue;
+      }
+
+      const nextLastItemId = feedItem.historyItems.at(-1)?.id ?? null;
+      const previousLastItemId = executionLastItemIdRef.current[feedItem.id] ?? null;
+      const shouldStickToBottom = executionShouldStickToBottomRef.current[feedItem.id] ?? true;
+
+      if (shouldAutoScrollTopologyHistory({
+        previousLastItemId,
+        nextLastItemId,
+        shouldStickToBottom,
+      })) {
+        frameIds.push(
+          requestAnimationFrame(() => {
+            const viewport = executionViewportRefs.current[feedItem.id];
+            if (!viewport) {
+              return;
+            }
+            viewport.scrollTop = viewport.scrollHeight;
+          }),
+        );
+      }
+
+      executionLastItemIdRef.current[feedItem.id] = nextLastItemId;
+    }
+
+    return () => {
+      for (const frameId of frameIds) {
+        cancelAnimationFrame(frameId);
+      }
+    };
+  }, [feedItems]);
 
   useEffect(() => {
     if (!mentionContext) {
@@ -488,7 +727,7 @@ export function ChatWindow({
         <div className={PANEL_HEADER_LEADING_CLASS}>
           <p className={PANEL_HEADER_TITLE_CLASS}>消息</p>
           <span className="rounded-full bg-[#c96f3b] px-2.5 py-0.5 text-xs font-semibold text-white">
-            {messages.length}
+            {feedItems.length}
           </span>
         </div>
         {task ? (
@@ -528,15 +767,44 @@ export function ChatWindow({
         }}
         className={`flex-1 min-h-0 space-y-1.5 overflow-y-auto ${PANEL_SECTION_BODY_CLASS}`}
       >
-        {messages.length > 0 ? (
-          messages.map((message) => (
-            <MessageBubble
-              key={message.id}
-              message={message}
-              taskAgentEntries={taskAgentEntries}
-              openingAgentTerminalId={openingAgentTerminalId}
-              onOpenAgentTerminal={onOpenAgentTerminal}
-            />
+        {feedItems.length > 0 ? (
+          feedItems.map((item) => (
+            item.type === "message" ? (
+              <MessageBubble
+                key={item.id}
+                message={item.message}
+                taskAgentEntries={taskAgentEntries}
+                openingAgentTerminalId={openingAgentTerminalId}
+                onOpenAgentTerminal={onOpenAgentTerminal}
+              />
+            ) : item.state === "completed" ? (
+              <MessageBubble
+                key={item.id}
+                message={item.message}
+                taskAgentEntries={taskAgentEntries}
+                openingAgentTerminalId={openingAgentTerminalId}
+                onOpenAgentTerminal={onOpenAgentTerminal}
+              />
+            ) : (
+              <RunningExecutionBubble
+                key={item.id}
+                item={item}
+                taskAgentEntries={taskAgentEntries}
+                openingAgentTerminalId={openingAgentTerminalId}
+                onOpenAgentTerminal={onOpenAgentTerminal}
+                viewportRef={(element) => {
+                  executionViewportRefs.current[item.id] = element;
+                }}
+                onViewportScroll={(event) => {
+                  executionShouldStickToBottomRef.current[item.id] =
+                    shouldStickTopologyHistoryToBottom({
+                      scrollHeight: event.currentTarget.scrollHeight,
+                      clientHeight: event.currentTarget.clientHeight,
+                      scrollTop: event.currentTarget.scrollTop,
+                    });
+                }}
+              />
+            )
           ))
         ) : (
           <div className="rounded-[8px] border border-dashed border-border/70 bg-card/60 px-4 py-4 text-sm text-muted-foreground">
