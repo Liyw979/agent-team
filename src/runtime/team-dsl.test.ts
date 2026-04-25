@@ -39,12 +39,14 @@ function link(
   to: string,
   trigger_type: "transfer" | "complete" | "continue",
   message_type: "none" | "last" | "last-all" | "all",
+  maxRevisionRounds?: number,
 ) {
   return {
     from,
     to,
     trigger_type,
     message_type,
+    ...(typeof maxRevisionRounds === "number" ? { maxRevisionRounds } : {}),
   };
 }
 
@@ -362,7 +364,13 @@ test("compileTeamDsl 支持从内置漏洞拓扑编译出论证挑战多轮 spaw
     ["线索发现", "漏洞挑战", "漏洞论证", "讨论总结"],
   );
   assert.deepEqual(compiled.topology.edges, [
-    { source: "线索发现", target: "疑点辩论", triggerOn: "continue", messageMode: "last-all" },
+    {
+      source: "线索发现",
+      target: "疑点辩论",
+      triggerOn: "continue",
+      messageMode: "last-all",
+      maxRevisionRounds: 999,
+    },
   ]);
   assert.deepEqual(compiled.topology.spawnRules?.[0]?.spawnedAgents, [
     { role: "漏洞挑战", templateName: "漏洞挑战" },
@@ -497,6 +505,70 @@ test("compileTeamDsl 支持在 links 上显式声明边级消息传递策略", (
     { source: "Debate", target: "Judge", triggerOn: "transfer", messageMode: "last" },
     { source: "Judge", target: "Source", triggerOn: "transfer", messageMode: "none" },
   ]);
+});
+
+test("compileTeamDsl 会保留 continue 边上的 maxRevisionRounds 配置", () => {
+  const compiled = compileTeamDsl({
+    entry: "线索发现",
+    nodes: [
+      agentNode("线索发现", "你负责线索发现。", false),
+      spawnNode(
+        "疑点辩论",
+        {
+          entry: "漏洞挑战",
+          nodes: [
+            agentNode("漏洞挑战", "你负责漏洞挑战。", false),
+            agentNode("讨论总结", "你负责讨论总结。", true),
+          ],
+          links: [
+            link("漏洞挑战", "讨论总结", "complete", "last"),
+            link("讨论总结", "线索发现", "transfer", "none"),
+          ],
+        },
+      ),
+    ],
+    links: [
+      link("线索发现", "疑点辩论", "continue", "last-all", 999),
+    ],
+  });
+
+  assert.deepEqual(compiled.topology.edges, [
+    {
+      source: "线索发现",
+      target: "疑点辩论",
+      triggerOn: "continue",
+      messageMode: "last-all",
+      maxRevisionRounds: 999,
+    },
+  ]);
+});
+
+test("compileTeamDsl 会保留 spawn 子图回到外层的 continue 边 maxRevisionRounds 配置", () => {
+  const compiled = compileTeamDsl({
+    entry: "线索发现",
+    nodes: [
+      agentNode("线索发现", "你负责线索发现。", false),
+      spawnNode(
+        "疑点辩论",
+        {
+          entry: "讨论总结",
+          nodes: [
+            agentNode("讨论总结", "你负责讨论总结。", true),
+          ],
+          links: [
+            link("讨论总结", "线索发现", "continue", "none", 7),
+          ],
+        },
+      ),
+    ],
+    links: [
+      link("线索发现", "疑点辩论", "transfer", "last-all"),
+    ],
+  });
+
+  assert.equal(compiled.topology.spawnRules?.[0]?.reportToTriggerOn, "continue");
+  assert.equal(compiled.topology.spawnRules?.[0]?.reportToMessageMode, "none");
+  assert.equal(compiled.topology.spawnRules?.[0]?.reportToMaxRevisionRounds, 7);
 });
 
 test("compileTeamDsl 仍兼容旧的 all，并在编译时归一化为 last-all", () => {

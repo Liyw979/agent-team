@@ -79,6 +79,7 @@ export interface SpawnRule {
   reportToTemplateName?: string;
   reportToTriggerOn?: TopologyEdgeTrigger;
   reportToMessageMode?: TopologyEdgeMessageMode;
+  reportToMaxRevisionRounds?: number;
 }
 
 export interface TopologyNodeRecord {
@@ -617,12 +618,19 @@ export function getSpawnRules(topology: TopologyRecord): SpawnRule[] {
     edges: rule.edges.map((edge) => ({
       ...edge,
       triggerOn: normalizeTopologyEdgeTrigger(edge.triggerOn),
+      ...(normalizeTopologyEdgeTrigger(edge.triggerOn) === "continue" && typeof edge.maxRevisionRounds === "number"
+        ? { maxRevisionRounds: normalizeActionRequiredMaxRounds(edge.maxRevisionRounds) }
+        : {}),
     })),
     ...(rule.reportToTriggerOn
       ? { reportToTriggerOn: normalizeTopologyEdgeTrigger(rule.reportToTriggerOn) }
       : {}),
     ...(rule.reportToMessageMode
       ? { reportToMessageMode: rule.reportToMessageMode }
+      : {}),
+    ...(normalizeTopologyEdgeTrigger(rule.reportToTriggerOn) === "continue"
+      && typeof rule.reportToMaxRevisionRounds === "number"
+      ? { reportToMaxRevisionRounds: normalizeActionRequiredMaxRounds(rule.reportToMaxRevisionRounds) }
       : {}),
   }));
 }

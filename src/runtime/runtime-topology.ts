@@ -140,8 +140,9 @@ export function instantiateSpawnBundle(input: {
       target: reportNode.id,
       triggerOn: spawnToReportEdge?.triggerOn ?? rule.reportToTriggerOn ?? "complete",
       messageMode: spawnToReportEdge?.messageMode ?? rule.reportToMessageMode ?? "last",
-      ...(spawnToReportEdge?.triggerOn === "continue" && typeof spawnToReportEdge.maxRevisionRounds === "number"
-        ? { maxRevisionRounds: spawnToReportEdge.maxRevisionRounds }
+      ...((spawnToReportEdge?.triggerOn ?? rule.reportToTriggerOn) === "continue"
+        && typeof (spawnToReportEdge?.maxRevisionRounds ?? rule.reportToMaxRevisionRounds) === "number"
+        ? { maxRevisionRounds: spawnToReportEdge?.maxRevisionRounds ?? rule.reportToMaxRevisionRounds }
         : {}),
     });
   }

@@ -39,6 +39,7 @@ interface GraphDslLink {
   to: string;
   trigger_type: TopologyEdgeTrigger;
   message_type: TopologyEdgeMessageMode | "all";
+  maxRevisionRounds?: number | undefined;
 }
 
 export interface GraphDslGraph {
@@ -71,6 +72,7 @@ const GraphDslLinkSchema: z.ZodType<GraphDslLink> = z.object({
     z.literal("last-all"),
     z.literal("all").transform(() => "last-all" as const),
   ]),
+  maxRevisionRounds: z.number().finite().optional(),
 }).strict();
 
 const GraphDslAgentNodeSchema: z.ZodType<GraphDslAgentNode> = z.object({
@@ -337,7 +339,7 @@ function formatGraphDslParseError(error: z.ZodError): string {
     issue.code === z.ZodIssueCode.unrecognized_keys
     && issue.path[0] === "links"
   ) {
-    return `${formatZodIssuePath(issue.path)} 只允许显式写出 from、to、trigger_type、message_type。`;
+    return `${formatZodIssuePath(issue.path)} 只允许显式写出 from、to、trigger_type、message_type、maxRevisionRounds。`;
   }
   if (issue.code === z.ZodIssueCode.invalid_type) {
     if (issue.received === "undefined") {
@@ -360,6 +362,20 @@ function normalizeGraphDslMessageMode(messageMode: GraphDslLink["message_type"])
   return messageMode === "all" ? "last-all" : messageMode;
 }
 
+function mapGraphDslLinkToTopologyEdge(link: GraphDslLink) {
+  return {
+    source: link.from,
+    target: link.to,
+    triggerOn: link.trigger_type,
+    messageMode: normalizeGraphDslMessageMode(link.message_type),
+    ...(link.trigger_type === "continue" && typeof link.maxRevisionRounds === "number"
+      ? {
+          maxRevisionRounds: normalizeActionRequiredMaxRounds(link.maxRevisionRounds),
+        }
+      : {}),
+  };
+}
+
 function resolveSpawnReportTo(
   graph: GraphDslGraph,
   spawnNodeName: string,
@@ -367,6 +383,7 @@ function resolveSpawnReportTo(
   target: string;
   triggerOn: TopologyEdgeTrigger;
   messageMode: TopologyEdgeMessageMode;
+  maxRevisionRounds?: number;
 } | undefined {
   const outgoingLinks = graph.links.filter((link) => link.from === spawnNodeName);
   return outgoingLinks.length === 1
@@ -374,6 +391,11 @@ function resolveSpawnReportTo(
         target: outgoingLinks[0]!.to,
         triggerOn: outgoingLinks[0]!.trigger_type,
         messageMode: normalizeGraphDslMessageMode(outgoingLinks[0]!.message_type),
+        ...(outgoingLinks[0]!.trigger_type === "continue" && typeof outgoingLinks[0]!.maxRevisionRounds === "number"
+          ? {
+              maxRevisionRounds: normalizeActionRequiredMaxRounds(outgoingLinks[0]!.maxRevisionRounds),
+            }
+          : {}),
       }
     : undefined;
 }
@@ -394,6 +416,7 @@ function resolveGraphExternalReport(
   target: string;
   triggerOn: TopologyEdgeTrigger;
   messageMode: TopologyEdgeMessageMode;
+  maxRevisionRounds?: number;
 } | undefined {
   const localNames = new Set(graph.nodes.map((node) => node.id));
   const externalLinks = graph.links.filter((link) =>
@@ -411,6 +434,11 @@ function resolveGraphExternalReport(
     target: externalLink.to,
     triggerOn: externalLink.trigger_type,
     messageMode: normalizeGraphDslMessageMode(externalLink.message_type),
+    ...(externalLink.trigger_type === "continue" && typeof externalLink.maxRevisionRounds === "number"
+      ? {
+          maxRevisionRounds: normalizeActionRequiredMaxRounds(externalLink.maxRevisionRounds),
+        }
+      : {}),
   };
 }
 
@@ -478,6 +506,7 @@ function collectGraphDslNodeDefinitions(
     const reportToTemplateName = externalReportTarget?.target ?? reportTarget?.target;
     const reportToTriggerOn = externalReportTarget?.triggerOn ?? reportTarget?.triggerOn;
     const reportToMessageMode = externalReportTarget?.messageMode ?? reportTarget?.messageMode;
+    const reportToMaxRevisionRounds = externalReportTarget?.maxRevisionRounds ?? reportTarget?.maxRevisionRounds;
     context.nodeRecords.set(node.id, {
       id: node.id,
       kind: "spawn",
@@ -506,11 +535,19 @@ function collectGraphDslNodeDefinitions(
           targetRole: link.to,
           triggerOn: link.trigger_type,
           messageMode: normalizeGraphDslMessageMode(link.message_type),
+          ...(link.trigger_type === "continue" && typeof link.maxRevisionRounds === "number"
+            ? {
+                maxRevisionRounds: normalizeActionRequiredMaxRounds(link.maxRevisionRounds),
+              }
+            : {}),
         })),
       exitWhen: "all_completed",
       ...(reportToTemplateName ? { reportToTemplateName } : {}),
       ...(reportToTriggerOn ? { reportToTriggerOn } : {}),
       ...(reportToMessageMode ? { reportToMessageMode } : {}),
+      ...(reportToTriggerOn === "continue" && typeof reportToMaxRevisionRounds === "number"
+        ? { reportToMaxRevisionRounds }
+        : {}),
     });
   }
 }
@@ -560,20 +597,10 @@ function compileGraphDsl(input: GraphDslGraph): CompiledTeamDsl {
 
   const topology: TopologyRecord = {
     nodes: input.nodes.map((node) => node.id),
-    edges: nonEndLinks.map((link) => ({
-      source: link.from,
-      target: link.to,
-      triggerOn: link.trigger_type,
-      messageMode: normalizeGraphDslMessageMode(link.message_type),
-    })),
+    edges: nonEndLinks.map((link) => mapGraphDslLinkToTopologyEdge(link)),
     langgraph: createTopologyLangGraphRecord({
       nodes: input.nodes.map((node) => node.id),
-      edges: nonEndLinks.map((link) => ({
-        source: link.from,
-        target: link.to,
-        triggerOn: link.trigger_type,
-        messageMode: normalizeGraphDslMessageMode(link.message_type),
-      })),
+      edges: nonEndLinks.map((link) => mapGraphDslLinkToTopologyEdge(link)),
       startTargets: [input.entry],
       endIncoming: endLinks.map((link) => ({
         source: link.from,
