@@ -73,10 +73,29 @@ test("拓扑节点头部会在状态 icon 左侧补充全屏与 attach 按钮", 
 
 test("拓扑里的单个 agent 可以进入全屏详情层，并展示完整历史", () => {
   assert.match(TOPOLOGY_GRAPH_SOURCE, /const \[maximizedAgentId, setMaximizedAgentId\] = useState<string \| null>\(null\)/);
+  assert.match(TOPOLOGY_GRAPH_SOURCE, /createPortal\(content, document\.body\)/);
+  assert.match(TOPOLOGY_GRAPH_SOURCE, /resolveFullscreenOverlayStrategy\(\{\s*ancestorCssEffects: \["backdrop-filter"\],\s*\}\)/);
   assert.match(TOPOLOGY_GRAPH_SOURCE, /aria-label=\{`\$\{maximizedNode\.id} 全屏详情`\}/);
-  assert.match(TOPOLOGY_GRAPH_SOURCE, /当前展示 \{maximizedNode\.id\} 的完整历史轨迹。/);
-  assert.match(TOPOLOGY_GRAPH_SOURCE, /<AgentHistoryMarkdown[\s\S]*content=\{item\.detail\}[\s\S]*className="mt-2 text-\[13px\] leading-\[1\.5\] text-inherit opacity-95 select-text"/);
+  assert.match(TOPOLOGY_GRAPH_SOURCE, /className="fixed inset-0 z-\[60\] bg-black\/28"/);
+  assert.match(TOPOLOGY_GRAPH_SOURCE, /className="flex h-full w-full flex-col overflow-hidden bg-background"/);
+  assert.match(TOPOLOGY_GRAPH_SOURCE, /<AgentHistoryMarkdown[\s\S]*content=\{item\.detail\}[\s\S]*className="mt-1 text-\[13px\] leading-\[1\.5\] text-inherit opacity-95 select-text"/);
   assert.match(TOPOLOGY_GRAPH_SOURCE, /onClick=\{\(\) => setMaximizedAgentId\(null\)\}/);
+  assert.doesNotMatch(TOPOLOGY_GRAPH_SOURCE, /className="fixed inset-0 z-40 bg-black\/28 px-4 py-4"/);
+  assert.doesNotMatch(TOPOLOGY_GRAPH_SOURCE, /当前展示 \{maximizedNode\.id\} 的完整历史轨迹。/);
+});
+
+test("单个 agent 全屏详情里的消息留白需要压缩到接近一半，避免内容区过空", () => {
+  assert.match(TOPOLOGY_GRAPH_SOURCE, /className="border-b px-3 py-2"/);
+  assert.match(TOPOLOGY_GRAPH_SOURCE, /className="flex items-start justify-between gap-2"/);
+  assert.doesNotMatch(TOPOLOGY_GRAPH_SOURCE, /<p className="mt-1 text-sm text-foreground\/62">/);
+  assert.match(TOPOLOGY_GRAPH_SOURCE, /className="min-h-0 flex-1 overflow-y-auto px-2\.5 py-2"/);
+  assert.match(TOPOLOGY_GRAPH_SOURCE, /className="space-y-1\.5"/);
+  assert.match(TOPOLOGY_GRAPH_SOURCE, /className=\{`rounded-\[12px\] border px-2 py-1\.5 \$\{getHistoryItemClassName\(item\)\}`\}/);
+  assert.match(TOPOLOGY_GRAPH_SOURCE, /<AgentHistoryMarkdown[\s\S]*content=\{item\.detail\}[\s\S]*className="mt-1 text-\[13px\] leading-\[1\.5\] text-inherit opacity-95 select-text"/);
+  assert.doesNotMatch(TOPOLOGY_GRAPH_SOURCE, /className="border-b px-6 py-4"/);
+  assert.doesNotMatch(TOPOLOGY_GRAPH_SOURCE, /className="min-h-0 flex-1 overflow-y-auto px-5 py-4"/);
+  assert.doesNotMatch(TOPOLOGY_GRAPH_SOURCE, /className="space-y-3"/);
+  assert.doesNotMatch(TOPOLOGY_GRAPH_SOURCE, /rounded-\[12px\] border px-4 py-3/);
 });
 
 test("拓扑里的空历史节点不应再展示待启动占位记录", () => {
