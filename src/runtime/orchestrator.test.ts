@@ -79,7 +79,6 @@ function buildOpenCodeExecutionResult(input: {
   agent: string;
   finalMessage: string;
   status?: "completed" | "error";
-  fallbackMessage?: string | null;
   messageId?: string;
   timestamp?: string;
   error?: string | null;
@@ -90,7 +89,6 @@ function buildOpenCodeExecutionResult(input: {
   return {
     status: input.status ?? "completed",
     finalMessage: input.finalMessage,
-    fallbackMessage: input.fallbackMessage ?? null,
     messageId,
     timestamp,
     rawMessage: {
@@ -110,13 +108,11 @@ function buildCompletedExecutionResult(input: {
   finalMessage: string;
   messageId?: string;
   timestamp?: string;
-  fallbackMessage?: null;
 }) {
   return buildOpenCodeExecutionResult({
     ...input,
     status: "completed",
-    fallbackMessage: input.fallbackMessage ?? null,
-  }) as OpenCodeExecutionResult & { status: "completed"; fallbackMessage: null };
+  }) as OpenCodeExecutionResult & { status: "completed" };
 }
 
 function buildErrorExecutionResult(input: {
@@ -129,8 +125,7 @@ function buildErrorExecutionResult(input: {
   return buildOpenCodeExecutionResult({
     ...input,
     status: "error",
-    fallbackMessage: null,
-  }) as OpenCodeExecutionResult & { status: "error"; fallbackMessage: null };
+  }) as OpenCodeExecutionResult & { status: "error" };
 }
 
 function forceCleanupCurrentProcessOpenCodeChildren() {
@@ -1780,7 +1775,12 @@ test("Build 与其他显式可写 Agent 可以同时保持可写", async () => {
     ],
   );
 
-  assert.equal(buildInjectedConfigFromAgents(project.agents), null);
+  assert.deepEqual(parseInjectedConfig(buildInjectedConfigFromAgents(project.agents)).agent, {
+    BA: {
+      mode: "primary",
+      prompt: "你是 BA。",
+    },
+  });
 });
 
 test("多个自定义 Agent 可以同时保持可写", async () => {
@@ -2742,7 +2742,7 @@ test("Task 启动后仍允许重新 applyTeamDsl，让 task run --file 继续以
   assert.equal(reapplied.agents.some((agent) => agent.id === "Build"), true);
 });
 
-test("已完成判定但没有可展示结果正文时返回简洁兜底文案", () => {
+test("已完成判定但没有可展示结果正文时不再返回通过兜底文案", () => {
   const orchestrator = createTestOrchestrator({
     userDataPath: createTempDir(),
     enableEventStream: false,
@@ -2756,7 +2756,6 @@ test("已完成判定但没有可展示结果正文时返回简洁兜底文案",
           decision: "complete" | "continue";
           opinion: string | null;
         },
-        fallbackMessage?: string | null,
       ) => string;
     }
   ).createDisplayContent(
@@ -2765,10 +2764,88 @@ test("已完成判定但没有可展示结果正文时返回简洁兜底文案",
       decision: "complete",
       opinion: null,
     },
-    null,
   );
 
-  assert.equal(displayContent, "通过");
+  assert.equal(displayContent, "");
+});
+
+test("Agent 返回 completed 但正文为空时，任务必须失败而不是写入通过", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  const orchestrator = createTestOrchestrator({
+    userDataPath,
+    enableEventStream: false,
+  });
+  stubOpenCodeSessions(orchestrator);
+  const typed = orchestrator as unknown as Orchestrator & {
+    runAgent: (
+      cwd: string,
+      task: { id: string; cwd: string },
+      agentId: string,
+      prompt: {
+        mode: "raw";
+        content: string;
+        from: string;
+      },
+      behavior?: {
+        followTopology?: boolean;
+      },
+    ) => Promise<void>;
+    opencodeClient: {
+      createSession: (projectPath: string, title: string) => Promise<string>;
+      reloadConfig: () => Promise<void>;
+    };
+    opencodeRunner: {
+      run: (payload: { agent: string }) => Promise<OpenCodeExecutionResult>;
+    };
+  };
+
+  let project = await orchestrator.getWorkspaceSnapshot(projectPath);
+  project = await addCustomAgent(orchestrator, project.cwd, "BA", "你是 BA。");
+  await orchestrator.saveTopology({
+    cwd: project.cwd,
+    topology: {
+      nodes: ["BA"],
+      edges: [],
+    },
+  });
+  const task = await orchestrator.initializeTask({ cwd: project.cwd, title: "demo" });
+
+  typed.opencodeClient.createSession = async (...args: [string, string]) => `session:${args[1]}`;
+  typed.opencodeClient.reloadConfig = async () => undefined;
+  typed.opencodeRunner.run = async ({ agent }) =>
+    buildCompletedExecutionResult({
+      agent,
+      finalMessage: "",
+      messageId: "msg-empty",
+      timestamp: "2026-04-25T00:00:00.000Z",
+    });
+
+  await typed.runAgent(
+    project.cwd,
+    task.task,
+    "BA",
+    {
+      mode: "raw",
+      from: "User",
+      content: "请输出结果",
+    },
+  );
+
+  const snapshot = await orchestrator.getTaskSnapshot(task.task.id);
+  assert.equal(snapshot.task.status, "failed");
+  assert.equal(
+    snapshot.messages.some((message) => message.sender === "BA" && message.kind === "agent-final"),
+    false,
+  );
+  assert.equal(
+    snapshot.messages.some((message) => message.content.includes("未返回可展示的结果正文")),
+    true,
+  );
+  assert.equal(
+    snapshot.messages.some((message) => message.content === "通过"),
+    false,
+  );
 });
 
 test("单 Agent 且没有下游时，任务结束后仍保留该 Agent 的最终聊天消息", async () => {
@@ -2846,7 +2923,6 @@ test("继续处理且只返回 action_required 标签时，群聊展示会去掉
           decision: "complete" | "continue";
           opinion: string | null;
         },
-        fallbackMessage?: string | null,
       ) => string;
     }
   ).createDisplayContent(
@@ -2855,7 +2931,6 @@ test("继续处理且只返回 action_required 标签时，群聊展示会去掉
       decision: "continue",
       opinion: "请继续补充实现依据。",
     },
-    null,
   );
 
   assert.equal(displayContent, "请继续补充实现依据。");
@@ -2890,7 +2965,6 @@ test("继续处理正文包含多个 markdown 标题时，不应只显示最后�
           decision: "complete" | "continue";
           opinion: string | null;
         },
-        fallbackMessage?: string | null,
       ) => string;
     }
   ).createDisplayContent(
@@ -2899,7 +2973,6 @@ test("继续处理正文包含多个 markdown 标题时，不应只显示最后�
       decision: "continue",
       opinion: "请继续补充实现依据。",
     },
-    null,
   );
 
   assert.equal(displayContent, cleanContent);

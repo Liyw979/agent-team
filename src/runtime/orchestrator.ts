@@ -947,13 +947,11 @@ export class Orchestrator {
   private resolveAgentContextContent(
     parsedReview: ParsedReview,
     rawFinalMessage: string,
-    fallbackMessage?: string | null,
   ): string {
     const candidates = [
       parsedReview.cleanContent.trim(),
       parsedReview.opinion?.trim() ?? "",
       this.stripStructuredSignals(stripReviewResponseMarkup(rawFinalMessage)).trim(),
-      fallbackMessage?.trim() ?? "",
     ];
 
     return candidates.find((item) => item.length > 0) ?? "";
@@ -974,15 +972,10 @@ export class Orchestrator {
       .trim();
   }
 
-  protected createDisplayContent(parsedReview: ParsedReview, fallbackMessage?: string | null): string {
+  protected createDisplayContent(parsedReview: ParsedReview): string {
     const cleanContent = this.extractAgentDisplayContent(parsedReview.cleanContent);
     if (cleanContent) {
       return cleanContent;
-    }
-
-    const fallbackContent = this.extractAgentDisplayContent(fallbackMessage?.trim() ?? "");
-    if (fallbackContent) {
-      return fallbackContent;
     }
 
     const opinion = parsedReview.opinion?.trim();
@@ -990,13 +983,7 @@ export class Orchestrator {
       return opinion;
     }
 
-    if (parsedReview.decision === "continue") {
-      return "（该 Agent 已给出需要响应的结论，但未返回可展示的结果正文。）";
-    }
-    if (parsedReview.decision === "complete") {
-      return "通过";
-    }
-    return "（该 Agent 未返回可展示的结果正文。）";
+    return "";
   }
 
   private getTaskRuntimeTarget(task: Pick<TaskRecord, "id" | "cwd">): OpenCodeRuntimeTarget {
@@ -1644,12 +1631,15 @@ export class Orchestrator {
       const agentContextContent = this.resolveAgentContextContent(
         parsedReview,
         response.finalMessage,
-        response.fallbackMessage,
       );
+      const displayContent = this.createDisplayContent(parsedReview);
+      if (!displayContent) {
+        throw new Error(`${runtimeAgentId} 未返回可展示的结果正文`);
+      }
       const taskMessage: MessageRecord = {
         id: response.messageId,
         taskId: task.id,
-        content: this.createDisplayContent(parsedReview, response.fallbackMessage),
+        content: displayContent,
         sender: runtimeAgentId,
         timestamp: response.timestamp,
         kind: "agent-final",

@@ -68,17 +68,22 @@ export function extractDslAgentsFromTopology(
 export function buildInjectedConfigFromAgents(agents: AgentRecord[]): string | null {
   const injectedAgents = Object.fromEntries(
     agents.flatMap((agent) => {
-      if (agent.id.trim().toLowerCase() === "build" || agent.isWritable === true) {
+      if (agent.id.trim().toLowerCase() === "build") {
         return [];
       }
-        return [[
-          toOpenCodeAgentId(agent.id),
-          {
-            mode: "primary",
-            prompt: agent.prompt,
-            permission: buildReadonlyAgentPermissionConfig(),
-          },
-        ]];
+      return [[
+        toOpenCodeAgentId(agent.id),
+        agent.isWritable === true
+          ? {
+              mode: "primary",
+              prompt: agent.prompt,
+            }
+          : {
+              mode: "primary",
+              prompt: agent.prompt,
+              permission: buildReadonlyAgentPermissionConfig(),
+            },
+      ]];
     }),
   );
 

@@ -40,7 +40,6 @@ export interface OpenCodeNormalizedMessage {
 export interface OpenCodeExecutionResult {
   status: "completed" | "error";
   finalMessage: string;
-  fallbackMessage: string | null;
   messageId: string;
   timestamp: string;
   rawMessage: OpenCodeNormalizedMessage;
@@ -271,7 +270,15 @@ export class OpenCodeClient {
 
     const raw = await this.readJsonResponse(response);
     if (!raw || typeof raw !== "object") {
-      return this.createPendingMessage(opencodeAgent);
+      appendAppLog("error", "opencode.submit_message_invalid_response", {
+        projectPath: normalized.projectPath,
+        sessionId,
+        agent: opencodeAgent,
+        status: response.status,
+      }, {
+        runtimeKey: normalized.runtimeKey,
+      });
+      throw new Error("OpenCode 提交消息响应缺少有效的消息实体");
     }
     return this.normalizeMessageEnvelope(raw as Record<string, unknown>, opencodeAgent);
   }
@@ -303,16 +310,21 @@ export class OpenCodeClient {
     if (!latest) {
       latest =
         (await messageCompletionPromise) ??
-        (await this.getLatestAssistantMessage(normalized, sessionId)) ??
-        submitted;
+        (await this.getLatestAssistantMessage(normalized, sessionId));
     }
 
-    const runtime = await this.getSessionRuntime(normalized, sessionId).catch(() => null);
+    if (!latest) {
+      throw new Error(`OpenCode session ${sessionId} 未返回任何有效的 assistant 消息`);
+    }
+
+    const finalMessage = latest.content || latest.error || "";
+    if (!finalMessage.trim()) {
+      throw new Error(`OpenCode session ${sessionId} 返回了空的 assistant 结果`);
+    }
 
     return {
       status: latest.error ? "error" : "completed",
-      finalMessage: latest.content || latest.error || "",
-      fallbackMessage: this.pickFallbackMessage(latest.content || latest.error || "", runtime?.activities ?? []),
+      finalMessage,
       messageId: latest.id,
       timestamp: latest.completedAt ?? latest.timestamp,
       rawMessage: latest,
@@ -1059,12 +1071,10 @@ export class OpenCodeClient {
       return null;
     }
 
-    const runtime = await this.getSessionRuntime(target, sessionId).catch(() => null);
     const message = finalReply.normalized;
     return {
       status: message.error ? "error" : "completed",
       finalMessage: message.content || message.error || "",
-      fallbackMessage: this.pickFallbackMessage(message.content || message.error || "", runtime?.activities ?? []),
       messageId: message.id,
       timestamp: message.completedAt ?? message.timestamp,
       rawMessage: message,
@@ -1108,18 +1118,6 @@ export class OpenCodeClient {
 
     const raw = await this.readJsonResponse(response);
     return Array.isArray(raw) ? raw : [];
-  }
-
-  private createPendingMessage(sender: string): OpenCodeNormalizedMessage {
-    return {
-      id: randomUUID(),
-      content: "",
-      sender,
-      timestamp: new Date().toISOString(),
-      completedAt: null,
-      error: null,
-      raw: null,
-    };
   }
 
   private async readJsonResponse(response: Response): Promise<unknown | null> {
@@ -1346,26 +1344,6 @@ export class OpenCodeClient {
       detail,
       timestamp,
     };
-  }
-
-  private pickFallbackMessage(finalMessage: string, activities: OpenCodeRuntimeActivity[]): string | null {
-    const normalizedFinal = finalMessage.trim();
-    if (normalizedFinal) {
-      return normalizedFinal;
-    }
-
-    for (const activity of activities) {
-      if (activity.kind === "tool" || activity.kind === "thinking") {
-        continue;
-      }
-      const detail = activity.detail.trim();
-      if (!detail) {
-        continue;
-      }
-      return detail;
-    }
-
-    return null;
   }
 
   private extractToolName(part: Record<string, unknown>): string | null {

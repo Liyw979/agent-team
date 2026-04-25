@@ -84,18 +84,17 @@ test("request 会跟随当前 serverHandle 的实际端口", async () => {
   assert.equal(requestedUrl, "http://127.0.0.1:43127/session");
 });
 
-test("submitMessage 在空响应体时不会抛出 JSON 解析错误", async () => {
+test("submitMessage 在空响应体时必须报错，不能伪造 pending message", async () => {
   const { client, projectPath } = createClient();
   client.request = async () => new Response("", { status: 200 });
 
-  const message = await client.submitMessage(projectPath, "session-1", {
-    agent: "BA",
-    content: "请整理需求",
-  });
-
-  assert.equal(typeof message.id, "string");
-  assert.equal(message.content, "");
-  assert.equal(message.sender, "BA");
+  await assert.rejects(
+    client.submitMessage(projectPath, "session-1", {
+      agent: "BA",
+      content: "请整理需求",
+    }),
+    /响应缺少有效的消息实体/,
+  );
 });
 
 test("createSession throws when the response is missing a session id", async () => {
@@ -255,6 +254,47 @@ test("resolveExecutionResult 在消息已完成时不会额外等待 session idl
 
   assert.equal(result.finalMessage, "已完成");
   assert.ok(elapsed < 120, `resolveExecutionResult 耗时 ${elapsed}ms，说明仍然被 session idle 等待拖住了`);
+});
+
+test("resolveExecutionResult 在没有任何 assistant 消息时必须报错，不能拿提交态或空消息兜底", async () => {
+  const { client, projectPath } = createClient();
+  const typed = client as unknown as OpenCodeClient & {
+    waitForSessionSettled: (sessionId: string, after: number, timeoutMs: number) => Promise<void>;
+    waitForMessageCompletion: (
+      projectPath: string,
+      sessionId: string,
+      messageId: string,
+      fallbackTimestamp: string,
+      timeoutMs: number,
+    ) => Promise<OpenCodeNormalizedMessage | null>;
+    getLatestAssistantMessage: (projectPath: string, sessionId: string) => Promise<unknown>;
+    getSessionRuntime: (projectPath: string, sessionId: string) => Promise<OpenCodeSessionRuntime>;
+  };
+
+  typed.waitForSessionSettled = async () => undefined;
+  typed.waitForMessageCompletion = async () => null;
+  typed.getLatestAssistantMessage = async () => null;
+  typed.getSessionRuntime = async () => ({
+    sessionId: "session-1",
+    messageCount: 0,
+    updatedAt: null,
+    headline: null,
+    activeToolNames: [],
+    activities: [],
+  });
+
+  await assert.rejects(
+    typed.resolveExecutionResult(projectPath, "session-1", {
+      id: "msg-user",
+      content: "请整理需求",
+      sender: "user",
+      timestamp: "2026-04-25T00:00:00.000Z",
+      completedAt: null,
+      error: null,
+      raw: null,
+    }),
+    /未返回任何有效的 assistant 消息/,
+  );
 });
 
 test("配置变更时不应触发 shutdown", async () => {

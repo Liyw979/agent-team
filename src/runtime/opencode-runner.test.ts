@@ -7,7 +7,6 @@ test("submitMessage 返回 terminated 后，若同一 session 稍后补出正式
   const expectedResult = {
     status: "completed" as const,
     finalMessage: "补回来的正式回复",
-    fallbackMessage: null,
     messageId: "msg-final",
     timestamp: "2026-04-17T06:17:06.782Z",
     rawMessage: {
