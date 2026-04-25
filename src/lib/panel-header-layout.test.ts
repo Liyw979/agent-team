@@ -73,6 +73,6 @@ test("团队列表与群聊列表的垂直间隔必须完全一致", () => {
   assert.doesNotMatch(APP_SOURCE, /className="space-y-3"/);
   assert.doesNotMatch(APP_SOURCE, /className="space-y-1\.5"/);
   assert.match(APP_SOURCE, /style=\{\{ gap: `\$\{agentCardGapPx}px` \}\}/);
-  assert.match(APP_SOURCE, /calculateAgentCardListGap/);
+  assert.match(APP_SOURCE, /calculateAgentCardPanelLayout/);
   assert.match(CHAT_WINDOW_SOURCE, /className=\{`flex-1 min-h-0 space-y-1\.5 overflow-y-auto \$\{PANEL_SECTION_BODY_CLASS\}`\}/);
 });

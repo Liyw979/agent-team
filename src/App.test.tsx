@@ -28,11 +28,11 @@ test("App 保留聊天输入，但团队面板不再提供 attach 按钮", () =>
   assert.doesNotMatch(APP_SOURCE, /LangGraph UI/);
 });
 
-test("团队成员卡片里的 prompt 只显示单行缩略，悬停时展示完整 prompt", () => {
+test("团队成员卡片里的 prompt 会按可用高度自动计算摘要行数，悬停时展示完整 prompt", () => {
   assert.match(APP_SOURCE, /buildAgentPromptPreviewText/);
   assert.match(APP_SOURCE, /title=\{agent\.promptPreview\}/);
   assert.match(APP_SOURCE, /agent\.promptPreview\.replace\(\/\\s\+\/gu, ""\)/);
-  assert.match(APP_SOURCE, /calculateAgentCardPromptLineCount/);
+  assert.match(APP_SOURCE, /calculateAgentCardPanelLayout/);
   assert.match(APP_SOURCE, /WebkitLineClamp: promptLineCount/);
   assert.match(APP_SOURCE, /color: color\.mutedText/);
   assert.match(APP_SOURCE, /className="min-w-0 overflow-hidden break-all text-\[13px\] leading-\[18px\]"/);
@@ -58,7 +58,7 @@ test("点击团队成员卡片会打开 Prompt 详情弹窗", () => {
 test("团队成员卡片不再显示消息统计，并把 agent 名称改成和聊天记录一致的有色标题条", () => {
   assert.doesNotMatch(APP_SOURCE, /className="space-y-3"/);
   assert.doesNotMatch(APP_SOURCE, /className="space-y-1\.5"/);
-  assert.match(APP_SOURCE, /calculateAgentCardListGap/);
+  assert.match(APP_SOURCE, /calculateAgentCardPanelLayout/);
   assert.match(APP_SOURCE, /style=\{\{ gap: `\$\{agentCardGapPx}px` \}\}/);
   assert.match(APP_SOURCE, /getAgentColorToken/);
   assert.doesNotMatch(APP_SOURCE, /buildAgentPanelAttachButtonState/);

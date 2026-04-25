@@ -16,7 +16,7 @@ import {
   subscribeAgentTeamEvents,
 } from "./lib/web-api";
 import { getAgentColorToken } from "./lib/agent-colors";
-import { calculateAgentCardListGap, calculateAgentCardPromptLineCount } from "./lib/agent-card-layout";
+import { calculateAgentCardPanelLayout } from "./lib/agent-card-layout";
 import { getAppShellClassName } from "./lib/app-shell-layout";
 import { getAppWorkspaceLayoutMetrics } from "./lib/app-workspace-layout";
 import { buildAgentPromptPreviewText } from "./lib/agent-prompt-preview";
@@ -238,27 +238,14 @@ function App() {
     }
 
     const updatePromptLineCount = () => {
-      const viewportHeight = viewport.clientHeight - (agentTerminalActionError ? 42 : 0);
-      const nextPromptLineCount = calculateAgentCardPromptLineCount({
-        viewportHeight,
+      const layout = calculateAgentCardPanelLayout({
+        viewportHeight: viewport.clientHeight,
         cardCount: agentCards.length,
-        gapPx: 6,
-        reservedHeightPx: 58,
-        lineHeightPx: 18,
+        promptCardCount: agentCards.filter((agent) => agent.promptPreview !== "-").length,
+        hasErrorBanner: agentTerminalActionError !== null,
       });
-      setPromptLineCount(nextPromptLineCount);
-      setAgentCardGapPx(
-        calculateAgentCardListGap({
-          viewportHeight,
-          cardCount: agentCards.length,
-          promptCardCount: agentCards.filter((agent) => agent.promptPreview !== "-").length,
-          promptLineCount: nextPromptLineCount,
-          minGapPx: 6,
-          reservedHeightPx: 58,
-          lineHeightPx: 18,
-          emptyStateHeightPx: 20,
-        }),
-      );
+      setPromptLineCount(layout.promptLineCount);
+      setAgentCardGapPx(layout.gapPx);
     };
 
     updatePromptLineCount();

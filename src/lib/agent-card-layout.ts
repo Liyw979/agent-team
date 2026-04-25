@@ -54,3 +54,39 @@ export function calculateAgentCardListGap(input: {
 
   return minGapPx + remainingHeight / (cardCount - 1);
 }
+
+const AGENT_CARD_MIN_GAP_PX = 6;
+const AGENT_CARD_LINE_HEIGHT_PX = 18;
+const AGENT_CARD_EMPTY_STATE_HEIGHT_PX = 20;
+const AGENT_CARD_ERROR_BANNER_HEIGHT_PX = 42;
+const AGENT_CARD_RESERVED_HEIGHT_PX = 40;
+
+export function calculateAgentCardPanelLayout(input: {
+  viewportHeight: number;
+  cardCount: number;
+  promptCardCount: number;
+  hasErrorBanner: boolean;
+}) {
+  const viewportHeight = Math.max(0, input.viewportHeight - (input.hasErrorBanner ? AGENT_CARD_ERROR_BANNER_HEIGHT_PX : 0));
+  const promptLineCount = calculateAgentCardPromptLineCount({
+    viewportHeight,
+    cardCount: input.cardCount,
+    gapPx: AGENT_CARD_MIN_GAP_PX,
+    reservedHeightPx: AGENT_CARD_RESERVED_HEIGHT_PX,
+    lineHeightPx: AGENT_CARD_LINE_HEIGHT_PX,
+  });
+
+  return {
+    promptLineCount,
+    gapPx: calculateAgentCardListGap({
+      viewportHeight,
+      cardCount: input.cardCount,
+      promptCardCount: input.promptCardCount,
+      promptLineCount,
+      minGapPx: AGENT_CARD_MIN_GAP_PX,
+      reservedHeightPx: AGENT_CARD_RESERVED_HEIGHT_PX,
+      lineHeightPx: AGENT_CARD_LINE_HEIGHT_PX,
+      emptyStateHeightPx: AGENT_CARD_EMPTY_STATE_HEIGHT_PX,
+    }),
+  };
+}
