@@ -1,10 +1,11 @@
 # AGENTS
 
-本文件汇总当前项目的产品定位、运行约定、开发命令与文档同步要求。后续协作默认以本文件为准。
+本文件汇总当前项目的产品定位、运行约定、开发命令与文档同步要求
 
-## 0. 文案约束
+## 0. 约束
 
 - 禁用词：`收口`。新增或修改文案、注释、提示词、日志、界面文案时都不得使用该表述，统一改为含义更准确的描述。
+- 禁止未经同意加入“兜底”， “兼容”代码，当前属于项目初期，尽可能暴露问题，不需要考虑兼容
 
 ## 1. 项目概览
 
@@ -59,82 +60,42 @@
 
 ### 3.1 OpenCode 注入与运行时
 
-- 每个工作区都会启动各自独立的 `opencode serve`。opencode-client[ensureServer, startServer]
-- 启动 OpenCode runtime 时直接执行 `opencode serve`，运行时会从启动输出中解析实际监听地址，并让当前工作区的 attach / 健康检查始终跟随该实际地址。opencode-client[startServer, getAttachBaseUrl, request]、opencode-serve-launch[extractOpenCodeServeBaseUrl]
-- 启动 `opencode serve` 前，只会一次性注入当前工作区里真正需要自定义 prompt / permission 的 Agent 配置；单个 serve 运行中不会做 reload / 二次注入 / 配置变更触发的自动重启。orchestrator[setInjectedConfigForTask]、opencode-client[setInjectedConfigContent, startServer]
-- 注入内容取当前拓扑 `nodeRecords` 里的 Agent prompt / writable。project-agent-source[extractDslAgentsFromTopology, buildInjectedConfigFromAgents]、orchestrator[setInjectedConfigForTask]
-- 只有当前工作区中真正需要自定义 prompt / permission 的 Agent 才会写入 `OPENCODE_CONFIG_CONTENT`。project-agent-source[buildInjectedConfigFromAgents]、opencode-client[startServer]
-- 使用 OpenCode 内置 prompt 的 Agent 不会出现在 `OPENCODE_CONFIG_CONTENT` 中；若当前工作区只有这类 Agent，则不会额外生成注入内容。types[usesOpenCodeBuiltinPrompt]、project-agent-source[buildInjectedConfigFromAgents]
-- 请求会携带 `x-opencode-directory` 请求头，保持会话与工作区目录一致。opencode-client[request]
-- Session 创建对齐官方 `POST /session`；消息发送对齐官方 `POST /session/:id/message`，请求体使用 `parts` 数组。opencode-client[createSession, submitMessage]
-- 若本机未安装或无法连接 `opencode serve`，系统会直接报错并写入日志。opencode-client[startServer]、app-log[appendAppLog]
+- 每个工作区独占一个 `opencode serve`；启动时直接执行该命令、解析实际监听地址，并让 attach / 健康检查 / 请求都跟随这个地址与工作区目录。opencode-client[ensureServer, startServer, getAttachBaseUrl, request]、opencode-serve-launch[extractOpenCodeServeBaseUrl]
+- `opencode serve` 只在启动前一次性注入当前拓扑里真正需要自定义 prompt / writable 的 Agent 配置；注入内容来自 `nodeRecords`，使用内置 prompt 的 Agent 不写入 `OPENCODE_CONFIG_CONTENT`，单个 serve 运行中也不会 reload 或因配置变化自动重启。orchestrator[setInjectedConfigForTask]、project-agent-source[extractDslAgentsFromTopology, buildInjectedConfigFromAgents]、types[usesOpenCodeBuiltinPrompt]、opencode-client[setInjectedConfigContent, startServer]
+- Session 与消息接口分别对齐官方 `POST /session`、`POST /session/:id/message`，请求体使用 `parts`；本机未安装或无法连接 `opencode serve` 时直接报错并写日志。opencode-client[createSession, submitMessage, startServer]、app-log[appendAppLog]
 
 ### 3.2 Task 初始化与状态流转
 
-- CLI 通过 `task headless`、`task ui` 管理当前工作区 Task 会话；GUI 负责展示当前 Task，Task 初始化与配置变更由 CLI 和编排层处理。cli[validateTaskHeadlessCommand, validateTaskUiCommand, ensureJsonTopologyApplied]、orchestrator[initializeTask, submitTask]、App[App]
-- 若当前节点执行完成后，拓扑里不存在可自动继续推进的下游节点，Task 会进入 `finished` 状态，并追加“本轮已完成，可继续 @Agent 发起下一轮。”系统消息；后续用户再次 `@Agent` 时，当前 Task 会从 `finished` 回到 `running` 继续推进。gating-router[applyAgentResultToGraphState]、langgraph-runtime[resumeTask, runTaskLoop]、orchestrator[completeTask]
-- 当 Task 进入 `finished` 状态时，右侧拓扑面板中的每个 Agent 节点都统一显示为 `已完成`；聊天区会追加一条“任务已经结束”的系统消息。orchestrator[completeTask]、task-completion-message[buildTaskCompletionMessageContent]、task-lifecycle-rules[reconcileTaskSnapshotFromMessages]、topology-graph-helpers[getTopologyAgentStatusBadgePresentation]
-- Agent 运行态成功码统一使用 `completed`。gating-rules[resolveAgentStatusFromDecision]、task-lifecycle-rules[reconcileTaskSnapshotFromMessages, resolveStandaloneTaskStatusAfterAgentRun]
-- 判定 Agent 若显式返回标签段，系统只识别以 `<continue>` 或 `<complete>` 开头的尾段，右侧结束标签可选；其中 `<continue>` 表示需要继续回应，若当前拓扑存在可用的 `continue` 下游，系统会继续按失败链路把意见回流给对应下游；只有不存在可继续派发的失败链路时，才会把当前 Task 结束并标记为“不通过”。若判定 Agent 没有返回正确的 `<continue>` 或 `<complete>` 标签，系统默认按 `continue` 处理。decision-parser[parseDecision, stripStructuredSignals]、decision-response[extractTrailingDecisionSignalBlock]、gating-rules[resolveAgentStatusFromDecision]、gating-router[applyAgentResultToGraphState, handleActionRequired]、orchestrator[createLangGraphBatchRunners, completeTask]
-- 同一个上游 Agent 在收到回流意见后再次成功交付时，会重新派发当前拓扑里满足条件的全部下游 Agent；不会因为某个下游在上一轮已成功执行过，就被静默跳过。gating-scheduler[planHandoffDispatch, recordHandoffBatchResponse]、gating-router[continueAfterHandoffBatchResponse, triggerHandoffDownstream]
+- CLI 通过 `task headless`、`task ui` 创建和驱动当前工作区 Task，GUI 只负责展示与继续发消息；Task 初始化、提交与配置应用由 CLI 和编排层完成。cli[validateTaskHeadlessCommand, validateTaskUiCommand, ensureJsonTopologyApplied]、orchestrator[initializeTask, submitTask]、App[App]
+- 当前节点完成后若不存在可自动推进的下游，Task 会进入 `finished`，聊天区追加“本轮已完成，可继续 @Agent 发起下一轮。”与“任务已经结束”系统消息，拓扑节点统一显示为 `已完成`；后续再次 `@Agent` 会把 Task 从 `finished` 恢复为 `running`。gating-router[applyAgentResultToGraphState]、langgraph-runtime[resumeTask, runTaskLoop]、orchestrator[completeTask]、task-completion-message[buildTaskCompletionMessageContent]、task-lifecycle-rules[reconcileTaskSnapshotFromMessages]、topology-graph-helpers[getTopologyAgentStatusBadgePresentation]
+- Agent 成功态统一使用 `completed`；判定 Agent 只识别尾段 `<continue>` / `<complete>`，缺失或不合法时默认按 `continue` 处理，并按当前拓扑决定回流、继续派发或结束为“不通过”。同一上游在收到回流后重新交付时，会重新派发本轮满足条件的全部下游，不会跳过上轮已成功节点。gating-rules[resolveAgentStatusFromDecision]、decision-parser[parseDecision, stripStructuredSignals]、decision-response[extractTrailingDecisionSignalBlock]、gating-router[handleActionRequired, continueAfterHandoffBatchResponse, triggerHandoffDownstream]、gating-scheduler[planHandoffDispatch, recordHandoffBatchResponse]、orchestrator[createLangGraphBatchRunners, completeTask]
 
 ### 3.3 拓扑与调度
 
-- LangGraph 是唯一调度运行时核心；`TopologyRecord` 是产品真源，运行时会在主进程内把它编译为图状态与调度索引。langgraph-runtime[resumeTask]、gating-router[createGraphTaskState, applyAgentResultToGraphState]、topology-compiler[compileTopology]
-- 拓扑边持久化 `source / target / triggerOn`；`triggerOn` 只允许 `transfer`、`complete`、`continue`。其中 `transfer` 表示普通协作流转，节点完成后直接触发下游；`complete` 表示判定通过后才触发下游；`continue` 表示判定不通过后的回流或继续回应链路。store[readWorkspaceState, writeWorkspaceState]、orchestrator[normalizeTopology]、topology-compiler[compileTopology]
-- 递归式 DSL 中，`spawn` 仍会被当成拓扑中的正常节点；当父图里存在唯一的 `spawn -> 某节点` 回流边时，编译阶段会把这条边的 `triggerOn` 一并记到 `spawn rule` 上，再由子图唯一终局角色按这条触发类型直接回到外层节点，同时把 `spawn` 节点自身标记为已完成，避免激活残留卡住后续流程。漏洞团队当前写的是 `["疑点辩论", "线索发现", "transfer"]`，所以它的 `讨论总结` 会按 `transfer` 回到 `线索发现`。team-dsl[compileTeamDsl]、runtime-topology[instantiateSpawnBundle]、gating-router[applyAgentResultToGraphState]
-- 漏洞挖掘团队的默认对抗拓扑里，`线索发现` 会先把 finding 交给 `漏洞挑战`，而不是先交给 `漏洞论证`；这是一条刻意保留的拓扑设计技巧，用来先由漏洞挑战暴露证据链缺口，再进入论证与挑战对抗，避免漏洞论证开场直接同意导致对抗性不足。config/team-topologies/vulnerability-team.topology.json、team-dsl[compileTeamDsl]、scheduler-script-emulator-migration.test.ts
-- 静态 `spawn` 节点属于调度节点，会保留在拓扑数据中供运行时识别，但前端拓扑图不会直接展示这类工厂节点；只有 `spawn` 实际展开出来的运行时 Agent 实例会作为可见节点显示。topology-spawn-drafts[getTopologyDisplayNodeIds]、TopologyGraph[TopologyGraph]、runtime-topology-graph[buildEffectiveTopology]
-- 当某个 Agent 存在“直接下游通过 `transfer` 触发、且该下游会用 `continue` 直接回流给自己、同时该下游没有 `complete` 下游”的判定回路时，系统会先只放行这类直接判定回路；只有这些回路全部通过后，才会继续放行该 Agent 其余直接 `transfer` 下游，避免 Build 与单个判定 Agent 多轮对话时反复提前触发无关下游。gating-scheduler[planHandoffDispatch, recordHandoffBatchResponse]、gating-router[handleActionRequired, continueAfterHandoffBatchResponse]
-- 同一轮里若某个 Agent 需要同时触发多个直接 `transfer` 下游 decisionAgent，这批 decisionAgent 会并发启动；只有当前整批 decisionAgent 都返回后，系统才会决定是否回流给上游修复，或继续补跑这一轮尚未确认通过的 decisionAgent，避免把并发批次错误串成“一次只放行一个”。gating-scheduler[planHandoffDispatch, recordHandoffBatchResponse]、orchestrator[createLangGraphBatchRunners]
-- 团队成员列表支持直接调整 Agent 顺序；该顺序会持久化到拓扑配置，并直接决定拓扑图从左到右的节点排列。types[resolveTopologyAgentOrder]、orchestrator[saveTopology, normalizeTopology]、frontend-agent-order[orderAgentsForFrontend]
-- 拓扑图中的 Agent 节点顺序是稳定的：未显式保存顺序时，默认优先取 `Build` 作为最左侧起点；当前拓扑未声明 `Build` 时，节点顺序按已声明的 Agent 顺序解析。types[resolveBuildAgentId, resolveTopologyAgentOrder, createDefaultTopology]
-- 拓扑配置中的 `nodes` 统一保存为有序的 Agent 名称字符串数组；该数组既是节点集合真源，也是节点顺序真源，其他派生标识在运行时推导。store[readWorkspaceState, writeWorkspaceState]、orchestrator[normalizeTopology]
-- 默认入口语义统一按当前 `nodes` 与 `Build` 是否存在在运行时推导，配置文件使用这套推导结果表达入口。types[resolvePrimaryTopologyStartTarget, resolveBuildAgentId, createDefaultTopology]
-- 编译后的最终拓扑会额外持久化 `topology.langgraph` 边界信息：`start.id` 固定为 LangGraph 的 `__start__`，并显式保存它连接到哪些业务节点；`end` 是否写入 `__end__`，取决于团队拓扑根图里是否显式声明了指向 `__end__` 的终止边；系统不会额外伪造一个业务 EndNode。types[createTopologyLangGraphRecord]、team-dsl[createTopology, compileTeamDsl]、store[readWorkspaceState, writeWorkspaceState]
-- 拓扑配置中的 `edges` 持久化 `source / target / triggerOn`；当 `triggerOn = continue` 时，还会额外持久化该边自己的 `maxRevisionRounds`，用于限制这条判定回流链路可连续反驳的最大轮数，默认值为 `4`。边的唯一标识在运行时按三元组即时推导。types[normalizeActionRequiredMaxRounds, getActionRequiredEdgeLoopLimit, getTopologyEdgeId]、store[readWorkspaceState]、orchestrator[normalizeTopology]
-- 拓扑节点顶部直接展示 Agent 当前状态徽标，包括 `未启动 / 运行中 / 已完成 / 执行失败`；判定类 Agent 则显示 `判定通过 / 判定不通过`。topology-graph-helpers[getTopologyAgentStatusBadgePresentation]、TopologyGraph[TopologyGraph]
-- 拓扑图中每个 Agent 节点头部都会在状态 icon 左侧提供 `attach` 按钮；点击后直接打开该 Agent 对应的 OpenCode attach 终端。topology-graph-helpers[getTopologyNodeHeaderActionOrder]、TopologyGraph[TopologyGraph]、App[App]、orchestrator[openAgentTerminal]
-- 拓扑图中的 Agent 节点颜色用于表达当前运行状态；内置与本地类型信息仅在编辑面板等辅助信息中展示。topology-graph-helpers[getTopologyAgentStatusBadgePresentation]、agent-colors[getAgentColorToken]、TopologyGraph[TopologyGraph]
-- 拓扑图会隐藏静态 `spawn` 工厂节点；当某个 `spawn` 子图已经实例化出 runtime agent 时，前端会用实例节点（如 `漏洞论证-1`）替换对应模板节点（如 `漏洞论证`）进行展示，避免模板卡片出现空历史区。topology-spawn-drafts[getTopologyDisplayNodeIds]、TopologyGraph[TopologyGraph]
-- 拓扑图在面板尺寸变化时会保持“Agent 在上、历史区在下、首尾节点贴近左右边界但保留少量留白、顶部预留连线通道”的布局约束，而不是把整张图简单等比缩放后居中。topology-canvas[buildTopologyCanvasLayout]、TopologyGraph[TopologyGraph]
-- 前端拓扑编辑面板支持为每一条 `action_required` 关系单独配置“最大反驳次数”；默认显示 `4`，不同判定关系可以分别保存不同数值。types[normalizeActionRequiredMaxRounds, getActionRequiredEdgeLoopLimit]、orchestrator[normalizeTopology]、store[readWorkspaceState, writeWorkspaceState]
+- LangGraph 是唯一调度核心，`TopologyRecord` 是真源；运行时会把它编译为图状态、调度索引和 `topology.langgraph` 边界信息。拓扑边只持久化 `source / target / triggerOn`，其中 `triggerOn` 仅允许 `transfer`、`complete`、`continue`；`continue` 边额外带 `maxRevisionRounds`，默认 `4`。store[readWorkspaceState, writeWorkspaceState]、langgraph-runtime[resumeTask]、topology-compiler[compileTopology]、gating-router[createGraphTaskState, applyAgentResultToGraphState]、types[createTopologyLangGraphRecord, normalizeActionRequiredMaxRounds, getActionRequiredEdgeLoopLimit, getTopologyEdgeId]
+- `spawn` 仍是拓扑节点：静态工厂节点保留在运行时数据中供调度识别，但前端隐藏，只展示实际展开出来的 runtime agent；父图存在唯一 `spawn` 回流边时，编译阶段会把其 `triggerOn` 记入 `spawn rule`，并由子图唯一终局角色按该触发类型回到外层节点，同时把 `spawn` 标记为已完成。team-dsl[compileTeamDsl]、runtime-topology[instantiateSpawnBundle]、runtime-topology-graph[buildEffectiveTopology]、topology-spawn-drafts[getTopologyDisplayNodeIds]、TopologyGraph[TopologyGraph]
+- 调度上，系统会先放行“直接 `transfer` 到判定节点、且该节点通过 `continue` 直接回流自身、并且没有 `complete` 下游”的直接判定回路；这类回路全部通过后，才继续放行其余直接 `transfer` 下游。若同一轮要触发多个直接 `transfer` 下游 decisionAgent，则整批并发执行，并在整批返回后统一决定回流、补跑或继续。gating-scheduler[planHandoffDispatch, recordHandoffBatchResponse]、gating-router[handleActionRequired, continueAfterHandoffBatchResponse]、orchestrator[createLangGraphBatchRunners]
+- 拓扑顺序与入口规则保持稳定：`nodes` 的有序字符串数组同时是真源节点集合和展示顺序；未显式保存顺序时优先把 `Build` 放最左，否则按声明顺序解析。团队成员列表可直接调整顺序并持久化。漏洞挖掘默认对抗拓扑保持“`线索发现` 先交给 `漏洞挑战` 再进入 `漏洞论证`”这一设计，以先暴露证据链缺口。types[resolveBuildAgentId, resolveTopologyAgentOrder, resolvePrimaryTopologyStartTarget, createDefaultTopology]、orchestrator[saveTopology, normalizeTopology]、frontend-agent-order[orderAgentsForFrontend]、config/team-topologies/vulnerability-team.topology.json、scheduler-script-emulator-migration.test.ts
+- 前端拓扑图只展示可见 Agent 实例，并在节点头部直接展示状态徽标、颜色和 `attach` 入口；判定类节点显示 `判定通过 / 判定不通过`。布局始终保持“Agent 在上、历史区在下、首尾贴边但留白、顶部预留连线通道”，编辑面板可逐条配置 `action_required` 的最大反驳次数。topology-graph-helpers[getTopologyAgentStatusBadgePresentation, getTopologyNodeHeaderActionOrder]、agent-colors[getAgentColorToken]、topology-canvas[buildTopologyCanvasLayout]、TopologyGraph[TopologyGraph]、App[App]、orchestrator[openAgentTerminal, normalizeTopology]
 
 ### 3.4 聊天与消息传递
 
-- Task 群聊支持 `@AgentId` 提交任务；输入 `@` 会弹出候选 Agent 列表，支持方向键、鼠标和 `Tab` 自动补全。chat-mentions[getMentionContext, getMentionOptionItems]、ChatWindow[ChatWindow]
-- 用户在 Task 群聊里直接 `@Agent` 时，群聊展示保留原始 `@Agent` 文本；底层发送给目标 Agent 前，会去掉仅用于寻址的开头或结尾 `@Agent`，并按 raw 模式封装为单行 `[User] <正文>`，不会拼成下游结构化段落。task-submission[resolveTaskSubmissionTarget]、message-forwarding[stripTargetMention]、orchestrator[submitTask, createLangGraphBatchRunners]
-- 群聊中同时展示 `user -> agent`、`agent -> agent` 协作消息，以及 Agent 最终回复。chat-messages[mergeTaskChatMessages]、ChatWindow[ChatWindow]、orchestrator[createLangGraphBatchRunners]
-- 当一个 Agent 同时触发多个下游 Agent 时，聊天区会合并展示为一条批量 `Agent -> Agent` 派发消息，而不是拆成多条重复消息。orchestrator[createLangGraphBatchRunners, shouldSuppressDuplicateDispatchMessage]、chat-messages[mergeTaskChatMessages]
-- 这类批量 `Agent -> Agent` 派发消息仅用于聊天区展示给人看，不会作为“尚未收到的群聊历史”再次转发给下游 Agent。orchestrator[createLangGraphBatchRunners]、message-forwarding[buildDownstreamForwardedContextFromMessages]
-- Agent 自动触发下游 Agent 时，只有首次自动流转会封装 `[Initial Task]` 与 `[From <AgentId> Agent]` 结构化段落；后续 Agent 间继续流转时只保留 `[From <AgentId> Agent]`，其中 `[Initial Task]` 固定承载当前 Task 的首条用户任务。orchestrator[consumeInitialTaskForwardingAllowanceFromGraphState, buildAgentExecutionPrompt]、message-forwarding[buildDownstreamForwardedContextFromMessages, getInitialUserMessageContent]
-- 对非 `Build` 且非判定类的下游，系统会在 `[Project Git Diff Summary]` 段附带当前 Project Git Diff 的精简摘要，帮助下游 Agent 快速感知最新改动；发给 `Build` 或判定类 Agent 时不附带该段，避免把辅助上下文误判为待审正文。orchestrator[buildProjectGitDiffSummary, createLangGraphBatchRunners]、types[usesOpenCodeBuiltinPrompt, isDecisionAgentInTopology]
-- Agent 自动派发下游时，不会额外补充整段群聊历史，但会携带本轮需要的首条用户任务与当前上游结果；若上游结果已完整包含用户消息，会自动去重。message-forwarding[buildDownstreamForwardedContextFromMessages, contentContainsNormalized]、orchestrator[createLangGraphBatchRunners]
-- 当边的 `message_type = all` 时，下游转发语义以“群聊语义层”作为真源：必须先经过 `chat-messages[mergeTaskChatMessages]` 合并出用户实际看到的消息卡片，再基于该卡片生成 transcript；不能直接遍历原始 `MessageRecord[]` 拼接，否则会把 `agent-final` 中已经出现过的继续处理正文，再由后续 `continue-request` 原样追加第二遍。message-forwarding[buildDownstreamForwardedContextFromMessages]、chat-messages[mergeTaskChatMessages]
-- 群聊落库与 Agent 间转发只使用 OpenCode 返回消息里的公开 `text` part；`reasoning`、步骤和工具调用不会混入群聊正文或下游 prompt。opencode-client[extractVisibleMessageText, getSessionRuntime]、orchestrator[stripStructuredSignals]
-- 同一个 Agent 的最终回复后若紧接着自动向下游传递，群聊会把“最终回复 + 下游派发提示”合并成同一条消息；合并后只追加 `@目标Agent` 标记，避免连续出现两条重复的同名 Agent 卡片。chat-messages[mergeTaskChatMessages]、chat-message-format[buildMentionSuffix, formatAgentDispatchContent]
-- 判定 Agent 给出以 `<continue>` 开头的尾段后，群聊会把该 Agent 的结果正文与回应请求合并展示成同一条消息，并在消息末尾统一追加 `@目标Agent` 标记；右侧结束标签可选。chat-messages[mergeTaskChatMessages]、chat-message-format[formatActionRequiredRequestContent]、decision-response[stripDecisionResponseMarkup, stripLeadingDecisionResponseLabel]
-- Agent 最终回复写入群聊时，只会在命中“正式结果 / 最终回复 / 最终交付 / 结论”等明确交付标题时提取对应尾部章节展示；若只是普通结构化文档而不存在这类标题，则保留完整正文，避免误截断到附录内容。chat-messages[extractAgentFinalDisplayContent, extractTrailingTopLevelSection]
+- Task 群聊通过 `@AgentId` 提交任务，输入 `@` 会弹出候选列表；展示层保留原始 `@Agent` 文本，但发送给目标 Agent 前会去掉仅用于寻址的头尾 `@Agent`，并按 raw 模式封装为单行 `[User] <正文>`。chat-mentions[getMentionContext, getMentionOptionItems]、task-submission[resolveTaskSubmissionTarget]、message-forwarding[stripTargetMention]、ChatWindow[ChatWindow]、orchestrator[submitTask, createLangGraphBatchRunners]
+- 群聊同时展示 `user -> agent`、`agent -> agent` 与最终回复；同一 Agent 批量派发多个下游时会合并成一条消息，仅用于展示，不会再作为历史转发给下游。首次自动流转会附带 `[Initial Task]` 与 `[From <AgentId> Agent]`，后续只保留 `[From <AgentId> Agent]`；自动派发只带首条用户任务和当前上游结果，命中重复内容会去重。chat-messages[mergeTaskChatMessages]、orchestrator[consumeInitialTaskForwardingAllowanceFromGraphState, createLangGraphBatchRunners, shouldSuppressDuplicateDispatchMessage]、message-forwarding[buildDownstreamForwardedContextFromMessages, getInitialUserMessageContent, contentContainsNormalized]
+- 下游转发语义以“用户实际看到的群聊卡片”为真源：`message_type = all` 时必须先做群聊合并再生成 transcript。群聊落库与 Agent 间转发只使用 OpenCode 公开 `text` part，不混入 `reasoning`、步骤或工具调用；对非 `Build` 且非判定类的下游，会额外附带 `[Project Git Diff Summary]`。message-forwarding[buildDownstreamForwardedContextFromMessages]、chat-messages[mergeTaskChatMessages]、opencode-client[extractVisibleMessageText, getSessionRuntime]、orchestrator[buildProjectGitDiffSummary, stripStructuredSignals, createLangGraphBatchRunners]、types[usesOpenCodeBuiltinPrompt, isDecisionAgentInTopology]
+- 消息展示会尽量合并同一轮语义：Agent 最终回复后紧接着自动派发下游时，会并成同一条消息并追加 `@目标Agent`；判定 Agent 返回 `<continue>` 时，也会把正文与回应请求合并展示。最终回复仅在命中“正式结果 / 最终回复 / 最终交付 / 结论”等标题时提取尾部章节，否则保留完整正文。chat-messages[mergeTaskChatMessages, extractAgentFinalDisplayContent, extractTrailingTopLevelSection]、chat-message-format[buildMentionSuffix, formatAgentDispatchContent, formatActionRequiredRequestContent]、decision-response[stripDecisionResponseMarkup, stripLeadingDecisionResponseLabel]
 
 ### 3.5 GUI 交互
 
-- 右下角团队成员面板展示当前 Task 的 Agent 运行态与 prompt 摘要。App[App]、agent-prompt-snippet[buildAgentPromptSnippetText]
-- 右上角拓扑图支持整块面板放大查看；放大视图会直接把当前拓扑图放大，Agent 卡片会随视口横向和纵向一起拉伸铺满面板，连线固定走在 Agent 顶部上方的通道内，不会越出拓扑 panel；节点下游关系可通过点击节点编辑。TopologyGraph[TopologyGraph]、topology-canvas[buildTopologyCanvasLayout]
-- 拓扑面板 Header 右侧与消息面板 Header 右侧都提供统一的“全屏”入口；点击拓扑面板会进入仅显示拓扑的单面板视图，点击消息面板会进入仅显示消息的单面板视图；对应全屏态内都可通过“退出全屏”恢复默认三栏布局。App[App]、TopologyGraph[TopologyGraph]、ChatWindow[ChatWindow]
-- 拓扑图历史区会优先展示 Agent 最近的运行活动，并明确区分思考、普通消息、步骤与 Tool Call 参数摘要，而不只是单行运行状态。agent-history[buildAgentHistoryItems]、TopologyGraph[TopologyGraph]、opencode-client[getSessionRuntime]
-- 每个 Agent 都会按名称自动分配一套稳定配色；聊天记录里会使用对应的浅色底、描边与标签色来区分不同 Agent。agent-colors[getAgentColorToken]、ChatWindow[MessageBubble]、App[App]
-- 右下角展示当前工作区拓扑中的全部 Agent，以及它们在当前 Task 语境下的状态。frontend-agent-order[orderAgentsForFrontend]、App[App]
-- 前端聚焦当前 Task 的展示与消息发送；Agent、Prompt、拓扑、Project、Task 的创建、删除、编辑与保存通过 JSON、CLI 与运行时处理。App[App]、ChatWindow[ChatWindow]、cli[ensureJsonTopologyApplied]、orchestrator[applyTeamDsl, saveTopology]
-- GUI 展示当前 Task 的聊天流、拓扑和 Agent 状态，并允许继续发消息；终端 attach 通过 OpenCode 外部终端打开。App[App]、ChatWindow[ChatWindow]、TopologyGraph[TopologyGraph]、web-api[openAgentTerminal]
+- GUI 聚焦当前 Task 的展示与继续发消息，不负责 Agent、Prompt、拓扑、Project、Task 的创建和保存；这些变更统一走 JSON、CLI 与运行时。App[App]、ChatWindow[ChatWindow]、cli[ensureJsonTopologyApplied]、orchestrator[applyTeamDsl, saveTopology]
+- 主界面展示聊天流、拓扑图、团队成员列表和当前 Task 语境下的 Agent 状态、prompt 摘要；拓扑历史区优先显示最近运行活动，并区分思考、普通消息、步骤与 Tool Call 参数摘要。App[App]、TopologyGraph[TopologyGraph]、ChatWindow[ChatWindow]、frontend-agent-order[orderAgentsForFrontend]、agent-prompt-snippet[buildAgentPromptSnippetText]、agent-history[buildAgentHistoryItems]、opencode-client[getSessionRuntime]
+- 拓扑面板和消息面板都支持全屏；拓扑放大视图会让卡片随视口铺满面板，连线固定走顶部通道，节点下游关系可点击编辑。Agent 名称配色在拓扑与聊天中保持稳定。TopologyGraph[TopologyGraph]、topology-canvas[buildTopologyCanvasLayout]、agent-colors[getAgentColorToken]、ChatWindow[MessageBubble]
 
 ### 3.6 终端行为
 
-- GUI 和 CLI 都通过 OpenCode session attach 到单个 Agent，会话调试入口统一围绕 OpenCode。terminal-commands[buildCliOpencodeAttachCommand]、orchestrator[openAgentTerminal, launchAgentTerminal]、task-attach-display[renderTaskAttachCommands]
-- OpenCode attach 入口统一位于拓扑图节点头部。topology-graph-helpers[getTopologyNodeHeaderActionOrder]、TopologyGraph[TopologyGraph]
-- Windows 上 attach 外部终端默认使用 `cmd.exe /k` 拉起可见窗口；若需备用路径，可在启动前设置 `AGENT_TEAM_WINDOWS_TERMINAL=powershell` 切换到 PowerShell 窗口启动。terminal-launcher[buildTerminalLaunchSpec]
-- 运行中的 Agent 会通过 OpenCode HTTP session 消息接口轮询实时工具调用与摘要，并显示在拓扑图节点内。web-api[getTaskRuntime]、App[App]、orchestrator[getTaskRuntime]、opencode-client[getSessionRuntime]
-- 同一工作区的 SSE 事件会按 `taskId` 区分当前页面所属 Task；当当前 Task 内部有新的 spawn runtime session 建立时，前端会立即刷新当前 Task 快照，使新实例节点尽快具备可点击的 `attach`。orchestrator[scheduleRuntimeRefresh]、runtime-event-refresh[shouldRefreshForRuntimeEvent]、App[App]
-- 应用退出时，会统一关闭当前工作区相关的 `opencode serve` 与其派生会话。orchestrator[dispose]、opencode-client[shutdown]、cli[disposeCliContext]
+- GUI 和 CLI 都围绕 OpenCode session attach 到单个 Agent，入口统一放在拓扑节点头部；终端文案与调试链路都直接对齐 OpenCode。terminal-commands[buildCliOpencodeAttachCommand]、topology-graph-helpers[getTopologyNodeHeaderActionOrder]、TopologyGraph[TopologyGraph]、orchestrator[openAgentTerminal, launchAgentTerminal]、task-attach-display[renderTaskAttachCommands]
+- 运行中的 Agent 会通过 OpenCode HTTP session 轮询实时工具调用与摘要并显示在拓扑节点内；同一工作区的 SSE 事件按 `taskId` 隔离，当前 Task 新增 spawn runtime session 时会立即刷新快照，让新实例节点尽快具备可点击的 `attach`。web-api[getTaskRuntime]、opencode-client[getSessionRuntime]、orchestrator[getTaskRuntime, scheduleRuntimeRefresh]、runtime-event-refresh[shouldRefreshForRuntimeEvent]、App[App]
+- Windows 默认用 `cmd.exe /k` 拉起 attach 终端，设置 `AGENT_TEAM_WINDOWS_TERMINAL=powershell` 可切到 PowerShell；应用退出时会统一关闭当前工作区相关的 `opencode serve` 与派生会话。terminal-launcher[buildTerminalLaunchSpec]、orchestrator[dispose]、opencode-client[shutdown]、cli[disposeCliContext]
 
 ## 4. CLI 约定
 
@@ -165,51 +126,7 @@ CLI 能力分组：
 - CLI 主进程收到 `Ctrl+C` / `SIGTERM` 时，会先回收当前这次命令启动或连接过的全部 OpenCode serve 实例，再结束当前命令，避免遗留孤儿会话。
 - `task headless` 在任务自然结束退出时会打印本次回收掉的 OpenCode 实例 PID，`task ui` 则只会在收到 `Ctrl+C` / `SIGTERM` 清理退出时打印，便于排查残留进程。
 
-## 5. 存储布局与仓库结构
-
-### 5.1 存储布局
-
-- 命令执行失败等诊断日志位于用户数据目录下的 `logs/tasks/<taskId>.log`。
-- 当前工作区的拓扑、Task、消息与运行态数据只在当前 CLI 进程内存中维护，不再落盘旧的工作区快照文件。
-- 团队拓扑 JSON 编译后的 Agent prompt / writable 元数据与 LangGraph 边界信息也只保留在当前运行时内存快照中。
-- 每个 Task 的 LangGraph checkpoint 只保存在当前进程内存里，不再额外写入工作区目录。
-- 编译态 CLI 首次启动时，会把内嵌的 Web 静态资源释放到用户数据目录下的 `runtime/<version>/web/`；源码运行时优先直接复用仓库里的 `dist/web/`。runtime-assets[ensureRuntimeAssets]
-- OpenCode serve 端口、Agent session id 与 Web Host 定位信息由运行时内存态管理；agent-team 不再额外为 OpenCode 注入专用数据库落盘路径。opencode-client[startServer]
-
-### 5.2 仓库结构
-
-```txt
-agent-team/
-├── src/
-│   ├── cli/
-│   │   ├── index.ts
-│   │   ├── launcher.cjs
-│   │   └── web-host.ts
-│   ├── components/
-│   ├── lib/
-│   ├── runtime/
-│   │   ├── gating-state.ts
-│   │   ├── gating-router.ts
-│   │   ├── langgraph-host.ts
-│   │   ├── langgraph-runtime.ts
-│   │   ├── orchestrator.ts
-│   │   ├── topology-compiler.ts
-│   │   ├── store.ts
-│   │   ├── opencode-client.ts
-│   │   └── user-data-path.ts
-│   ├── shared/
-│   │   ├── ipc.ts
-│   │   ├── terminal-commands.ts
-│   │   └── types.ts
-│   ├── App.tsx
-│   ├── main.tsx
-│   └── styles.css
-├── config/
-│   └── opencode.example.json
-└── AGENTS.md
-```
-
-## 6. 开发与打包
+## 5. 开发与打包
 
 开发环境：
 
@@ -249,7 +166,7 @@ bun run dist:mac-x64
 - 如果只想单独刷新网页产物，可以执行 `bun run build`。
 - 每次修改前端页面、样式或共享前端数据结构后，都必须执行 `bun run build`，把最新的 UI 产物刷新到 `dist/web/`。
 
-## 7. 文档同步要求
+## 6. 文档同步要求
 
 以下变更必须同步检查并在需要时更新本文件：
 
@@ -260,7 +177,7 @@ bun run dist:mac-x64
 - CLI 命令、别名或默认行为变化
 - 会影响协作者理解当前系统行为的 UI 或编排逻辑变化
 
-## 8. 后续建议
+## 7. 后续建议
 
 - 把协作消息做得更接近 “Agent @ Agent” 的可视化协作流。
 - 补充集成测试。
