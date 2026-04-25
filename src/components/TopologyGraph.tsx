@@ -53,6 +53,17 @@ interface SelectedHistoryItemState {
   item: AgentHistoryItem;
 }
 
+interface TopologyNodePresentation {
+  color: ReturnType<typeof getAgentColorToken>;
+  historyItems: AgentHistoryItem[];
+  statusBadge: TopologyAgentStatusBadgePresentation;
+  headerActions: ReturnType<typeof getTopologyNodeHeaderActionOrder>;
+  isAttachOpening: boolean;
+  attachDisabled: boolean;
+  attachTitle: string;
+  agentFullscreenButtonCopy: ReturnType<typeof getPanelFullscreenButtonCopy>;
+}
+
 function getHistoryItemClassName(item: AgentHistoryItem) {
   switch (item.tone) {
     case "failure":
@@ -220,6 +231,7 @@ export function TopologyGraph({
   const historyShouldStickToBottomRef = useRef<Record<string, boolean>>({});
   const historyLastItemIdRef = useRef<Record<string, string | null>>({});
   const [canvasViewport, setCanvasViewport] = useState<{ width: number; height: number } | null>(null);
+  const [maximizedAgentId, setMaximizedAgentId] = useState<string | null>(null);
   const [selectedHistoryItem, setSelectedHistoryItem] = useState<SelectedHistoryItemState | null>(null);
   const topology = task?.topology ?? workspace?.topology;
   const taskAgents = useMemo(
@@ -322,21 +334,28 @@ export function TopologyGraph({
   );
 
   useEffect(() => {
-    if (!selectedHistoryItem) {
+    if (!selectedHistoryItem && !maximizedAgentId) {
       return;
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setSelectedHistoryItem(null);
+      if (event.key !== "Escape") {
+        return;
       }
+
+      if (selectedHistoryItem) {
+        setSelectedHistoryItem(null);
+        return;
+      }
+
+      setMaximizedAgentId(null);
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [selectedHistoryItem]);
+  }, [maximizedAgentId, selectedHistoryItem]);
 
   useEffect(() => {
     if (!topology) {
@@ -405,6 +424,63 @@ export function TopologyGraph({
     };
   }, [historyByAgent, topology, visibleNodeIds]);
 
+  useEffect(() => {
+    if (!maximizedAgentId) {
+      return;
+    }
+
+    if (!visibleNodeIds.includes(maximizedAgentId)) {
+      setMaximizedAgentId(null);
+    }
+  }, [maximizedAgentId, visibleNodeIds]);
+
+  function buildNodePresentation(agentId: string): TopologyNodePresentation {
+    const taskAgent = taskAgents.get(agentId);
+    const runtimeSnapshot = runtimeSnapshots[agentId];
+    const color = getAgentColorToken(agentId);
+    const historyItems = historyByAgent.get(agentId) ?? [];
+    const statusBadge = getTopologyAgentStatusBadgePresentation(
+      topology!,
+      agentId,
+      resolveTopologyNodeDisplayStatus({
+        ...withOptionalValue({}, "taskAgentStatus", taskAgent?.status),
+        ...withOptionalValue(
+          {},
+          "runtimeSnapshotStatus",
+          runtimeSnapshot?.runtimeStatus ?? runtimeSnapshot?.status,
+        ),
+      }),
+      {
+        finalLoopDecisionAgentName,
+      },
+    );
+    const showAttachButton = typeof onOpenAgentTerminal === "function";
+    const headerActions = getTopologyNodeHeaderActionOrder({
+      showFullscreenButton: true,
+      showAttachButton,
+    });
+    const isAttachOpening = openingAgentTerminalId === agentId;
+    const attachDisabled = !taskAgent?.opencodeSessionId || isAttachOpening;
+    const attachTitle = taskAgent?.opencodeSessionId
+      ? (isAttachOpening ? `正在打开 ${agentId} 的 attach 终端` : `attach 到 ${agentId}`)
+      : `${agentId} 当前还没有可 attach 的 OpenCode session。`;
+    return {
+      color,
+      historyItems,
+      statusBadge,
+      headerActions,
+      isAttachOpening,
+      attachDisabled,
+      attachTitle,
+      agentFullscreenButtonCopy: getPanelFullscreenButtonCopy(maximizedAgentId === agentId),
+    };
+  }
+
+  const maximizedNode = maximizedAgentId
+    ? (canvasLayout?.nodes.find((node) => node.id === maximizedAgentId) ?? null)
+    : null;
+  const maximizedNodePresentation = maximizedNode ? buildNodePresentation(maximizedNode.id) : null;
+
   if (!workspace || !task || !topology || !canvasLayout) {
     return (
       <section className={PANEL_SURFACE_CLASS}>
@@ -463,34 +539,16 @@ export function TopologyGraph({
             }}
           >
             {canvasLayout.nodes.map((node) => {
-              const taskAgent = taskAgents.get(node.id);
-              const runtimeSnapshot = runtimeSnapshots[node.id];
-              const color = getAgentColorToken(node.id);
-              const historyItems = historyByAgent.get(node.id) ?? [];
-              const statusBadge = getTopologyAgentStatusBadgePresentation(
-                topology,
-                node.id,
-                resolveTopologyNodeDisplayStatus({
-                  ...withOptionalValue({}, "taskAgentStatus", taskAgent?.status),
-                  ...withOptionalValue(
-                    {},
-                    "runtimeSnapshotStatus",
-                    runtimeSnapshot?.runtimeStatus ?? runtimeSnapshot?.status,
-                  ),
-                }),
-                {
-                  finalLoopDecisionAgentName,
-                },
-              );
-              const showAttachButton = typeof onOpenAgentTerminal === "function";
-              const headerActions = getTopologyNodeHeaderActionOrder({
-                showAttachButton,
-              });
-              const isAttachOpening = openingAgentTerminalId === node.id;
-              const attachDisabled = !taskAgent?.opencodeSessionId || isAttachOpening;
-              const attachTitle = taskAgent?.opencodeSessionId
-                ? (isAttachOpening ? `正在打开 ${node.id} 的 attach 终端` : `attach 到 ${node.id}`)
-                : `${node.id} 当前还没有可 attach 的 OpenCode session。`;
+              const {
+                color,
+                historyItems,
+                statusBadge,
+                headerActions,
+                isAttachOpening,
+                attachDisabled,
+                attachTitle,
+                agentFullscreenButtonCopy,
+              } = buildNodePresentation(node.id);
               return (
                 <div
                   key={node.id}
@@ -530,6 +588,25 @@ export function TopologyGraph({
                       </p>
                       <div className="shrink-0 flex items-center gap-2">
                         {headerActions.map((action) => {
+                          if (action === "fullscreen") {
+                            return (
+                              <button
+                                key={action}
+                                type="button"
+                                aria-label={`${agentFullscreenButtonCopy.ariaLabel} ${node.id} 详情`}
+                                title={`${agentFullscreenButtonCopy.label}查看 ${node.id} 详情`}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  onSelectAgent(node.id);
+                                  setMaximizedAgentId(node.id);
+                                }}
+                                className="inline-flex h-6 items-center justify-center rounded-full border border-[#d8cdbd] bg-[#fffaf2] px-2 text-[10px] font-semibold text-foreground/76 shadow-[0_1px_0_rgba(255,255,255,0.45)] transition hover:border-[#cda27d] hover:bg-white"
+                              >
+                                {agentFullscreenButtonCopy.label}
+                              </button>
+                            );
+                          }
+
                           if (action === "attach") {
                             return (
                               <button
@@ -625,6 +702,132 @@ export function TopologyGraph({
           </div>
         </div>
       </div>
+
+      {maximizedNode && maximizedNodePresentation ? (
+        <div
+          className="fixed inset-0 z-40 bg-black/28 px-4 py-4"
+          onClick={() => setMaximizedAgentId(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${maximizedNode.id} 全屏详情`}
+            className="flex h-full w-full flex-col overflow-hidden rounded-[18px] border bg-background shadow-[0_24px_80px_rgba(23,32,25,0.22)]"
+            style={{
+              borderColor: maximizedNodePresentation.color.border,
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div
+              className="border-b px-6 py-4"
+              style={{
+                background: maximizedNodePresentation.color.soft,
+                borderColor: maximizedNodePresentation.color.border,
+              }}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-3">
+                    <span
+                      className="inline-flex max-w-full shrink-0 rounded-[10px] px-3 py-1 text-center text-[18px] font-semibold leading-[1.2] tracking-[0.02em]"
+                      style={{
+                        background: maximizedNodePresentation.color.solid,
+                        color: maximizedNodePresentation.color.badgeText,
+                      }}
+                    >
+                      {maximizedNode.id}
+                    </span>
+                    <span className="text-sm text-foreground/68">
+                      {maximizedNodePresentation.statusBadge.label}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm text-foreground/62">
+                    当前展示 {maximizedNode.id} 的完整历史轨迹。
+                  </p>
+                </div>
+                <div className="shrink-0 flex items-center gap-2">
+                  {maximizedNodePresentation.headerActions.map((action) => {
+                    if (action === "fullscreen") {
+                      return (
+                        <button
+                          key={action}
+                          type="button"
+                          aria-label={`${maximizedNodePresentation.agentFullscreenButtonCopy.ariaLabel} ${maximizedNode.id} 详情`}
+                          onClick={() => setMaximizedAgentId(null)}
+                          className={`${PANEL_HEADER_ACTION_BUTTON_CLASS} no-drag`}
+                        >
+                          {maximizedNodePresentation.agentFullscreenButtonCopy.label}
+                        </button>
+                      );
+                    }
+
+                    if (action === "attach") {
+                      return (
+                        <button
+                          key={action}
+                          type="button"
+                          aria-label={`打开 ${maximizedNode.id} 的 attach 终端`}
+                          title={maximizedNodePresentation.attachTitle}
+                          disabled={maximizedNodePresentation.attachDisabled}
+                          onClick={() => {
+                            if (maximizedNodePresentation.attachDisabled || !onOpenAgentTerminal) {
+                              return;
+                            }
+                            onOpenAgentTerminal(maximizedNode.id);
+                          }}
+                          className="inline-flex h-8 items-center justify-center gap-1 rounded-full border border-[#d8cdbd] bg-[#fffaf2] px-3 text-[12px] font-semibold text-foreground/76 shadow-[0_1px_0_rgba(255,255,255,0.45)] transition hover:border-[#cda27d] hover:bg-white disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:border-[#d8cdbd] disabled:hover:bg-[#fffaf2]"
+                        >
+                          {renderAttachButtonIcon()}
+                          <span>{maximizedNodePresentation.isAttachOpening ? "打开中" : "attach"}</span>
+                        </button>
+                      );
+                    }
+
+                    return (
+                      <span
+                        key={action}
+                        aria-label={maximizedNodePresentation.statusBadge.label}
+                        title={maximizedNodePresentation.statusBadge.label}
+                        className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-semibold shadow-[0_1px_0_rgba(255,255,255,0.45)] ${maximizedNodePresentation.statusBadge.className} ${maximizedNodePresentation.statusBadge.effectClassName}`}
+                      >
+                        {renderStatusBadgeIcon(maximizedNodePresentation.statusBadge)}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+              {maximizedNodePresentation.historyItems.length > 0 ? (
+                <div className="space-y-3">
+                  {maximizedNodePresentation.historyItems.map((item) => (
+                    <article
+                      key={item.id}
+                      className={`rounded-[12px] border px-4 py-3 ${getHistoryItemClassName(item)}`}
+                    >
+                      <div className="min-w-0 flex-1 select-text">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-[13px] font-semibold">{item.label}</span>
+                          <span className="text-[12px] opacity-70">{formatHistoryTimestamp(item.timestamp)}</span>
+                        </div>
+                        <AgentHistoryMarkdown
+                          content={item.detail}
+                          className="mt-2 text-[13px] leading-[1.5] text-inherit opacity-95 select-text"
+                        />
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex h-full items-center justify-center rounded-[14px] border border-dashed border-border/70 bg-background/45 text-sm text-muted-foreground">
+                  待启动
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {selectedHistoryItem ? (
         <div

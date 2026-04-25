@@ -134,16 +134,26 @@ test("getTopologyLoopLimitFailedDecisionAgentName 会从任务失败原因里识
   );
 });
 
-test("getTopologyNodeHeaderActionOrder 会把 attach 固定排在状态 icon 左边", () => {
+test("getTopologyNodeHeaderActionOrder 会把全屏与 attach 固定排在状态 icon 左边", () => {
   assert.deepEqual(
     getTopologyNodeHeaderActionOrder({
+      showFullscreenButton: true,
       showAttachButton: true,
     }),
-    ["attach", "status"],
+    ["fullscreen", "attach", "status"],
   );
 
   assert.deepEqual(
     getTopologyNodeHeaderActionOrder({
+      showFullscreenButton: true,
+      showAttachButton: false,
+    }),
+    ["fullscreen", "status"],
+  );
+
+  assert.deepEqual(
+    getTopologyNodeHeaderActionOrder({
+      showFullscreenButton: false,
       showAttachButton: false,
     }),
     ["status"],
