@@ -12,6 +12,7 @@ import {
   type AgentRecord,
   BUILD_AGENT_ID,
   createDefaultTopology,
+  DEFAULT_ACTION_REQUIRED_MAX_ROUNDS,
   normalizeActionRequiredMaxRounds,
   createTopologyLangGraphRecord,
   normalizeTopologyEdgeTrigger,
@@ -1248,12 +1249,13 @@ export class Orchestrator {
     const seenEdges = new Set<string>();
     const seenPairs = new Set<string>();
     const edges = topology.edges
-      .filter(
-        (edge) =>
-          normalizeTopologyEdgeTrigger(edge.triggerOn) === "transfer" ||
-          normalizeTopologyEdgeTrigger(edge.triggerOn) === "complete" ||
-          normalizeTopologyEdgeTrigger(edge.triggerOn) === "continue",
-      )
+      .map((edge) => {
+        const triggerOn = normalizeTopologyEdgeTrigger(edge.triggerOn);
+        return {
+          ...edge,
+          triggerOn,
+        };
+      })
       .filter((edge) => validTopologyNames.has(edge.source) && validTopologyNames.has(edge.target))
       .filter((edge) => {
         const key = `${edge.source}__${edge.target}__${edge.triggerOn}`;
@@ -1274,11 +1276,14 @@ export class Orchestrator {
       .map((edge) => ({
         source: edge.source,
         target: edge.target,
-        triggerOn: normalizeTopologyEdgeTrigger(edge.triggerOn),
+        triggerOn: edge.triggerOn,
         messageMode: edge.messageMode,
-        ...(normalizeTopologyEdgeTrigger(edge.triggerOn) === "continue"
+        ...(edge.triggerOn === "continue"
           ? {
-              maxRevisionRounds: normalizeActionRequiredMaxRounds(edge.maxRevisionRounds),
+              maxRevisionRounds:
+                edge.maxRevisionRounds === undefined
+                  ? DEFAULT_ACTION_REQUIRED_MAX_ROUNDS
+                  : normalizeActionRequiredMaxRounds(edge.maxRevisionRounds),
             }
           : {}),
       }));

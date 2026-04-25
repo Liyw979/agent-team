@@ -192,11 +192,10 @@ export interface SpawnActivationRecord {
 }
 
 export function normalizeActionRequiredMaxRounds(value: unknown): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return DEFAULT_ACTION_REQUIRED_MAX_ROUNDS;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    throw new Error("maxRevisionRounds 必须是大于等于 1 的整数");
   }
-
-  return Math.max(1, Math.floor(value));
+  return value;
 }
 
 export function getActionRequiredEdgeLoopLimit(
@@ -210,7 +209,9 @@ export function getActionRequiredEdgeLoopLimit(
       && item.target === targetAgentId
       && normalizeTopologyEdgeTrigger(item.triggerOn) === "continue",
   );
-  return normalizeActionRequiredMaxRounds(edge?.maxRevisionRounds);
+  return edge?.maxRevisionRounds === undefined
+    ? DEFAULT_ACTION_REQUIRED_MAX_ROUNDS
+    : normalizeActionRequiredMaxRounds(edge.maxRevisionRounds);
 }
 
 interface BaseMessageRecord {
@@ -433,10 +434,10 @@ export interface AgentTeamEvent {
 }
 
 export function normalizeTopologyEdgeTrigger(value: unknown): "transfer" | "complete" | "continue" {
-  if (value === "complete" || value === "continue") {
+  if (value === "transfer" || value === "complete" || value === "continue") {
     return value;
   }
-  return "transfer";
+  throw new Error(`非法拓扑 trigger：${String(value)}`);
 }
 
 export function getTopologyEdgeId(edge: Pick<TopologyEdge, "source" | "target" | "triggerOn">): string {
@@ -611,28 +612,33 @@ export function getSpawnRules(topology: TopologyRecord): SpawnRule[] {
       .filter((node) => node.kind === "spawn")
       .map((node) => [node.spawnRuleId!, node.id]),
   );
-  return (topology.spawnRules ?? []).map((rule) => ({
-    ...rule,
-    spawnNodeName: rule.spawnNodeName ?? spawnNodeNameByRuleId.get(rule.id) ?? rule.id,
-    spawnedAgents: rule.spawnedAgents.map((agent) => ({ ...agent })),
-    edges: rule.edges.map((edge) => ({
-      ...edge,
-      triggerOn: normalizeTopologyEdgeTrigger(edge.triggerOn),
-      ...(normalizeTopologyEdgeTrigger(edge.triggerOn) === "continue" && typeof edge.maxRevisionRounds === "number"
-        ? { maxRevisionRounds: normalizeActionRequiredMaxRounds(edge.maxRevisionRounds) }
+  return (topology.spawnRules ?? []).map((rule) => {
+    const reportToTriggerOn =
+      rule.reportToTriggerOn === undefined ? undefined : normalizeTopologyEdgeTrigger(rule.reportToTriggerOn);
+
+    return {
+      ...rule,
+      spawnNodeName: rule.spawnNodeName ?? spawnNodeNameByRuleId.get(rule.id) ?? rule.id,
+      spawnedAgents: rule.spawnedAgents.map((agent) => ({ ...agent })),
+      edges: rule.edges.map((edge) => {
+        const triggerOn = normalizeTopologyEdgeTrigger(edge.triggerOn);
+        return {
+          ...edge,
+          triggerOn,
+          ...(triggerOn === "continue" && typeof edge.maxRevisionRounds === "number"
+            ? { maxRevisionRounds: normalizeActionRequiredMaxRounds(edge.maxRevisionRounds) }
+            : {}),
+        };
+      }),
+      ...(reportToTriggerOn ? { reportToTriggerOn } : {}),
+      ...(rule.reportToMessageMode
+        ? { reportToMessageMode: rule.reportToMessageMode }
         : {}),
-    })),
-    ...(rule.reportToTriggerOn
-      ? { reportToTriggerOn: normalizeTopologyEdgeTrigger(rule.reportToTriggerOn) }
-      : {}),
-    ...(rule.reportToMessageMode
-      ? { reportToMessageMode: rule.reportToMessageMode }
-      : {}),
-    ...(normalizeTopologyEdgeTrigger(rule.reportToTriggerOn) === "continue"
-      && typeof rule.reportToMaxRevisionRounds === "number"
-      ? { reportToMaxRevisionRounds: normalizeActionRequiredMaxRounds(rule.reportToMaxRevisionRounds) }
-      : {}),
-  }));
+      ...(reportToTriggerOn === "continue" && typeof rule.reportToMaxRevisionRounds === "number"
+        ? { reportToMaxRevisionRounds: normalizeActionRequiredMaxRounds(rule.reportToMaxRevisionRounds) }
+        : {}),
+    };
+  });
 }
 
 export function createTopologyLangGraphRecord(input: {

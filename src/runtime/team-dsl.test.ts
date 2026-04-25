@@ -38,7 +38,7 @@ function link(
   from: string,
   to: string,
   trigger_type: "transfer" | "complete" | "continue",
-  message_type: "none" | "last" | "last-all" | "all",
+  message_type: "none" | "last" | "last-all",
   maxRevisionRounds?: number,
 ) {
   return {
@@ -53,7 +53,7 @@ function link(
 function endLink(
   from: string,
   trigger_type: "transfer" | "complete" | "continue",
-  message_type: "none" | "last" | "last-all" | "all",
+  message_type: "none" | "last" | "last-all",
 ) {
   return {
     from,
@@ -571,21 +571,43 @@ test("compileTeamDsl 会保留 spawn 子图回到外层的 continue 边 maxRevis
   assert.equal(compiled.topology.spawnRules?.[0]?.reportToMaxRevisionRounds, 7);
 });
 
-test("compileTeamDsl 仍兼容旧的 all，并在编译时归一化为 last-all", () => {
-  const compiled = compileTeamDsl({
-    entry: "线索发现",
-    nodes: [
-      agentNode("线索发现", "你负责线索发现。", false),
-      agentNode("疑点辩论", "你负责辩论。", false),
-    ],
-    links: [
-      link("线索发现", "疑点辩论", "transfer", "all"),
-    ],
-  });
+test("compileTeamDsl 会拒绝旧的 all message_type", () => {
+  assert.throws(
+    () =>
+      compileTeamDsl({
+        entry: "线索发现",
+        nodes: [
+          agentNode("线索发现", "你负责线索发现。", false),
+          agentNode("疑点辩论", "你负责辩论。", false),
+        ],
+        links: [
+          {
+            from: "线索发现",
+            to: "疑点辩论",
+            trigger_type: "transfer",
+            message_type: "all",
+          },
+        ],
+      } as never),
+    /links\[0\]\.message_type/u,
+  );
+});
 
-  assert.deepEqual(compiled.topology.edges, [
-    { source: "线索发现", target: "疑点辩论", triggerOn: "transfer", messageMode: "last-all" },
-  ]);
+test("compileTeamDsl 会拒绝非法 maxRevisionRounds，而不是偷偷取整或补底", () => {
+  assert.throws(
+    () =>
+      compileTeamDsl({
+        entry: "线索发现",
+        nodes: [
+          agentNode("线索发现", "你负责线索发现。", false),
+          agentNode("疑点辩论", "你负责辩论。", false),
+        ],
+        links: [
+          link("线索发现", "疑点辩论", "continue", "last-all", 0),
+        ],
+      }),
+    /maxRevisionRounds 必须是大于等于 1 的整数/u,
+  );
 });
 
 test("matchesAppliedTeamDsl 会把完全一致的当前团队配置识别为无需重复 apply", () => {

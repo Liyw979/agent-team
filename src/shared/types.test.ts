@@ -6,6 +6,7 @@ import {
   getSpawnRules,
   getActionRequiredEdgeLoopLimit,
   isReviewAgentInTopology,
+  normalizeActionRequiredMaxRounds,
   normalizeTopologyEdgeTrigger,
   type TopologyAgentSeed,
   type TopologyRecord,
@@ -114,11 +115,18 @@ test("只有 Build 继续视为 OpenCode 内置 prompt", () => {
   assert.equal(usesOpenCodeBuiltinPrompt("UnitTest"), false);
 });
 
-test("未知 trigger 会回退到 transfer，canonical trigger 保持新命名", () => {
-  assert.equal(normalizeTopologyEdgeTrigger("unknown"), "transfer");
+test("未知 trigger 必须直接报错，canonical trigger 保持新命名", () => {
+  assert.throws(() => normalizeTopologyEdgeTrigger("unknown"), /非法拓扑 trigger/u);
   assert.equal(normalizeTopologyEdgeTrigger("transfer"), "transfer");
   assert.equal(normalizeTopologyEdgeTrigger("complete"), "complete");
   assert.equal(normalizeTopologyEdgeTrigger("continue"), "continue");
+});
+
+test("非法 maxRevisionRounds 必须直接报错，不能偷偷修正", () => {
+  assert.throws(() => normalizeActionRequiredMaxRounds(0), /maxRevisionRounds 必须是大于等于 1 的整数/u);
+  assert.throws(() => normalizeActionRequiredMaxRounds(1.5), /maxRevisionRounds 必须是大于等于 1 的整数/u);
+  assert.throws(() => normalizeActionRequiredMaxRounds("4"), /maxRevisionRounds 必须是大于等于 1 的整数/u);
+  assert.equal(normalizeActionRequiredMaxRounds(4), 4);
 });
 
 test("MessageRecord 不再暴露无生产用途的 projectId / sessionId / sourceAgentId", () => {
