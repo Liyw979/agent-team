@@ -37,6 +37,7 @@ import {
   formatActionRequiredRequestContent,
   parseTargetAgentIds,
 } from "@shared/chat-message-format";
+import { stripReviewResponseMarkup } from "@shared/review-response";
 import { buildAgentSystemPrompt } from "./agent-system-prompt";
 import {
   parseReview as parseReviewPure,
@@ -950,7 +951,8 @@ export class Orchestrator {
   ): string {
     const candidates = [
       parsedReview.cleanContent.trim(),
-      this.stripStructuredSignals(rawFinalMessage).trim(),
+      parsedReview.opinion?.trim() ?? "",
+      this.stripStructuredSignals(stripReviewResponseMarkup(rawFinalMessage)).trim(),
       fallbackMessage?.trim() ?? "",
     ];
 
