@@ -37,13 +37,13 @@ import {
   formatActionRequiredRequestContent,
   parseTargetAgentIds,
 } from "@shared/chat-message-format";
-import { stripReviewResponseMarkup } from "@shared/review-response";
+import { stripDecisionResponseMarkup } from "@shared/decision-response";
 import { buildAgentSystemPrompt } from "./agent-system-prompt";
 import {
-  parseReview as parseReviewPure,
+  parseDecision as parseDecisionPure,
   stripStructuredSignals as stripStructuredSignalsPure,
-  type ParsedReview,
-} from "./review-parser";
+  type ParsedDecision,
+} from "./decision-parser";
 import {
   OpenCodeClient,
   type OpenCodeRuntimeTarget,
@@ -52,7 +52,7 @@ import {
 import { OpenCodeRunner } from "./opencode-runner";
 import { StoreService } from "./store";
 import {
-  resolveAgentStatusFromReview,
+  resolveAgentStatusFromDecision,
 } from "./gating-rules";
 import {
   buildDownstreamForwardedContextFromMessages,
@@ -79,7 +79,7 @@ import { buildEffectiveTopology, getRuntimeTemplateName } from "./runtime-topolo
 import { resolveForwardingActiveAgentIdsFromState } from "./forwarding-active-agents";
 import type { CompiledTeamDsl } from "./team-dsl";
 import { shouldScheduleEventStreamReconnect } from "./event-stream-lifecycle";
-import { resolveExecutionReviewAgent } from "./review-agent-context";
+import { resolveExecutionDecisionAgent } from "./decision-agent-context";
 import { resolveTaskAgentIdsToPrewarm } from "./task-session-prewarm";
 import {
   buildInjectedConfigFromAgents,
@@ -747,7 +747,7 @@ export class Orchestrator {
     topology: TopologyRecord,
     targetAgentId: string,
   ): boolean {
-    return targetAgentId !== BUILD_AGENT_ID && !resolveExecutionReviewAgent({
+    return targetAgentId !== BUILD_AGENT_ID && !resolveExecutionDecisionAgent({
       state: null,
       topology,
       runtimeAgentId: targetAgentId,
@@ -795,8 +795,8 @@ export class Orchestrator {
     };
   }
 
-  protected parseReview(content: string, reviewAgent: boolean): ParsedReview {
-    return parseReviewPure(content, reviewAgent);
+  protected parseDecision(content: string, decisionAgent: boolean): ParsedDecision {
+    return parseDecisionPure(content, decisionAgent);
   }
 
   private stripStructuredSignals(content: string): string {
@@ -945,13 +945,15 @@ export class Orchestrator {
   }
 
   private resolveAgentContextContent(
-    parsedReview: ParsedReview,
+    parsedDecision: ParsedDecision,
     rawFinalMessage: string,
+    fallbackMessage?: string | null,
   ): string {
     const candidates = [
-      parsedReview.cleanContent.trim(),
-      parsedReview.opinion?.trim() ?? "",
-      this.stripStructuredSignals(stripReviewResponseMarkup(rawFinalMessage)).trim(),
+      parsedDecision.cleanContent.trim(),
+      parsedDecision.opinion?.trim() ?? "",
+      this.stripStructuredSignals(stripDecisionResponseMarkup(rawFinalMessage)).trim(),
+      fallbackMessage?.trim() ?? "",
     ];
 
     return candidates.find((item) => item.length > 0) ?? "";
@@ -961,29 +963,75 @@ export class Orchestrator {
     return formatAgentDispatchContent(content, targetAgentIds);
   }
 
-  private extractAgentDisplayContent(content: string): string {
+  private extractAgentDisplayContent(content: string, options?: { preferTrailingDeliverySection?: boolean }): string {
     const trimmed = content.trim();
     if (!trimmed) {
       return "";
     }
 
-    return trimmed
+    const trailingSection = options?.preferTrailingDeliverySection
+      ? this.extractTrailingTopLevelSection(trimmed)
+      : trimmed;
+    return trailingSection
       .replace(/\n(?:---|\*\*\*)(?:\s*\n?)*$/u, "")
       .trim();
   }
 
-  protected createDisplayContent(parsedReview: ParsedReview): string {
-    const cleanContent = this.extractAgentDisplayContent(parsedReview.cleanContent);
+  private extractTrailingTopLevelSection(content: string): string {
+    const headingPattern = /(^|\n)(#{1,2}\s+[^\n]+)\n/g;
+    let lastHeadingIndex = -1;
+    let match: RegExpExecArray | null = headingPattern.exec(content);
+    while (match) {
+      const prefix = match[1] ?? "";
+      lastHeadingIndex = match.index + prefix.length;
+      match = headingPattern.exec(content);
+    }
+
+    if (lastHeadingIndex < 0) {
+      return content;
+    }
+
+    const trailingSection = content.slice(lastHeadingIndex).trim();
+    return trailingSection || content;
+  }
+
+  protected createDisplayContent(parsedDecision: ParsedDecision, fallbackMessage?: string | null): string {
+    const preferTrailingDeliverySection = parsedDecision.decision === "invalid";
+    const cleanContent = this.extractAgentDisplayContent(parsedDecision.cleanContent, {
+      preferTrailingDeliverySection,
+    });
+    if (parsedDecision.decision === "invalid" && parsedDecision.validationError) {
+      return [cleanContent, parsedDecision.validationError].filter(Boolean).join("\n\n");
+    }
     if (cleanContent) {
       return cleanContent;
     }
 
-    const opinion = parsedReview.opinion?.trim();
+    const fallbackContent = this.extractAgentDisplayContent(fallbackMessage?.trim() ?? "", {
+      preferTrailingDeliverySection,
+    });
+    if (parsedDecision.decision === "invalid" && parsedDecision.validationError) {
+      return [fallbackContent, parsedDecision.validationError].filter(Boolean).join("\n\n");
+    }
+    if (fallbackContent) {
+      return fallbackContent;
+    }
+
+    const opinion = parsedDecision.opinion?.trim();
     if (opinion) {
       return opinion;
     }
 
-    return "";
+    if (parsedDecision.decision === "continue") {
+      return "（该 Agent 已给出需要响应的结论，但未返回可展示的结果正文。）";
+    }
+    if (parsedDecision.decision === "invalid") {
+      return parsedDecision.validationError ?? "（该 Agent 返回了无效的判定结果。）";
+    }
+    if (parsedDecision.decision === "complete") {
+      return "通过";
+    }
+    return "（该 Agent 未返回可展示的结果正文。）";
   }
 
   private getTaskRuntimeTarget(task: Pick<TaskRecord, "id" | "cwd">): OpenCodeRuntimeTarget {
@@ -1479,7 +1527,7 @@ export class Orchestrator {
           || "请直接回应当前内容，给出你的判断、补充、澄清、反驳或修改方案。";
         prompt = withOptionalString(withOptionalString({
           mode: "structured",
-          from: batch.sourceAgentId ?? "Reviewer",
+          from: batch.sourceAgentId ?? "DecisionAgent",
           agentMessage: revisionContent,
           allowDirectFallbackWhenNoBatch: true,
         }, "userMessage",
@@ -1491,7 +1539,7 @@ export class Orchestrator {
         const remediationMessage: MessageRecord = {
           id: randomUUID(),
           taskId,
-          sender: batch.sourceAgentId ?? "Reviewer",
+          sender: batch.sourceAgentId ?? "DecisionAgent",
           timestamp: new Date().toISOString(),
           content: formatActionRequiredRequestContent(
             revisionContent,
@@ -1504,7 +1552,7 @@ export class Orchestrator {
             "senderDisplayName",
             batch.sourceAgentId
               ? this.resolveMessageSenderDisplayName(state, batch.sourceAgentId)
-              : "Reviewer",
+              : "DecisionAgent",
           ),
         };
         this.store.insertMessage(cwd, remediationMessage);
@@ -1571,7 +1619,8 @@ export class Orchestrator {
       return {
         agentId: runtimeAgentId,
         status: "failed",
-        reviewAgent: false,
+        decisionAgent: false,
+        decision: "invalid",
         agentStatus: "failed",
         agentContextContent: "",
         opinion: null,
@@ -1608,7 +1657,7 @@ export class Orchestrator {
 
       const topology = this.store.getTopology(cwd);
       const dispatchedContent = this.buildAgentExecutionPrompt(prompt);
-      const reviewAgent = resolveExecutionReviewAgent({
+      const decisionAgent = resolveExecutionDecisionAgent({
         state,
         topology,
         runtimeAgentId,
@@ -1619,7 +1668,7 @@ export class Orchestrator {
         sessionId: agentSessionId,
         content: dispatchedContent,
         agent: executableAgentId,
-        ...(reviewAgent ? { system: buildAgentSystemPrompt() } : {}),
+        ...(decisionAgent ? { system: buildAgentSystemPrompt() } : {}),
       });
 
       if (response.status === "error") {
@@ -1627,40 +1676,37 @@ export class Orchestrator {
           response.rawMessage.error || response.finalMessage || `${runtimeAgentId} 返回错误状态`,
         );
       }
-      const parsedReview = this.parseReview(response.finalMessage, reviewAgent);
+      const parsedDecision = this.parseDecision(response.finalMessage, decisionAgent);
       const agentContextContent = this.resolveAgentContextContent(
-        parsedReview,
+        parsedDecision,
         response.finalMessage,
+        response.fallbackMessage,
       );
-      const displayContent = this.createDisplayContent(parsedReview);
-      if (!displayContent) {
-        throw new Error(`${runtimeAgentId} 未返回可展示的结果正文`);
-      }
       const taskMessage: MessageRecord = {
         id: response.messageId,
         taskId: task.id,
-        content: displayContent,
+        content: this.createDisplayContent(parsedDecision, response.fallbackMessage),
         sender: runtimeAgentId,
         timestamp: response.timestamp,
         kind: "agent-final",
         status: response.status,
-        reviewDecision: parsedReview.decision,
-        reviewOpinion: parsedReview.opinion ?? "",
+        decision: parsedDecision.decision,
+        decisionNote: parsedDecision.opinion ?? "",
         rawResponse: response.finalMessage,
         senderDisplayName: this.resolveMessageSenderDisplayName(state, runtimeAgentId),
       };
       this.store.insertMessage(cwd, taskMessage);
 
       const actionRequiredTargets =
-        parsedReview.decision === "continue"
+        parsedDecision.decision === "continue"
           ? this.getOutgoingEdges(topology, runtimeAgentId, "continue")
           : [];
-      const agentStatus = resolveAgentStatusFromReview({
-        reviewDecision: parsedReview.decision,
-        reviewAgent,
+      const agentStatus = resolveAgentStatusFromDecision({
+        decision: parsedDecision.decision,
+        decisionAgent,
       });
       this.store.updateTaskAgentStatus(task.cwd, task.id, runtimeAgentId, agentStatus);
-      if (parsedReview.decision === "continue" && actionRequiredTargets.length > 0) {
+      if (parsedDecision.decision === "continue" && actionRequiredTargets.length > 0) {
         this.updateTaskStatusIfActive(
           task.cwd,
           task.id,
@@ -1700,17 +1746,17 @@ export class Orchestrator {
       return {
         agentId: runtimeAgentId,
         status: "completed",
-        reviewAgent,
-        reviewDecision: parsedReview.decision,
+        decisionAgent,
+        decision: parsedDecision.decision,
         agentStatus,
         agentContextContent,
-        opinion: parsedReview.opinion,
+        opinion: parsedDecision.opinion,
         allowDirectFallbackWhenNoBatch: prompt.allowDirectFallbackWhenNoBatch ?? false,
         signalDone: signal.done,
       };
     } catch (error) {
       const topology = this.store.getTopology(cwd);
-      const reviewAgent = resolveExecutionReviewAgent({
+      const decisionAgent = resolveExecutionDecisionAgent({
         state,
         topology,
         runtimeAgentId,
@@ -1751,7 +1797,8 @@ export class Orchestrator {
       return {
         agentId: runtimeAgentId,
         status: "failed",
-        reviewAgent,
+        decisionAgent,
+        decision: "invalid",
         agentStatus: "failed",
         agentContextContent: "",
         opinion: null,

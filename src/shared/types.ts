@@ -12,7 +12,7 @@ export type TaskStatus =
   | "failed"
   | "continue";
 
-export type ReviewDecision = "complete" | "continue";
+export type Decision = "complete" | "continue" | "invalid";
 
 export type PermissionMode = "allow" | "ask" | "deny";
 
@@ -241,8 +241,8 @@ export interface TaskCreatedMessageRecord extends BaseMessageRecord {
 
 export interface AgentFinalMessageRecord extends BaseMessageRecord {
   kind: "agent-final";
-  reviewDecision: ReviewDecision;
-  reviewOpinion: string;
+  decision: Decision;
+  decisionNote: string;
   rawResponse: string;
   status: "completed" | "error";
   senderDisplayName?: string;
@@ -443,11 +443,11 @@ export function getTopologyEdgeId(edge: Pick<TopologyEdge, "source" | "target" |
   return `${edge.source}__${edge.target}__${normalizeTopologyEdgeTrigger(edge.triggerOn)}`;
 }
 
-export function isReviewAgentInTopology(
+export function isDecisionAgentInTopology(
   topology: Pick<TopologyRecord, "edges"> & Partial<Pick<TopologyRecord, "langgraph">>,
   agentId: string,
 ): boolean {
-  const hasReviewEdge = topology.edges.some(
+  const hasDecisionEdge = topology.edges.some(
     (edge) =>
       edge.source === agentId &&
       (() => {
@@ -455,7 +455,7 @@ export function isReviewAgentInTopology(
         return triggerOn === "complete" || triggerOn === "continue";
       })(),
   );
-  if (hasReviewEdge) {
+  if (hasDecisionEdge) {
     return true;
   }
 

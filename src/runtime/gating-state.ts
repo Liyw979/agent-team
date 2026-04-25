@@ -15,7 +15,7 @@ export interface GraphActionRequiredRequest {
 
 export interface GatingSourceRevisionState {
   currentRevision: number;
-  reviewerPassRevision: Map<string, number>;
+  decisionPassRevision: Map<string, number>;
 }
 
 export interface GatingHandoffDispatchBatchState {
@@ -41,7 +41,7 @@ export interface GatingSchedulerRuntimeState {
 
 export interface GraphSourceRevisionState {
   currentRevision: number;
-  reviewerPassRevision: Record<string, number>;
+  decisionPassRevision: Record<string, number>;
 }
 
 export interface GraphHandoffBatchState {
@@ -178,7 +178,7 @@ export function cloneGraphTaskState(state: GraphTaskState): GraphTaskState {
         agentId,
         {
           currentRevision: revisionState.currentRevision,
-          reviewerPassRevision: { ...revisionState.reviewerPassRevision },
+          decisionPassRevision: { ...revisionState.decisionPassRevision },
         },
       ]),
     ),
@@ -229,7 +229,7 @@ export function graphStateToSchedulerRuntime(state: GraphTaskState): GatingSched
         agentId,
         {
           currentRevision: revisionState.currentRevision,
-          reviewerPassRevision: new Map(Object.entries(revisionState.reviewerPassRevision)),
+          decisionPassRevision: new Map(Object.entries(revisionState.decisionPassRevision)),
         } satisfies GatingSourceRevisionState,
       ]),
     ),
@@ -265,7 +265,7 @@ export function applySchedulerRuntimeToGraphState(
       agentId,
       {
         currentRevision: revisionState.currentRevision,
-        reviewerPassRevision: Object.fromEntries(revisionState.reviewerPassRevision.entries()),
+        decisionPassRevision: Object.fromEntries(revisionState.decisionPassRevision.entries()),
       },
     ]),
   );

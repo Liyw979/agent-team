@@ -8,7 +8,7 @@ function createHistoryItem(index: number): AgentHistoryItem {
   return {
     id: `history-${index}`,
     label: index === 0 ? "思考" : "工具",
-    previewDetail: index === 0 ? "Prioritizing instructions" : `tool-${index}`,
+    detailSnippet: index === 0 ? "Prioritizing instructions" : `tool-${index}`,
     detail: index === 0 ? "Prioritizing instructions" : `tool-${index}`,
     timestamp: `2026-04-24T00:00:${String(index).padStart(2, "0")}.000Z`,
     sortTimestamp: `2026-04-24T00:00:${String(index).padStart(2, "0")}.000Z`,

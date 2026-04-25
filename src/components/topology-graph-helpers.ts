@@ -1,5 +1,5 @@
 import {
-  isReviewAgentInTopology,
+  isDecisionAgentInTopology,
   isTaskCompletedMessageRecord,
   type MessageRecord,
   type TopologyEdge,
@@ -26,30 +26,30 @@ export function getTopologyAgentStatusBadgePresentation(
   agentId: string,
   agentState: string,
   options?: {
-    finalLoopReviewerName?: string | null;
+    finalLoopDecisionAgentName?: string | null;
   },
 ): TopologyAgentStatusBadgePresentation {
-  const reviewAgent = isReviewAgentInTopology(topology, agentId);
-  const isFinalLoopFailedReviewer =
-    reviewAgent
+  const decisionAgent = isDecisionAgentInTopology(topology, agentId);
+  const isFinalLoopFailedDecisionAgent =
+    decisionAgent
     && agentState === "failed"
-    && options?.finalLoopReviewerName === agentId;
+    && options?.finalLoopDecisionAgentName === agentId;
 
   switch (agentState) {
     case "completed":
       return {
-        label: reviewAgent ? "已完成判定" : "已完成",
+        label: decisionAgent ? "已完成判定" : "已完成",
         icon: "success",
         className: "border border-[#2c4a3f]/18 bg-[#edf5f0] text-[#2c4a3f]",
         effectClassName: "",
       };
     case "failed":
       return {
-        label: reviewAgent
-          ? (isFinalLoopFailedReviewer ? "继续处理，最后一次" : "继续处理")
+        label: decisionAgent
+          ? (isFinalLoopFailedDecisionAgent ? "继续处理，最后一次" : "继续处理")
           : "执行失败",
-        icon: reviewAgent ? "continue" : "failed",
-        className: reviewAgent
+        icon: decisionAgent ? "continue" : "failed",
+        className: decisionAgent
           ? "border border-[#d6a14a]/55 bg-[#fff7e8] text-[#8a5a12]"
           : "border border-[#d66b63]/45 bg-[#fff1ef] text-[#a33f38]",
         effectClassName: "",
@@ -87,7 +87,7 @@ export function getTopologyAgentStatusLabel(
   return getTopologyAgentStatusBadgePresentation(topology, agentId, agentState).label;
 }
 
-export function getTopologyLoopLimitFailedReviewerName(
+export function getTopologyLoopLimitFailedDecisionAgentName(
   messages: MessageRecord[],
 ): string | null {
   const failedCompletionMessage = [...messages]
@@ -95,8 +95,8 @@ export function getTopologyLoopLimitFailedReviewerName(
     .find((message) => isTaskCompletedMessageRecord(message) && message.status === "failed");
   const content = failedCompletionMessage?.content?.trim() ?? "";
   const match = /^(.*?)\s*->\s*.*已连续交流\s+\d+\s+次，任务已结束$/u.exec(content);
-  const reviewerName = match?.[1]?.trim() ?? "";
-  return reviewerName || null;
+  const decisionAgentName = match?.[1]?.trim() ?? "";
+  return decisionAgentName || null;
 }
 
 export function getTopologyEdgeTriggerAppearance(triggerOn: TopologyEdge["triggerOn"]) {

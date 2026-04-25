@@ -208,7 +208,7 @@ function resolveAgentStatusFromFinalMessage(
   if (!isAgentFinalMessageRecord(message)) {
     return "completed";
   }
-  if (message.reviewDecision === "continue") {
+  if (message.decision === "continue") {
     return "continue";
   }
   if (message.status === "error") {

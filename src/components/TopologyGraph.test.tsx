@@ -23,7 +23,7 @@ test("点击拓扑里的单条历史消息后，会弹出完整内容弹窗", ()
   assert.match(TOPOLOGY_GRAPH_SOURCE, /event\.stopPropagation\(\);[\s\S]*setSelectedHistoryItem\(/);
   assert.match(TOPOLOGY_GRAPH_SOURCE, /role="dialog"/);
   assert.match(TOPOLOGY_GRAPH_SOURCE, /<AgentHistoryMarkdown[\s\S]*content=\{selectedHistoryItem\.item\.detail\}/);
-  assert.match(TOPOLOGY_GRAPH_SOURCE, /<AgentHistoryMarkdown[\s\S]*content=\{item\.previewDetail\}/);
+  assert.match(TOPOLOGY_GRAPH_SOURCE, /<AgentHistoryMarkdown[\s\S]*content=\{item\.detailSnippet\}/);
   assert.match(
     TOPOLOGY_GRAPH_SOURCE,
     /<article[\s\S]*className=\{`\$\{getTopologyHistoryItemButtonClassName\(\)\} \$\{getHistoryItemClassName\(item\)\}`\}/,

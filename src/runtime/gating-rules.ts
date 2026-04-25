@@ -1,23 +1,23 @@
-import type { AgentStatus, ReviewDecision } from "@shared/types";
+import type { AgentStatus, Decision } from "@shared/types";
 
 type ActionRequiredRequestContinuationInput = {
   continuation: {
     pendingTargets: string[];
-    repairReviewerAgentId: string | null;
+    repairDecisionAgentId: string | null;
     redispatchTargets: string[];
   } | null;
   fallbackActionWhenNoBatch?: Extract<
     ActionRequiredRequestContinuationAction,
-    "ignore" | "trigger_fallback_review"
+    "ignore" | "trigger_fallback_decision"
   >;
 };
 
 type ActionRequiredRequestContinuationAction =
   | "ignore"
-  | "wait_pending_reviewers"
-  | "trigger_repair_review"
-  | "redispatch_reviewers"
-  | "trigger_fallback_review";
+  | "wait_pending_decision_agents"
+  | "trigger_repair_decision"
+  | "redispatch_decision_agents"
+  | "trigger_fallback_decision";
 
 export function shouldStopTaskForUnhandledActionRequiredRequest(input: {
   completeTaskOnFinish: boolean;
@@ -30,12 +30,16 @@ export function shouldStopTaskForUnhandledActionRequiredRequest(input: {
   return input.continuationAction === "ignore";
 }
 
-export function resolveAgentStatusFromReview(input: {
-  reviewDecision: ReviewDecision;
-  reviewAgent: boolean;
+export function resolveAgentStatusFromDecision(input: {
+  decision: Decision;
+  decisionAgent: boolean;
 }): AgentStatus {
-  if (input.reviewDecision === "continue") {
-    return input.reviewAgent ? "continue" : "failed";
+  if (input.decision === "invalid") {
+    return "failed";
+  }
+
+  if (input.decision === "continue") {
+    return input.decisionAgent ? "continue" : "failed";
   }
 
   return "completed";
@@ -49,15 +53,15 @@ export function resolveActionRequiredRequestContinuationAction(
   }
 
   if (input.continuation.pendingTargets.length > 0) {
-    return "wait_pending_reviewers";
+    return "wait_pending_decision_agents";
   }
 
-  if (input.continuation.repairReviewerAgentId) {
-    return "trigger_repair_review";
+  if (input.continuation.repairDecisionAgentId) {
+    return "trigger_repair_decision";
   }
 
   if (input.continuation.redispatchTargets.length > 0) {
-    return "redispatch_reviewers";
+    return "redispatch_decision_agents";
   }
 
   return "ignore";

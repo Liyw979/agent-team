@@ -1,25 +1,25 @@
-export const REVIEW_CONTINUE_LABEL = "<continue>";
-export const REVIEW_CONTINUE_END_LABEL = "</continue>";
-export const REVIEW_COMPLETE_LABEL = "<complete>";
-export const REVIEW_COMPLETE_END_LABEL = "</complete>";
+export const DECISION_CONTINUE_LABEL = "<continue>";
+export const DECISION_CONTINUE_END_LABEL = "</continue>";
+export const DECISION_COMPLETE_LABEL = "<complete>";
+export const DECISION_COMPLETE_END_LABEL = "</complete>";
 
-type ReviewSignalKind = "continue" | "complete";
+type DecisionSignalKind = "continue" | "complete";
 
-const REVIEW_SIGNAL_TAG_PATTERN = /<\/?(?:continue|complete)>/gu;
+const DECISION_SIGNAL_TAG_PATTERN = /<\/?(?:continue|complete)>/gu;
 
-export function stripLeadingReviewResponseLabel(content: string): string {
-  return content.replace(REVIEW_SIGNAL_TAG_PATTERN, "").trim();
+export function stripLeadingDecisionResponseLabel(content: string): string {
+  return content.replace(DECISION_SIGNAL_TAG_PATTERN, "").trim();
 }
 
-export function extractLastReviewResponse(content: string): string {
-  return extractTrailingReviewSignalBlock(content)?.response ?? "";
+export function extractLastDecisionResponse(content: string): string {
+  return extractTrailingDecisionSignalBlock(content)?.response ?? "";
 }
 
-export function extractTrailingReviewSignalBlock(content: string): {
+export function extractTrailingDecisionSignalBlock(content: string): {
   body: string;
   response: string;
   rawBlock: string;
-  kind: ReviewSignalKind;
+  kind: DecisionSignalKind;
 } | null {
   const trimmed = content.trim();
   const pattern = /<(continue|complete)>([\s\S]*?)<\/\1>/gu;
@@ -47,8 +47,8 @@ export function extractTrailingReviewSignalBlock(content: string): {
 
   const leadingStart = findLeadingSignalStart(trimmed);
   if (leadingStart) {
-    const response = stripTrailingBareReviewSignal(
-      stripLeadingReviewResponseLabel(trimmed),
+    const response = stripTrailingBareDecisionSignal(
+      stripLeadingDecisionResponseLabel(trimmed),
       leadingStart.kind,
     );
     if (response) {
@@ -67,10 +67,10 @@ export function extractTrailingReviewSignalBlock(content: string): {
   }
 
   const rawBlock = trimmed.slice(trailingStart.index).trim();
-  const response = stripLeadingReviewResponseLabel(rawBlock);
+  const response = stripLeadingDecisionResponseLabel(rawBlock);
   if (!response) {
     const body = trimmed.slice(0, trailingStart.index).trim();
-    if (body && isBareReviewSignal(rawBlock, trailingStart.kind)) {
+    if (body && isBareDecisionSignal(rawBlock, trailingStart.kind)) {
       return {
         body,
         response: body,
@@ -89,15 +89,15 @@ export function extractTrailingReviewSignalBlock(content: string): {
   };
 }
 
-export function stripReviewResponseMarkup(content: string): string {
+export function stripDecisionResponseMarkup(content: string): string {
   const trimmed = content.trim();
   if (!trimmed) {
     return "";
   }
 
-  const parsed = extractTrailingReviewSignalBlock(trimmed);
+  const parsed = extractTrailingDecisionSignalBlock(trimmed);
   if (!parsed) {
-    return stripLeadingReviewResponseLabel(trimmed);
+    return stripLeadingDecisionResponseLabel(trimmed);
   }
 
   const normalizedBody = parsed.body.replace(/\s+/g, " ").trim();
@@ -109,12 +109,12 @@ export function stripReviewResponseMarkup(content: string): string {
   return [parsed.body, parsed.response].filter(Boolean).join("\n\n").trim();
 }
 
-function findLastSignalStart(content: string): { index: number; kind: ReviewSignalKind } | null {
-  let last: { index: number; kind: ReviewSignalKind } | null = null;
+function findLastSignalStart(content: string): { index: number; kind: DecisionSignalKind } | null {
+  let last: { index: number; kind: DecisionSignalKind } | null = null;
 
-  const tokens: Array<{ kind: ReviewSignalKind; start: string }> = [
-    { kind: "continue", start: REVIEW_CONTINUE_LABEL },
-    { kind: "complete", start: REVIEW_COMPLETE_LABEL },
+  const tokens: Array<{ kind: DecisionSignalKind; start: string }> = [
+    { kind: "continue", start: DECISION_CONTINUE_LABEL },
+    { kind: "complete", start: DECISION_COMPLETE_LABEL },
   ];
 
   for (const token of tokens) {
@@ -130,23 +130,23 @@ function findLastSignalStart(content: string): { index: number; kind: ReviewSign
   return last;
 }
 
-function findLeadingSignalStart(content: string): { kind: ReviewSignalKind } | null {
-  if (content.startsWith(REVIEW_CONTINUE_LABEL)) {
+function findLeadingSignalStart(content: string): { kind: DecisionSignalKind } | null {
+  if (content.startsWith(DECISION_CONTINUE_LABEL)) {
     return { kind: "continue" };
   }
-  if (content.startsWith(REVIEW_COMPLETE_LABEL)) {
+  if (content.startsWith(DECISION_COMPLETE_LABEL)) {
     return { kind: "complete" };
   }
   return null;
 }
 
-function isBareReviewSignal(rawBlock: string, kind: ReviewSignalKind): boolean {
-  return rawBlock === (kind === "continue" ? REVIEW_CONTINUE_LABEL : REVIEW_COMPLETE_LABEL);
+function isBareDecisionSignal(rawBlock: string, kind: DecisionSignalKind): boolean {
+  return rawBlock === (kind === "continue" ? DECISION_CONTINUE_LABEL : DECISION_COMPLETE_LABEL);
 }
 
-function stripTrailingBareReviewSignal(content: string, kind: ReviewSignalKind): string {
+function stripTrailingBareDecisionSignal(content: string, kind: DecisionSignalKind): string {
   let normalized = content.trim();
-  const label = kind === "continue" ? REVIEW_CONTINUE_LABEL : REVIEW_COMPLETE_LABEL;
+  const label = kind === "continue" ? DECISION_CONTINUE_LABEL : DECISION_COMPLETE_LABEL;
 
   while (normalized.endsWith(label)) {
     const next = normalized.slice(0, -label.length).trimEnd();

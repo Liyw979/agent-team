@@ -1,4 +1,4 @@
-export function buildAgentPromptPreviewText(input: {
+export function buildAgentPromptSnippetText(input: {
   agentId: string;
   prompt: string;
 }): string {

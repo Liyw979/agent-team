@@ -7,12 +7,12 @@ test("buildAgentPromptDialogState 会为普通 agent 返回 prompt 详情", () =
   assert.deepEqual(
     buildAgentPromptDialogState({
       agentId: "CodeReview",
-      prompt: "你负责审查代码改动。",
+      prompt: "你负责判定代码改动。",
     }),
     {
       agentId: "CodeReview",
       promptSourceLabel: "System Prompt",
-      content: "你负责审查代码改动。",
+      content: "你负责判定代码改动。",
     },
   );
 });

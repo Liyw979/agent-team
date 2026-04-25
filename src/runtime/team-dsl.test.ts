@@ -262,13 +262,13 @@ test("compileTeamDsl 支持在拓扑文件里直接连接 __end__", () => {
       spawnNode(
         "Debate",
         {
-          entry: "Reviewer",
+          entry: "DecisionAgent",
           nodes: [
-            agentNode("Reviewer", "你是 reviewer。", false),
+            agentNode("DecisionAgent", "你是 decisionAgent。", false),
             agentNode("Summary", "你是 summary。", false),
           ],
           links: [
-            link("Reviewer", "Summary", "complete", "last"),
+            link("DecisionAgent", "Summary", "complete", "last"),
           ],
         },
       ),
@@ -406,12 +406,12 @@ test("compileTeamDsl 会拒绝在 spawn 子图里直接连接 __end__", () => {
           spawnNode(
             "Debate",
             {
-              entry: "Reviewer",
+              entry: "DecisionAgent",
               nodes: [
-                agentNode("Reviewer", "你是 reviewer。", false),
+                agentNode("DecisionAgent", "你是 decisionAgent。", false),
               ],
               links: [
-                endLink("Reviewer", "complete", "none"),
+                endLink("DecisionAgent", "complete", "none"),
               ],
             },
           ),

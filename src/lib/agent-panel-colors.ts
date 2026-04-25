@@ -4,23 +4,23 @@ interface AgentPanelColorToken {
 }
 
 const AGENT_PANEL_COLOR_TOKENS: Record<string, AgentPanelColorToken> = {
-  ba: {
+  BA: {
     background: "#F4EED4",
     border: "#B8A64B",
   },
-  build: {
+  Build: {
     background: "#DDD7EE",
     border: "#B7AFE8",
   },
-  codereview: {
+  CodeReview: {
     background: "#F4E0D4",
     border: "#E4B18F",
   },
-  unittest: {
+  UnitTest: {
     background: "#DCDDFA",
     border: "#AEB7F2",
   },
-  taskreview: {
+  TaskReview: {
     background: "#F4E0D4",
     border: "#E4B18F",
   },
@@ -41,17 +41,16 @@ const FALLBACK_AGENT_PANEL_COLOR_TOKENS: AgentPanelColorToken[] = [
   },
 ];
 
-function normalizeAgentId(agentId: string) {
+function buildFallbackAgentKey(agentId: string) {
   return agentId.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 function hashAgentId(agentId: string) {
-  return [...normalizeAgentId(agentId)].reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  return [...buildFallbackAgentKey(agentId)].reduce((acc, char) => acc + char.charCodeAt(0), 0);
 }
 
 export function getAgentPanelColorToken(agentId: string): AgentPanelColorToken {
-  const normalized = normalizeAgentId(agentId);
-  const matched = AGENT_PANEL_COLOR_TOKENS[normalized];
+  const matched = AGENT_PANEL_COLOR_TOKENS[agentId.trim()];
   if (matched) {
     return matched;
   }

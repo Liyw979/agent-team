@@ -4,14 +4,14 @@ import type {
   MessageRecord,
   TopologyRecord,
 } from "@shared/types";
-import { isAgentFinalMessageRecord, isReviewAgentInTopology } from "@shared/types";
-import { stripReviewResponseMarkup } from "@shared/review-response";
-import { getLoopLimitFailedReviewerName } from "./review-loop-limit";
+import { isAgentFinalMessageRecord, isDecisionAgentInTopology } from "@shared/types";
+import { stripDecisionResponseMarkup } from "@shared/decision-response";
+import { getLoopLimitFailedDecisionAgentName } from "./decision-loop-limit";
 
 export interface AgentHistoryItem {
   id: string;
   label: string;
-  previewDetail: string;
+  detailSnippet: string;
   detail: string;
   timestamp: string;
   sortTimestamp: string;
@@ -25,14 +25,14 @@ export interface AgentHistoryItem {
 }
 
 function normalizeHistoryDetail(content: string | null | undefined) {
-  const normalized = stripReviewResponseMarkup(content ?? "")
+  const normalized = stripDecisionResponseMarkup(content ?? "")
     .replace(/\r\n?/gu, "\n")
     .replace(/[ \t]+\n/gu, "\n")
     .trim();
   return normalized || "暂无详细记录";
 }
 
-function buildHistoryPreviewDetail(detail: string) {
+function buildHistoryDetailSnippet(detail: string) {
   const normalized = detail
     .replace(/\n\s*\n+/gu, "\n")
     .trim();
@@ -60,10 +60,10 @@ function getRuntimeItemPresentation(kind: AgentRuntimeSnapshot["activities"][num
 }
 
 function getFinalItemPresentation(input: {
-  reviewAgent: boolean;
+  decisionAgent: boolean;
   status: string;
 }) {
-  if (input.status === "final_failed_review") {
+  if (input.status === "final_failed_decision") {
     return {
       label: "继续处理，最后一次",
       tone: "failure" as const,
@@ -79,13 +79,13 @@ function getFinalItemPresentation(input: {
 
   if (input.status === "failed") {
     return {
-      label: input.reviewAgent ? "继续处理" : "执行失败",
+      label: input.decisionAgent ? "继续处理" : "执行失败",
       tone: "failure" as const,
     };
   }
 
   return {
-    label: input.reviewAgent ? "已完成判定" : "已完成",
+    label: input.decisionAgent ? "已完成判定" : "已完成",
     tone: "success" as const,
   };
 }
@@ -95,8 +95,8 @@ function buildFinalHistoryItems(input: {
   messages: MessageRecord[];
   topology: Pick<TopologyRecord, "edges">;
 }) {
-  const reviewAgent = isReviewAgentInTopology(input.topology, input.agentId);
-  const finalLoopReviewerName = getLoopLimitFailedReviewerName(input.messages);
+  const decisionAgent = isDecisionAgentInTopology(input.topology, input.agentId);
+  const finalLoopDecisionAgentName = getLoopLimitFailedDecisionAgentName(input.messages);
 
   return input.messages
     .filter(
@@ -105,13 +105,13 @@ function buildFinalHistoryItems(input: {
     )
     .map((message) => {
       const status =
-        message.reviewDecision === "continue"
+        message.decision === "continue"
           ? "continue"
-          : reviewAgent && message.status === "error" && finalLoopReviewerName === input.agentId
-            ? "final_failed_review"
+          : decisionAgent && message.status === "error" && finalLoopDecisionAgentName === input.agentId
+            ? "final_failed_decision"
             : message.status;
       const presentation = getFinalItemPresentation({
-        reviewAgent,
+        decisionAgent,
         status,
       });
       const detail = normalizeHistoryDetail(message.content);
@@ -119,7 +119,7 @@ function buildFinalHistoryItems(input: {
       return {
         id: message.id,
         label: presentation.label,
-        previewDetail: buildHistoryPreviewDetail(detail),
+        detailSnippet: buildHistoryDetailSnippet(detail),
         detail,
         timestamp: message.timestamp,
         sortTimestamp: `${message.timestamp}#z-final`,
@@ -153,7 +153,7 @@ function buildRuntimeHistoryItems(input: {
     const runtimeItem = {
       id: `${input.agentId}-runtime-${activity.id}-${index}`,
       label: presentation.label,
-      previewDetail: buildHistoryPreviewDetail(detail),
+      detailSnippet: buildHistoryDetailSnippet(detail),
       detail,
       timestamp: activity.timestamp,
       sortTimestamp: `${activity.timestamp}#a-runtime-${String(index).padStart(6, "0")}`,

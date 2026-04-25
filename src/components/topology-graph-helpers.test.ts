@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   getTopologyAgentStatusBadgePresentation,
-  getTopologyLoopLimitFailedReviewerName,
+  getTopologyLoopLimitFailedDecisionAgentName,
   getTopologyNodeHeaderActionOrder,
 } from "./topology-graph-helpers";
 import type { MessageRecord } from "@shared/types";
@@ -66,7 +66,7 @@ test("getTopologyAgentStatusBadgePresentation 会把普通 agent 状态映射为
   );
 });
 
-test("getTopologyAgentStatusBadgePresentation 会把审查 agent 映射为 continue/complete 语义对应的状态徽标", () => {
+test("getTopologyAgentStatusBadgePresentation 会把判定 agent 映射为 continue/complete 语义对应的状态徽标", () => {
   const topology = {
     edges: [
       {
@@ -100,7 +100,7 @@ test("getTopologyAgentStatusBadgePresentation 会把审查 agent 映射为 conti
 
   assert.deepEqual(
     getTopologyAgentStatusBadgePresentation(topology, "CodeReview", "failed", {
-      finalLoopReviewerName: "CodeReview",
+      finalLoopDecisionAgentName: "CodeReview",
     }),
     {
       label: "继续处理，最后一次",
@@ -111,9 +111,9 @@ test("getTopologyAgentStatusBadgePresentation 会把审查 agent 映射为 conti
   );
 });
 
-test("getTopologyLoopLimitFailedReviewerName 会从任务失败原因里识别超限 reviewer", () => {
+test("getTopologyLoopLimitFailedDecisionAgentName 会从任务失败原因里识别超限 decisionAgent", () => {
   assert.equal(
-    getTopologyLoopLimitFailedReviewerName([
+    getTopologyLoopLimitFailedDecisionAgentName([
       createTaskCompletedMessage({
         id: "completion-1",
         content: "UnitTest -> Build 已连续交流 4 次，任务已结束",
@@ -124,7 +124,7 @@ test("getTopologyLoopLimitFailedReviewerName 会从任务失败原因里识别�
   );
 
   assert.equal(
-    getTopologyLoopLimitFailedReviewerName([
+    getTopologyLoopLimitFailedDecisionAgentName([
       createTaskRoundFinishedMessage({
         id: "completion-2",
         content: "本轮已完成，可继续 @Agent 发起下一轮。",

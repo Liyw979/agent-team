@@ -29,9 +29,9 @@ test("App 保留聊天输入，但团队面板不再提供 attach 按钮", () =>
 });
 
 test("团队成员卡片里的 prompt 会按可用高度自动计算摘要行数，悬停时展示完整 prompt", () => {
-  assert.match(APP_SOURCE, /buildAgentPromptPreviewText/);
-  assert.match(APP_SOURCE, /title=\{agent\.promptPreview\}/);
-  assert.match(APP_SOURCE, /agent\.promptPreview\.replace\(\/\\s\+\/gu, ""\)/);
+  assert.match(APP_SOURCE, /buildAgentPromptSnippetText/);
+  assert.match(APP_SOURCE, /title=\{agent\.promptSnippet\}/);
+  assert.match(APP_SOURCE, /agent\.promptSnippet\.replace\(\/\\s\+\/gu, ""\)/);
   assert.match(APP_SOURCE, /calculateAgentCardPanelLayout/);
   assert.match(APP_SOURCE, /WebkitLineClamp: promptLineCount/);
   assert.match(APP_SOURCE, /color: color\.mutedText/);

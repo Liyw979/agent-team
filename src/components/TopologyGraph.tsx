@@ -18,7 +18,7 @@ import { PANEL_HEADER_ACTION_BUTTON_CLASS } from "@/lib/panel-header-action-butt
 import { getPanelFullscreenButtonCopy } from "@/lib/panel-fullscreen-label";
 import {
   getTopologyAgentStatusBadgePresentation,
-  getTopologyLoopLimitFailedReviewerName,
+  getTopologyLoopLimitFailedDecisionAgentName,
   getTopologyNodeHeaderActionOrder,
   type TopologyAgentStatusBadgePresentation,
 } from "@/components/topology-graph-helpers";
@@ -316,8 +316,8 @@ export function TopologyGraph({
       ]),
     );
   }, [runtimeSnapshots, task, topology, visibleNodeIds]);
-  const finalLoopReviewerName = useMemo(
-    () => (task ? getTopologyLoopLimitFailedReviewerName(task.messages) : null),
+  const finalLoopDecisionAgentName = useMemo(
+    () => (task ? getTopologyLoopLimitFailedDecisionAgentName(task.messages) : null),
     [task],
   );
 
@@ -479,7 +479,7 @@ export function TopologyGraph({
                   ),
                 }),
                 {
-                  finalLoopReviewerName,
+                  finalLoopDecisionAgentName,
                 },
               );
               const showAttachButton = typeof onOpenAgentTerminal === "function";
@@ -606,7 +606,7 @@ export function TopologyGraph({
                                 <span className="text-[11px] opacity-70">{formatHistoryTimestamp(item.timestamp)}</span>
                               </div>
                               <AgentHistoryMarkdown
-                                content={item.previewDetail}
+                                content={item.detailSnippet}
                                 className="mt-1 text-[11px] leading-[1.35] opacity-90 select-text"
                               />
                             </div>

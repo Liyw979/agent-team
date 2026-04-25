@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 
-import type { ReviewDecision, TopologyRecord } from "@shared/types";
+import type { TopologyRecord } from "@shared/types";
 
 import {
   applyAgentResultToGraphState,
   createGraphTaskState,
   createUserDispatchDecision,
-  type GraphCompletedAgentResult,
+  type GraphAgentResult,
   type GraphRoutingDecision,
 } from "./gating-router";
 import { buildEffectiveTopology } from "./runtime-topology-graph";
-import { resolveExecutionReviewAgent } from "./review-agent-context";
+import { resolveExecutionDecisionAgent } from "./decision-agent-context";
 import {
   extractLeadingMention,
   formatSchedulerScriptMessageLine,
@@ -136,7 +136,7 @@ export function buildUnexpectedScriptEndMessage(input: {
     return `脚本提前结束，当前还缺少 ${formatTargetList(getScriptVisibleDecisionTargets(input.state, input.decision))} 这批调度断言，调度状态为 ${describeDecision(input.decision)}`;
   }
 
-  if (isPendingReviewerFinishedDecision(input.decision)) {
+  if (isPendingDecisionAgentFinishedDecision(input.decision)) {
     const pendingTargets = getAllowedPendingSendersFromFinishedDecision(input.state, input.decision);
     if (pendingTargets.length > 0) {
       return `脚本提前结束，当前仍在等待 ${formatTargetList(pendingTargets)}，调度状态为 ${describeDecision(input.decision)}`;
@@ -171,7 +171,7 @@ export function canScriptEndAfterLastLine(input: {
   }
 
   return !(
-    isPendingReviewerFinishedDecision(input.decision)
+    isPendingDecisionAgentFinishedDecision(input.decision)
     && getAllowedPendingSendersFromFinishedDecision(input.state, input.decision).length > 0
   );
 }
@@ -190,7 +190,7 @@ export function shouldRequireSourceDispatchAssertion(input: {
 
 function collectActualTransitionTargets(input: {
   transitions: Array<{
-    reviewDecision: ReviewDecision;
+    decisionValue: GraphAgentResult["decision"];
     state: ReturnType<typeof createGraphTaskState>;
     decision: GraphRoutingDecision;
   }>;
@@ -203,18 +203,18 @@ function collectActualTransitionTargets(input: {
           transition.state,
           transition.decision,
           input.senderId,
-          transition.reviewDecision,
+          transition.decisionValue,
         )
       ),
     ),
   ];
 }
 
-function isPendingReviewerFinishedDecision(
+function isPendingDecisionAgentFinishedDecision(
   decision: GraphRoutingDecision,
 ): decision is Extract<GraphRoutingDecision, { type: "finished" }> {
   return decision.type === "finished"
-    && (decision.finishReason === "wait_pending_reviewers" || decision.finishReason === "no_runnable_agents");
+    && (decision.finishReason === "wait_pending_decision_agents" || decision.finishReason === "no_runnable_agents");
 }
 
 export function getAllowedPendingSendersFromFinishedDecision(
@@ -228,26 +228,26 @@ export function getAllowedPendingSendersFromFinishedDecision(
   ];
 }
 
-export function preferCompleteReviewCandidatesForPendingNextSender<T extends {
-  result: GraphCompletedAgentResult;
+export function preferCompleteDecisionCandidatesForPendingNextSender<T extends {
+  result: GraphAgentResult;
   state: ReturnType<typeof createGraphTaskState>;
   decision: GraphRoutingDecision;
 }>(input: {
   candidates: T[];
   nextSenderId: string;
 }): T[] {
-  const pendingReviewerCandidates = input.candidates.filter((candidate) =>
-    isPendingReviewerFinishedDecision(candidate.decision)
+  const pendingDecisionAgentCandidates = input.candidates.filter((candidate) =>
+    isPendingDecisionAgentFinishedDecision(candidate.decision)
     && getAllowedPendingSendersFromFinishedDecision(candidate.state, candidate.decision).includes(input.nextSenderId)
   );
-  if (pendingReviewerCandidates.length === 0) {
+  if (pendingDecisionAgentCandidates.length === 0) {
     return input.candidates;
   }
 
-  const preferredComplete = pendingReviewerCandidates.filter((candidate) =>
-    candidate.result.reviewDecision === "complete"
+  const preferredComplete = pendingDecisionAgentCandidates.filter((candidate) =>
+    candidate.result.decision === "complete"
   );
-  return preferredComplete.length > 0 ? preferredComplete : pendingReviewerCandidates;
+  return preferredComplete.length > 0 ? preferredComplete : pendingDecisionAgentCandidates;
 }
 
 function createTraceBatchIdFactory() {
@@ -348,7 +348,7 @@ async function runSchedulerScriptInternal(
       && beforeDecision.batch.jobs.some((job) => job.agentId === senderId)
       ? beforeBatchId
       : null;
-    if (consumedBatchId === null && isPendingReviewerFinishedDecision(beforeDecision)) {
+    if (consumedBatchId === null && isPendingDecisionAgentFinishedDecision(beforeDecision)) {
       const matchedSourceIds = Object.values(beforeState.activeHandoffBatchBySource)
         .filter((batch) => batch.pendingTargets.includes(senderId))
         .map((batch) => batch.sourceAgentId);
@@ -431,7 +431,7 @@ async function runSchedulerScriptInternal(
     );
 
     const nextLine = lines[index + 1] ?? null;
-    const reviewResolution = applyMessageLineAndMatchDecision({
+    const decisionResolution = applyMessageLineAndMatchDecision({
       state,
       line: ensuredLine,
       senderId,
@@ -439,14 +439,14 @@ async function runSchedulerScriptInternal(
       nextLine,
     });
 
-    state = reviewResolution.state;
-    currentDecision = reviewResolution.decision;
+    state = decisionResolution.state;
+    currentDecision = decisionResolution.decision;
     const explicitTargets = ensuredLine.targets.length > 0
       ? resolveActualTransitionTargets(
-        reviewResolution.state,
-        reviewResolution.decision,
+        decisionResolution.state,
+        decisionResolution.decision,
         senderId,
-        reviewResolution.reviewDecision,
+        decisionResolution.decisionValue,
       )
       : [];
     const afterBatchId = resolveBatchId(currentDecision);
@@ -797,7 +797,7 @@ function assertSenderAllowed(
     return;
   }
 
-  if (isPendingReviewerFinishedDecision(decision)) {
+  if (isPendingDecisionAgentFinishedDecision(decision)) {
     const pendingTargets = getAllowedPendingSendersFromFinishedDecision(state, decision);
     assert.ok(
       pendingTargets.includes(senderId),
@@ -866,37 +866,37 @@ function applyMessageLineAndMatchDecision(input: {
 }): {
   state: ReturnType<typeof createGraphTaskState>;
   decision: GraphRoutingDecision;
-  reviewDecision: ReviewDecision;
+  decisionValue: GraphAgentResult["decision"];
 } {
   const executableAgentId = input.senderId;
-  const reviewAgent = resolveExecutionReviewAgent({
+  const decisionAgent = resolveExecutionDecisionAgent({
     state: input.state,
     topology: input.topology,
     runtimeAgentId: input.senderId,
     executableAgentId,
   });
 
-  const candidateDecisions = reviewAgent ? (["continue", "complete"] as const) : (["complete"] as const);
+  const candidateDecisions = decisionAgent ? (["continue", "complete"] as const) : (["complete"] as const);
   const matchedCandidates: Array<{
-    result: GraphCompletedAgentResult;
+    result: GraphAgentResult;
     state: ReturnType<typeof createGraphTaskState>;
     decision: GraphRoutingDecision;
   }> = [];
   const attemptedTransitions: Array<{
-    reviewDecision: ReviewDecision;
+    decisionValue: GraphAgentResult["decision"];
     state: ReturnType<typeof createGraphTaskState>;
     decision: GraphRoutingDecision;
   }> = [];
   const attemptedDecisions: string[] = [];
 
-  for (const reviewDecision of candidateDecisions) {
-    const result: GraphCompletedAgentResult = {
+  for (const decision of candidateDecisions) {
+    const result: GraphAgentResult = {
       agentId: input.senderId,
       status: "completed",
-      reviewAgent,
-      reviewDecision,
+      decisionAgent,
+      decision,
       // 在顺序脚本 DSL 里，每一条 agent 发言都代表“一次已完成的回复”，
-      // 路由是否继续由 reviewDecision 决定，不再把 agentStatus 继续保留成 continue，
+      // 路由是否继续由 decision 决定，不再把 agentStatus 继续保留成 continue，
       // 否则已完成的旧 spawn runtime 会在后续 finding 中再次混入目标集合。
       agentStatus: "completed",
       agentContextContent: input.line.body,
@@ -906,21 +906,21 @@ function applyMessageLineAndMatchDecision(input: {
     };
     const reduced = applyAgentResultToGraphState(input.state, result);
     attemptedTransitions.push({
-      reviewDecision,
+      decisionValue: decision,
       state: reduced.state,
       decision: reduced.decision,
     });
     attemptedDecisions.push(
-      `${reviewDecision}:${describeDecisionWithVisibleTargets(reduced.state, reduced.decision)}`,
+      `${decision}:${describeDecisionWithVisibleTargets(reduced.state, reduced.decision)}`,
     );
     if (!matchesExpectedTransition({
       line: input.line,
       nextLine: input.nextLine,
       state: reduced.state,
-      decision: reduced.decision,
+      routingDecision: reduced.decision,
       senderId: input.senderId,
-      reviewDecision,
-      reviewAgent,
+      decisionValue: decision,
+      decisionAgent,
     })) {
       continue;
     }
@@ -932,7 +932,7 @@ function applyMessageLineAndMatchDecision(input: {
     });
   }
 
-  const disambiguatedCandidates = disambiguateReviewCandidates({
+  const disambiguatedCandidates = disambiguateDecisionCandidates({
     candidates: matchedCandidates,
     line: input.line,
     state: input.state,
@@ -956,7 +956,7 @@ function applyMessageLineAndMatchDecision(input: {
             transition.state,
             transition.decision,
             input.senderId,
-            transition.reviewDecision,
+            transition.decisionValue,
           ),
           expectedTargets,
         )
@@ -993,7 +993,7 @@ function applyMessageLineAndMatchDecision(input: {
       input.nextLine?.kind === "message"
       && attemptedTransitions.length > 0
       && attemptedTransitions.every((transition) =>
-        transition.decision.type === "finished" && transition.decision.finishReason !== "wait_pending_reviewers"
+        transition.decision.type === "finished" && transition.decision.finishReason !== "wait_pending_decision_agents"
       )
     ) {
       assert.fail(
@@ -1001,26 +1001,26 @@ function applyMessageLineAndMatchDecision(input: {
       );
     }
     assert.fail(
-      `${input.line.raw} 的 review 决策无法唯一推断，匹配数量为 0。实际候选为 [${attemptedDecisions.join("; ")}]`,
+      `${input.line.raw} 的 decision 决策无法唯一推断，匹配数量为 0。实际候选为 [${attemptedDecisions.join("; ")}]`,
     );
   }
 
   assert.equal(
     disambiguatedCandidates.length,
     1,
-    `${input.line.raw} 的 review 决策无法唯一推断。实际候选为 [${attemptedDecisions.join("; ")}]`,
+    `${input.line.raw} 的 decision 决策无法唯一推断。实际候选为 [${attemptedDecisions.join("; ")}]`,
   );
 
   const chosen = disambiguatedCandidates[0]!;
   if (
-    chosen.result.reviewDecision === "continue"
-    && isPendingReviewerFinishedDecision(chosen.decision)
+    chosen.result.decision === "continue"
+    && isPendingDecisionAgentFinishedDecision(chosen.decision)
     && input.line.targets.length === 0
   ) {
-    const deferredTargets = resolveDeferredReviewTargets(
+    const deferredTargets = resolveDeferredDecisionTargets(
       chosen.state,
       input.senderId,
-      chosen.result.reviewDecision,
+      chosen.result.decision,
     );
     if (deferredTargets.length > 0) {
       assert.fail(
@@ -1038,7 +1038,7 @@ function applyMessageLineAndMatchDecision(input: {
     );
     const actualTargets = chosen.decision.type === "execute_batch"
       ? getScriptVisibleDecisionTargets(chosen.state, chosen.decision)
-      : resolveDeferredReviewTargets(chosen.state, input.senderId, chosen.result.reviewDecision);
+      : resolveDeferredDecisionTargets(chosen.state, input.senderId, chosen.result.decision);
     assert.equal(
       arraysEqual(actualTargets, expectedTargets),
       true,
@@ -1054,19 +1054,19 @@ function applyMessageLineAndMatchDecision(input: {
     return {
       state: chosen.state,
       decision: chosen.decision,
-      reviewDecision: chosen.result.reviewDecision,
+      decisionValue: chosen.result.decision,
     };
   }
 
   return {
     state: chosen.state,
     decision: chosen.decision,
-    reviewDecision: chosen.result.reviewDecision,
+    decisionValue: chosen.result.decision,
   };
 }
 
-function disambiguateReviewCandidates<T extends {
-  result: GraphCompletedAgentResult;
+function disambiguateDecisionCandidates<T extends {
+  result: GraphAgentResult;
   state: ReturnType<typeof createGraphTaskState>;
   decision: GraphRoutingDecision;
 }>(input: {
@@ -1091,7 +1091,7 @@ function disambiguateReviewCandidates<T extends {
     if (sourceOnly.length > 0) {
       return sourceOnly;
     }
-    const preferredWaitingCandidates = preferCompleteReviewCandidatesForPendingNextSender({
+    const preferredWaitingCandidates = preferCompleteDecisionCandidatesForPendingNextSender({
       candidates,
       nextSenderId,
     });
@@ -1106,7 +1106,7 @@ function disambiguateReviewCandidates<T extends {
         candidate.state,
         candidate.decision,
         senderId,
-        candidate.result.reviewDecision,
+        candidate.result.decision,
       )
     );
     const firstTargets = actualTargetGroups[0] ?? [];
@@ -1115,7 +1115,7 @@ function disambiguateReviewCandidates<T extends {
     );
     if (sameImmediateTargets) {
       const preferredComplete = candidates.filter((candidate) =>
-        candidate.result.reviewDecision === "complete"
+        candidate.result.decision === "complete"
       );
       if (preferredComplete.length > 0) {
         return preferredComplete;
@@ -1129,7 +1129,7 @@ function disambiguateReviewCandidates<T extends {
   );
   const narrowed = candidates.filter((candidate) =>
     arraysEqual(
-      resolveDeferredReviewTargets(state, senderId, candidate.result.reviewDecision),
+      resolveDeferredDecisionTargets(state, senderId, candidate.result.decision),
       expectedTargets,
     )
   );
@@ -1140,41 +1140,41 @@ export function matchesExpectedTransition(input: {
   line: Extract<ParsedScriptLine, { kind: "message" }>;
   nextLine: ParsedScriptLine | null;
   state: ReturnType<typeof createGraphTaskState>;
-  decision: GraphRoutingDecision;
+  routingDecision: GraphRoutingDecision;
   senderId: string;
-  reviewDecision: ReviewDecision;
-  reviewAgent: boolean;
+  decisionValue: GraphAgentResult["decision"];
+  decisionAgent: boolean;
 }): boolean {
-  const deferredReviewTargets = resolveDeferredReviewTargets(
+  const deferredDecisionTargets = resolveDeferredDecisionTargets(
     input.state,
     input.senderId,
-    input.reviewDecision,
+    input.decisionValue,
   );
-  const hasHiddenDecisionTargets = input.decision.type === "execute_batch"
-    && getStrictHiddenDecisionTargets(input.state, input.decision).length > 0;
+  const hasHiddenDecisionTargets = input.routingDecision.type === "execute_batch"
+    && getStrictHiddenDecisionTargets(input.state, input.routingDecision).length > 0;
 
   if (input.line.targets.length > 0) {
     const expectedTargets = input.line.targets.map((target) =>
       resolveScriptTargetNameForComparison(input.state, target)
     );
-    if (input.decision.type === "execute_batch") {
+    if (input.routingDecision.type === "execute_batch") {
       if (hasHiddenDecisionTargets) {
         return false;
       }
-      if (input.decision.batch.sourceAgentId !== input.senderId) {
+      if (input.routingDecision.batch.sourceAgentId !== input.senderId) {
         return false;
       }
-      const actualTargets = getScriptVisibleDecisionTargets(input.state, input.decision);
+      const actualTargets = getScriptVisibleDecisionTargets(input.state, input.routingDecision);
       return arraysEqual(actualTargets, expectedTargets);
     }
-    return isPendingReviewerFinishedDecision(input.decision)
-      && deferredReviewTargets.length > 0
-      && arraysEqual(expectedTargets, deferredReviewTargets);
+    return isPendingDecisionAgentFinishedDecision(input.routingDecision)
+      && deferredDecisionTargets.length > 0
+      && arraysEqual(expectedTargets, deferredDecisionTargets);
   }
 
   if (input.nextLine?.kind === "message") {
     if (isDispatchAssertionLine(input.nextLine)) {
-      if (input.decision.type !== "execute_batch") {
+      if (input.routingDecision.type !== "execute_batch") {
         return false;
       }
       if (hasHiddenDecisionTargets) {
@@ -1184,57 +1184,57 @@ export function matchesExpectedTransition(input: {
         resolveScriptTargetNameForComparison(input.state, target)
       );
       return dispatchAssertionTargetsCovered(
-        getScriptVisibleDecisionTargets(input.state, input.decision),
+        getScriptVisibleDecisionTargets(input.state, input.routingDecision),
         expectedTargets,
       );
     }
-    if (input.reviewAgent && input.decision.type === "execute_batch") {
+    if (input.decisionAgent && input.routingDecision.type === "execute_batch") {
       if (hasHiddenDecisionTargets) {
         return false;
       }
       const nextSenderId = resolveScriptAgentId(input.state, input.nextLine.sender);
       if (shouldRequireSourceDispatchAssertion({
         currentSenderId: input.senderId,
-        decision: input.decision,
+        decision: input.routingDecision,
         nextSenderId,
       })) {
         return false;
       }
-      const actualTargets = getScriptVisibleDecisionTargets(input.state, input.decision);
-      if (input.decision.batch.sourceAgentId === nextSenderId) {
+      const actualTargets = getScriptVisibleDecisionTargets(input.state, input.routingDecision);
+      if (input.routingDecision.batch.sourceAgentId === nextSenderId) {
         return !actualTargets.includes(nextSenderId);
       }
       return actualTargets.includes(nextSenderId);
     }
   }
 
-  if (deferredReviewTargets.length > 0) {
+  if (deferredDecisionTargets.length > 0) {
     return false;
   }
 
   if (input.nextLine?.kind === "state" && input.nextLine.value === "finished") {
-    return input.decision.type === "finished";
+    return input.routingDecision.type === "finished";
   }
 
   if (input.nextLine?.kind === "message") {
     const nextSenderId = resolveScriptAgentId(input.state, input.nextLine.sender);
-    if (isPendingReviewerFinishedDecision(input.decision)) {
-      return getAllowedPendingSendersFromFinishedDecision(input.state, input.decision).includes(nextSenderId);
+    if (isPendingDecisionAgentFinishedDecision(input.routingDecision)) {
+      return getAllowedPendingSendersFromFinishedDecision(input.state, input.routingDecision).includes(nextSenderId);
     }
     if (
-      input.decision.type === "execute_batch"
-      && (input.decision.batch.sourceAgentId !== input.senderId || input.reviewAgent)
+      input.routingDecision.type === "execute_batch"
+      && (input.routingDecision.batch.sourceAgentId !== input.senderId || input.decisionAgent)
     ) {
       if (hasHiddenDecisionTargets) {
         return false;
       }
-      return getScriptVisibleDecisionTargets(input.state, input.decision).includes(nextSenderId);
+      return getScriptVisibleDecisionTargets(input.state, input.routingDecision).includes(nextSenderId);
     }
     return false;
   }
 
   if (input.nextLine === null) {
-    return input.decision.type === "finished";
+    return input.routingDecision.type === "finished";
   }
 
   return false;
@@ -1247,14 +1247,19 @@ function arraysEqual(left: string[], right: string[]): boolean {
   return left.every((item, index) => item === right[index]);
 }
 
-function resolveDeferredReviewTargets(
+function resolveDeferredDecisionTargets(
   state: ReturnType<typeof createGraphTaskState>,
   senderId: string,
-  reviewDecision: ReviewDecision,
+  decision: GraphAgentResult["decision"],
 ): string[] {
-  const triggerOn = reviewDecision === "continue"
+  const triggerOn = decision === "continue"
     ? "continue"
-    : "complete";
+    : decision === "complete"
+      ? "complete"
+      : null;
+  if (!triggerOn) {
+    return [];
+  }
 
   const effectiveTopology = buildEffectiveTopology(state);
   return [...new Set(
@@ -1268,12 +1273,12 @@ function resolveActualTransitionTargets(
   state: ReturnType<typeof createGraphTaskState>,
   decision: GraphRoutingDecision,
   senderId: string,
-  reviewDecision: ReviewDecision,
+  decisionValue: GraphAgentResult["decision"],
 ): string[] {
   if (decision.type === "execute_batch") {
     return getScriptVisibleDecisionTargets(state, decision);
   }
-  return resolveDeferredReviewTargets(state, senderId, reviewDecision);
+  return resolveDeferredDecisionTargets(state, senderId, decisionValue);
 }
 
 function isDirectTransitionFromSender(

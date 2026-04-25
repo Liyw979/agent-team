@@ -5,7 +5,7 @@ import {
   createDefaultTopology,
   getSpawnRules,
   getActionRequiredEdgeLoopLimit,
-  isReviewAgentInTopology,
+  isDecisionAgentInTopology,
   normalizeTopologyEdgeTrigger,
   type TopologyAgentSeed,
   type TopologyRecord,
@@ -66,7 +66,7 @@ test("默认拓扑在缺少 Build 时不会偷偷把首个 Agent 当起点", () 
   });
 });
 
-test("存在 review 出边时 isReviewAgentInTopology 返回 true", () => {
+test("存在 decision 出边时 isDecisionAgentInTopology 返回 true", () => {
   const topology: TopologyRecord = {
     nodes: ["Build", "TaskReview"],
     edges: [
@@ -79,8 +79,8 @@ test("存在 review 出边时 isReviewAgentInTopology 返回 true", () => {
     ],
   };
 
-  assert.equal(isReviewAgentInTopology(topology, "TaskReview"), true);
-  assert.equal(isReviewAgentInTopology(topology, "Build"), false);
+  assert.equal(isDecisionAgentInTopology(topology, "TaskReview"), true);
+  assert.equal(isDecisionAgentInTopology(topology, "Build"), false);
 });
 
 test("continue 边默认回流上限为 4，且支持按边单独覆盖", () => {

@@ -12,7 +12,7 @@
     "build:embedded-assets": "bun run build:web && node src/cli/generate-embedded-assets.mjs",
     "knip": "bun run build:embedded-assets && knip",
     "test": "bun run build:embedded-assets && tsx --test",
-    "preview": "vite preview",
+    "serve:dist": "vite --host localhost --mode production",
     "cli": "node src/cli/launcher.cjs",
     "dist:win": "bun run build && bun build --compile --target bun-windows-x64 ./src/cli/index.ts --outfile ./dist/agent-team.exe",
     "dist:mac-arm64": "bun run build && bun build --compile --target bun-darwin-arm64 ./src/cli/index.ts --outfile ./dist/agent-team-macos-arm64",

@@ -1,10 +1,13 @@
-import { extractTrailingReviewSignalBlock } from "@shared/review-response";
-import type { ReviewDecision } from "@shared/types";
+import { extractTrailingDecisionSignalBlock } from "@shared/decision-response";
 
-export interface ParsedReview {
+export type Decision = "complete" | "continue" | "invalid";
+
+export interface ParsedDecision {
   cleanContent: string;
-  decision: ReviewDecision;
+  decision: Decision;
   opinion: string | null;
+  rawDecisionBlock: string | null;
+  validationError: string | null;
 }
 
 export function stripStructuredSignals(content: string): string {
@@ -15,22 +18,26 @@ export function stripStructuredSignals(content: string): string {
     .trim();
 }
 
-export function parseReview(content: string, reviewAgent: boolean): ParsedReview {
-  const signalMatch = extractTrailingReviewSignalBlock(content);
+export function parseDecision(content: string, decisionAgent: boolean): ParsedDecision {
+  const signalMatch = extractTrailingDecisionSignalBlock(content);
   if (signalMatch) {
     return {
       cleanContent: stripStructuredSignals(signalMatch.body),
       decision: signalMatch.kind === "complete" ? "complete" : "continue",
       opinion: signalMatch.response,
+      rawDecisionBlock: signalMatch.rawBlock,
+      validationError: null,
     };
   }
 
   const cleanContent = stripStructuredSignals(content);
-  if (!reviewAgent) {
+  if (!decisionAgent) {
     return {
       cleanContent,
       decision: "complete",
       opinion: null,
+      rawDecisionBlock: null,
+      validationError: null,
     };
   }
 
@@ -38,5 +45,7 @@ export function parseReview(content: string, reviewAgent: boolean): ParsedReview
     cleanContent,
     decision: "continue",
     opinion: cleanContent || null,
+    rawDecisionBlock: null,
+    validationError: null,
   };
 }

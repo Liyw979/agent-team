@@ -26,8 +26,8 @@ function appearsInOrder(source: string, before: string, after: string): boolean 
   return beforeIndex !== -1 && afterIndex !== -1 && beforeIndex < afterIndex;
 }
 
-test("CLI no longer accepts the removed review shortcut", () => {
-  assert.doesNotMatch(CLI_SOURCE, /relation === "review"/);
+test("CLI no longer accepts the removed decision shortcut", () => {
+  assert.doesNotMatch(CLI_SOURCE, /relation === "decision"/);
 });
 
 test("CLI help only includes task headless and task ui commands", () => {
@@ -105,7 +105,7 @@ test("task ui prints diagnostics before starting the web host", () => {
   assert.equal(
     appearsInOrder(
       taskUiSection,
-      "printTaskRunDiagnostics(diagnostics, previewUrl);",
+      "printTaskRunDiagnostics(diagnostics, uiUrl);",
       "const { host, url } = await ensureUiHost(",
     ),
     true,
@@ -113,8 +113,8 @@ test("task ui prints diagnostics before starting the web host", () => {
 });
 
 test("task ui diagnostics reuse the final browser url and do not print a separate UI line", () => {
-  assert.match(CLI_SOURCE, /const previewUrl = buildUiUrl\(/);
-  assert.match(CLI_SOURCE, /printTaskRunDiagnostics\(diagnostics, previewUrl\);/);
+  assert.match(CLI_SOURCE, /const uiUrl = buildUiUrl\(/);
+  assert.match(CLI_SOURCE, /printTaskRunDiagnostics\(diagnostics, uiUrl\);/);
   assert.doesNotMatch(CLI_SOURCE, /process\.stdout\.write\(`\[UI\] \$\{url\}\\n`\)/);
 });
 

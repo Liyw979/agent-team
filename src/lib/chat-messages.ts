@@ -10,10 +10,10 @@ import {
   parseTargetAgentIds,
 } from "@shared/chat-message-format";
 import {
-  extractLastReviewResponse,
-  stripReviewResponseMarkup,
-  stripLeadingReviewResponseLabel,
-} from "@shared/review-response";
+  extractLastDecisionResponse,
+  stripDecisionResponseMarkup,
+  stripLeadingDecisionResponseLabel,
+} from "@shared/decision-response";
 
 export interface ChatMessageItem {
   id: string;
@@ -106,17 +106,17 @@ export function stripTrailingFollowUpOffer(content: string): string {
 }
 
 function stripRevisionFeedbackLabel(content: string): string {
-  return stripLeadingReviewResponseLabel(stripReviewResponseMarkup(content));
+  return stripLeadingDecisionResponseLabel(stripDecisionResponseMarkup(content));
 }
 
 function getActionRequiredRequestDisplayBody(message: MessageRecord): string {
   const normalized = stripTrailingMentions(message.content);
-  const extracted = extractLastReviewResponse(normalized);
+  const extracted = extractLastDecisionResponse(normalized);
   if (extracted) {
     return extracted;
   }
 
-  return stripReviewResponseMarkup(normalized);
+  return stripDecisionResponseMarkup(normalized);
 }
 
 function formatDisplayContentWithStoredMentions(sourceContent: string, body: string): string {
@@ -158,8 +158,8 @@ function extractAgentFinalDisplayContent(message: MessageRecord): string {
     return "";
   }
 
-  const normalizedRawContent = stripReviewResponseMarkup(rawContent);
-  const trailingSection = isAgentFinalMessageRecord(message) && message.reviewDecision
+  const normalizedRawContent = stripDecisionResponseMarkup(rawContent);
+  const trailingSection = isAgentFinalMessageRecord(message) && message.decision
     ? normalizedRawContent
     : extractTrailingTopLevelSection(normalizedRawContent);
   const normalized = trailingSection
@@ -184,8 +184,8 @@ function buildMergedActionRequiredRequestContent(previous: ChatMessageItem, curr
   const normalizedPreviousFinalResponse =
     previousLastMessage
     && isAgentFinalMessageRecord(previousLastMessage)
-    && previousLastMessage.reviewDecision === "continue"
-      ? (extractLastReviewResponse(previousLastMessage.content) || "")
+    && previousLastMessage.decision === "continue"
+      ? (extractLastDecisionResponse(previousLastMessage.content) || "")
         .replace(/\s+/g, " ")
         .trim()
       : "";
@@ -264,7 +264,7 @@ function shouldMergeActionRequiredRequest(previous: ChatMessageItem, current: Me
     previous.kinds.at(-1) === "agent-final" &&
     !!previousLastMessage &&
     isAgentFinalMessageRecord(previousLastMessage) &&
-    previousLastMessage.reviewDecision === "continue" &&
+    previousLastMessage.decision === "continue" &&
     current.kind === "continue-request"
   );
 }
@@ -290,7 +290,7 @@ function findActionRequiredRequestMergeTargetIndex(
       candidate.kinds.at(-1) === "agent-final" &&
       !!candidateLastMessage &&
       isAgentFinalMessageRecord(candidateLastMessage) &&
-      candidateLastMessage.reviewDecision === "continue"
+      candidateLastMessage.decision === "continue"
     ) {
       return index;
     }

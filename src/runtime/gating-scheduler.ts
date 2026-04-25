@@ -25,7 +25,7 @@ export interface GatingBatchContinuation {
   sourceAgentId: string;
   sourceContent: string;
   pendingTargets: string[];
-  repairReviewerAgentId: string | null;
+  repairDecisionAgentId: string | null;
   redispatchTargets: string[];
 }
 
@@ -196,7 +196,7 @@ export class GatingScheduler {
 
       const sourceState = this.getOrCreateSourceRevisionState(sourceAgentId);
       if (outcome === "complete") {
-        sourceState.reviewerPassRevision.set(responderAgentId, batch.sourceRevision);
+        sourceState.decisionPassRevision.set(responderAgentId, batch.sourceRevision);
       } else if (!batch.failedTargets.includes(responderAgentId)) {
         batch.failedTargets.push(responderAgentId);
       }
@@ -211,7 +211,7 @@ export class GatingScheduler {
           sourceAgentId,
           sourceContent: batch.sourceContent,
           pendingTargets: [...batch.pendingTargets],
-          repairReviewerAgentId: null,
+          repairDecisionAgentId: null,
           redispatchTargets: [],
         };
       }
@@ -223,21 +223,21 @@ export class GatingScheduler {
           sourceAgentId,
           sourceContent: batch.sourceContent,
           pendingTargets: [],
-          repairReviewerAgentId: batch.targets.find((targetName) => batch.failedTargets.includes(targetName)) ?? null,
+          repairDecisionAgentId: batch.targets.find((targetName) => batch.failedTargets.includes(targetName)) ?? null,
           redispatchTargets: [],
         };
       }
 
       if (batch.dispatchKind === "handoff" && batch.targets.length === 1) {
         const staleTargets = this.getHandoffTargetsForBatch(sourceAgentId, batch).filter(
-          (targetName) => sourceState.reviewerPassRevision.get(targetName) !== batch.sourceRevision,
+          (targetName) => sourceState.decisionPassRevision.get(targetName) !== batch.sourceRevision,
         );
         return {
           matchedBatch: true,
           sourceAgentId,
           sourceContent: batch.sourceContent,
           pendingTargets: [],
-          repairReviewerAgentId: null,
+          repairDecisionAgentId: null,
           redispatchTargets: staleTargets,
         };
       }
@@ -247,7 +247,7 @@ export class GatingScheduler {
         sourceAgentId,
         sourceContent: batch.sourceContent,
         pendingTargets: [],
-        repairReviewerAgentId: null,
+        repairDecisionAgentId: null,
         redispatchTargets: [],
       };
     }
@@ -309,7 +309,7 @@ export class GatingScheduler {
     if (!state) {
       state = {
         currentRevision: 0,
-        reviewerPassRevision: new Map(),
+        decisionPassRevision: new Map(),
       };
       this.runtime.sourceRevisionStateByAgent.set(sourceAgentId, state);
     }

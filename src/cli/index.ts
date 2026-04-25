@@ -368,11 +368,11 @@ async function handleTaskUiCommand(
     content: command.message!.trim(),
   });
   const uiPort = await resolveUiPort();
-  const previewUrl = buildUiUrl({
+  const uiUrl = buildUiUrl({
     port: uiPort,
     taskId: snapshot.task.id,
   });
-  printTaskRunDiagnostics(diagnostics, previewUrl);
+  printTaskRunDiagnostics(diagnostics, uiUrl);
   const { host, url } = await ensureUiHost(
     context,
     snapshot.task.cwd,

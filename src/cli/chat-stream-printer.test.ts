@@ -39,8 +39,8 @@ function createMessage(input: {
       content: input.content,
       kind: "agent-final",
       status: "completed",
-      reviewDecision: "complete",
-      reviewOpinion: "",
+      decision: "complete",
+      decisionNote: "",
       rawResponse: input.content,
     };
   }
@@ -176,8 +176,8 @@ test("renderChatStreamEntries 输出的是群聊文本，不包含 agent runtime
           content: "Build 已完成。",
           kind: "agent-final",
           status: "completed",
-          reviewDecision: "complete",
-          reviewOpinion: "",
+          decision: "complete",
+          decisionNote: "",
           rawResponse: "Build 已完成。",
         },
         {

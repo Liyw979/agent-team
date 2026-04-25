@@ -19,7 +19,7 @@ import { getAgentColorToken } from "./lib/agent-colors";
 import { calculateAgentCardPanelLayout } from "./lib/agent-card-layout";
 import { getAppShellClassName } from "./lib/app-shell-layout";
 import { getAppWorkspaceLayoutMetrics } from "./lib/app-workspace-layout";
-import { buildAgentPromptPreviewText } from "./lib/agent-prompt-preview";
+import { buildAgentPromptSnippetText } from "./lib/agent-prompt-snippet";
 import {
   PANEL_HEADER_CLASS,
   PANEL_HEADER_LEADING_CLASS,
@@ -216,14 +216,14 @@ function App() {
     const taskAgents = new Map(task.agents.map((agent) => [agent.id, agent]));
     return orderAgentsForFrontend(workspace.agents, task.topology ?? workspace.topology).map((agent) => {
       const taskAgent = taskAgents.get(agent.id);
-      const promptPreview = buildAgentPromptPreviewText({
+      const promptSnippet = buildAgentPromptSnippetText({
         agentId: agent.id,
         prompt: agent.prompt,
       });
       return {
         id: agent.id,
         prompt: agent.prompt,
-        promptPreview,
+        promptSnippet,
         status: taskAgent?.status ?? "idle",
       };
     });
@@ -241,7 +241,7 @@ function App() {
       const layout = calculateAgentCardPanelLayout({
         viewportHeight: viewport.clientHeight,
         cardCount: agentCards.length,
-        promptCardCount: agentCards.filter((agent) => agent.promptPreview !== "-").length,
+        promptCardCount: agentCards.filter((agent) => agent.promptSnippet !== "-").length,
         hasErrorBanner: agentTerminalActionError !== null,
       });
       setPromptLineCount(layout.promptLineCount);
@@ -432,7 +432,7 @@ function App() {
                   <div className="flex flex-col" style={{ gap: `${agentCardGapPx}px` }}>
                     {agentCards.map((agent) => {
                       const color = getAgentColorToken(agent.id);
-                      const promptPreviewLine = agent.promptPreview.replace(/\s+/gu, "");
+                      const promptSnippetLine = agent.promptSnippet.replace(/\s+/gu, "");
                       return (
                         <div
                           key={agent.id}
@@ -467,10 +467,10 @@ function App() {
                               </span>
                             </div>
                           </div>
-                          {agent.promptPreview !== "-" ? (
+                          {agent.promptSnippet !== "-" ? (
                             <div className="mt-1 min-w-0">
                               <p
-                                title={agent.promptPreview}
+                                title={agent.promptSnippet}
                                 className="min-w-0 overflow-hidden break-all text-[13px] leading-[18px]"
                                 style={{
                                   color: color.mutedText,
@@ -479,7 +479,7 @@ function App() {
                                   WebkitLineClamp: promptLineCount,
                                 }}
                               >
-                                {promptPreviewLine}
+                                {promptSnippetLine}
                               </p>
                             </div>
                           ) : (
