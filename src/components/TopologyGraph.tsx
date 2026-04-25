@@ -187,7 +187,7 @@ function renderAttachButtonIcon() {
   return (
     <svg
       viewBox="0 0 16 16"
-      className="h-3.5 w-3.5"
+      className="h-3 w-3"
       fill="none"
       stroke="currentColor"
       strokeWidth="1.5"
@@ -545,7 +545,7 @@ export function TopologyGraph({
                                   }
                                   onOpenAgentTerminal(node.id);
                                 }}
-                                className="inline-flex h-7 items-center justify-center gap-1 rounded-full border border-[#d8cdbd] bg-[#fffaf2] px-2.5 text-[11px] font-semibold text-foreground/76 shadow-[0_1px_0_rgba(255,255,255,0.45)] transition hover:border-[#cda27d] hover:bg-white disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:border-[#d8cdbd] disabled:hover:bg-[#fffaf2]"
+                                className="inline-flex h-6 items-center justify-center gap-1 rounded-full border border-[#d8cdbd] bg-[#fffaf2] px-2 text-[10px] font-semibold text-foreground/76 shadow-[0_1px_0_rgba(255,255,255,0.45)] transition hover:border-[#cda27d] hover:bg-white disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:border-[#d8cdbd] disabled:hover:bg-[#fffaf2]"
                               >
                                 {renderAttachButtonIcon()}
                                 <span>{isAttachOpening ? "打开中" : "attach"}</span>

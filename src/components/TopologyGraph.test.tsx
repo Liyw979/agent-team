@@ -68,6 +68,15 @@ test("拓扑节点头部会在状态 icon 左侧补充 attach 按钮", () => {
   assert.match(TOPOLOGY_GRAPH_SOURCE, /headerActions\.map\(\(action\) => \{/);
 });
 
+test("拓扑节点头部的 attach 按钮需要保持更小的胶囊尺寸", () => {
+  assert.match(
+    TOPOLOGY_GRAPH_SOURCE,
+    /className="inline-flex h-6 items-center justify-center gap-1 rounded-full border border-\[#d8cdbd\] bg-\[#fffaf2\] px-2 text-\[10px\] font-semibold text-foreground\/76/,
+  );
+  assert.match(TOPOLOGY_GRAPH_SOURCE, /className="h-3 w-3"/);
+  assert.doesNotMatch(TOPOLOGY_GRAPH_SOURCE, /className="inline-flex h-7 items-center justify-center gap-1 rounded-full border border-\[#d8cdbd\] bg-\[#fffaf2\] px-2\.5 text-\[11px\] font-semibold text-foreground\/76/);
+});
+
 test("拓扑节点状态徽标不能继续只看 taskAgent.status，避免 runtime 仍有实时活动时错误显示已完成", () => {
   assert.doesNotMatch(
     TOPOLOGY_GRAPH_SOURCE,
