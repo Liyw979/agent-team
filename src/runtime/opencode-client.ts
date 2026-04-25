@@ -319,7 +319,7 @@ export class OpenCodeClient {
 
     const finalMessage = latest.content || latest.error || "";
     if (!finalMessage.trim()) {
-      throw new Error(`OpenCode session ${sessionId} 返回了空的 assistant 结果`);
+      throw new Error(this.buildEmptyAssistantResultError(sessionId, latest));
     }
 
     return {
@@ -1177,6 +1177,23 @@ export class OpenCodeClient {
       error: this.extractEventError(info["error"] ?? envelope["error"]),
       raw,
     };
+  }
+
+  private buildEmptyAssistantResultError(
+    sessionId: string,
+    message: OpenCodeNormalizedMessage,
+  ): string {
+    const record = this.asRecord(message.raw);
+    const info = this.asRecord(record["info"] ?? message.raw);
+    const parts = Array.isArray(record["parts"]) ? (record["parts"] as Array<Record<string, unknown>>) : [];
+    const finish = typeof info["finish"] === "string" && info["finish"].trim()
+      ? info["finish"].trim()
+      : "unknown";
+    const partTypes = parts
+      .map((part) => (typeof part["type"] === "string" ? part["type"].trim() : ""))
+      .filter(Boolean);
+    const partSummary = partTypes.length > 0 ? partTypes.join(",") : "none";
+    return `OpenCode session ${sessionId} 返回了空的 assistant 结果: messageId=${message.id}, finish=${finish}, partTypes=${partSummary}`;
   }
 
   private extractParentMessageId(info: Record<string, unknown>): string | null {
