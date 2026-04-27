@@ -1193,7 +1193,7 @@ export class OpenCodeClient {
   }
 
   private isRecoverableTransportError(errorMessage: string): boolean {
-    return /\b(terminated|aborted)\b/i.test(errorMessage);
+    return /\b(terminated|aborted)\b/i.test(errorMessage) || /fetch failed/i.test(errorMessage);
   }
 
   buildRuntimeSnapshot(sessionId: string, messages: unknown[]): OpenCodeSessionRuntime {
