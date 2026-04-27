@@ -28,13 +28,23 @@ export function AgentHistoryMarkdown({
 }) {
   const normalizedContent = compactAgentHistoryMarkdownContent(content);
 
+  if (!className && !style) {
+    return (
+      <MarkdownMessage
+        content={normalizedContent}
+        inheritTypography
+        style={AGENT_HISTORY_MARKDOWN_STYLE}
+      />
+    );
+  }
+
   if (className) {
     return (
       <MarkdownMessage
         content={normalizedContent}
         className={className}
         inheritTypography
-        style={{ ...AGENT_HISTORY_MARKDOWN_STYLE, ...style }}
+        style={style ? { ...AGENT_HISTORY_MARKDOWN_STYLE, ...style } : AGENT_HISTORY_MARKDOWN_STYLE}
       />
     );
   }
