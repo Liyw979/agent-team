@@ -36,6 +36,16 @@ test("本项目内提供开发团队与漏洞挖掘团队拓扑文件", () => {
   assert.equal(fs.existsSync(vulnerabilityTeamTsFile), false);
 });
 
+test("仓库内全部团队拓扑 JSON5 文件都可以被真实解析", () => {
+  const topologyFiles = fs.readdirSync(BUILTIN_TOPOLOGY_DIR)
+    .filter((fileName) => fileName.endsWith(".json5"));
+
+  assert.equal(topologyFiles.length > 0, true);
+  for (const fileName of topologyFiles) {
+    assert.doesNotThrow(() => readBuiltinTopology(fileName), `${fileName} 必须是合法 JSON5`);
+  }
+});
+
 test("内置团队拓扑 JSON5 节点使用 id 字段而不是 name 字段", () => {
   const topologyFiles = [
     "development-team.topology.json5",
