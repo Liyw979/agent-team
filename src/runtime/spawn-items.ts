@@ -1,4 +1,5 @@
 import type { SpawnItemPayload } from "@shared/types";
+import { parseJson5 } from "@shared/json5";
 
 function extractCandidateJsonStrings(content: string): string[] {
   const trimmed = content.trim();
@@ -8,7 +9,7 @@ function extractCandidateJsonStrings(content: string): string[] {
     candidates.push(trimmed);
   }
 
-  const fencePattern = /```(?:json)?\s*([\s\S]*?)```/giu;
+  const fencePattern = /```(?:json5?|JSON5?)?\s*([\s\S]*?)```/gu;
   for (const match of trimmed.matchAll(fencePattern)) {
     const body = match[1]?.trim();
     if (body) {
@@ -22,7 +23,7 @@ function extractCandidateJsonStrings(content: string): string[] {
 function parseJsonObject(content: string): Record<string, unknown> | null {
   for (const candidate of extractCandidateJsonStrings(content)) {
     try {
-      const parsed = JSON.parse(candidate) as unknown;
+      const parsed = parseJson5(candidate) as unknown;
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         return parsed as Record<string, unknown>;
       }

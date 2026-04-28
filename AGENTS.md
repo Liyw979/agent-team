@@ -30,18 +30,18 @@
 
 ### 2.1 Agent 配置与拓扑应用
 
-- 团队拓扑 JSON 会先编译为 Agent 与拓扑记录，再应用到当前工作区，Task 启动时读取这份编译结果。team-dsl[compileTeamDsl]、cli[ensureJsonTopologyApplied]、orchestrator[applyTeamDsl]
+- 团队拓扑 JSON5 会先编译为 Agent 与拓扑记录，再应用到当前工作区，Task 启动时读取这份编译结果。team-dsl[compileTeamDsl]、cli[ensureJson5TopologyApplied]、orchestrator[applyTeamDsl]
 - Agent 的 prompt 与可写权限从当前拓扑的 `nodeRecords` 中提取，并在读取工作区 Agent 列表时即时恢复。project-agent-source[extractDslAgentsFromTopology]、orchestrator[listWorkspaceAgents]
 - 拓扑里单个 Agent 的 prompt 只能描述它自己的职责、输入与输出约束，不能提及其他 Agent、上下游、回流、裁决、交给谁处理、回应某个特定角色等协作关系；运行时每个 Agent 都应被视为不知道其他 Agent 的存在。team-dsl[compileTeamDsl]、project-agent-source[extractDslAgentsFromTopology]
-- 团队拓扑 JSON 的 `agents` 数组统一使用对象格式；不再支持直接写成 `"Build"` 这类字符串简写。每个 Agent 的 `writable` 都必须显式声明，不存在默认可写 Agent。team-dsl[compileTeamDsl]、project-agent-source[extractDslAgentsFromTopology]
-- 团队拓扑 JSON 中每个 Agent 都可以通过 `writable` 字段显式声明是否具备写能力；系统允许多个可写 Agent 同时存在。project-agent-source[extractDslAgentsFromTopology, validateProjectAgents, buildInjectedConfigFromAgents]、orchestrator[submitTask, initializeTask]
-- 新的团队拓扑 JSON 可以覆盖当前工作区拓扑，后续读取工作区或 Task 快照时会使用最新持久化结果。cli[ensureJsonTopologyApplied]、store[upsertTopology]、orchestrator[hydrateWorkspace, hydrateTask]
+- 团队拓扑 JSON5 的 `agents` 数组统一使用对象格式；不再支持直接写成 `"Build"` 这类字符串简写。每个 Agent 的 `writable` 都必须显式声明，不存在默认可写 Agent。team-dsl[compileTeamDsl]、project-agent-source[extractDslAgentsFromTopology]
+- 团队拓扑 JSON5 中每个 Agent 都可以通过 `writable` 字段显式声明是否具备写能力；系统允许多个可写 Agent 同时存在。project-agent-source[extractDslAgentsFromTopology, validateProjectAgents, buildInjectedConfigFromAgents]、orchestrator[submitTask, initializeTask]
+- 新的团队拓扑 JSON5 可以覆盖当前工作区拓扑，后续读取工作区或 Task 快照时会使用最新持久化结果。cli[ensureJson5TopologyApplied]、store[upsertTopology]、orchestrator[hydrateWorkspace, hydrateTask]
 
 ### 2.2 工作区状态与 Task 定位
 
 - 当前工作区的拓扑、Task、消息与运行态由当前 CLI 进程内存维护；不会再物化旧的 `<cwd>/.agent-team/state.json`。store[getState, hasWorkspaceState]、orchestrator[hydrateWorkspace, hydrateTask]
-- 新建 Task 需要显式传入团队拓扑 JSON 文件，CLI 会先校验参数再加载并应用定义。cli[validateTaskHeadlessCommand, validateTaskUiCommand, loadTeamDslDefinition, ensureJsonTopologyApplied]
-- 团队拓扑 JSON 只支持递归式 `entry + nodes + links` DSL；根图若需要显式结束来源，直接通过 `{ "from": "...", "to": "__end__", "trigger_type": "...", "message_type": "none" }` 这类终止边表达。team-dsl[compileTeamDsl]
+- 新建 Task 需要显式传入团队拓扑 JSON5 文件，CLI 会先校验参数再加载并应用定义。cli[validateTaskHeadlessCommand, validateTaskUiCommand, ensureJson5TopologyApplied]、cli-topology-file[loadTeamDslDefinitionFile]
+- 团队拓扑 JSON5 只支持递归式 `entry + nodes + links` DSL；根图若需要显式结束来源，直接通过 `{ "from": "...", "to": "__end__", "trigger_type": "...", "message_type": "none" }` 这类终止边表达。team-dsl[compileTeamDsl]
 - 递归式 DSL 中，节点 `type` 只允许 `agent` 或 `spawn`；`spawn` 自身不带 `prompt`，并固定从上游结果里的 `items` 数组展开子图，不支持通过拓扑配置改字段名。team-dsl[compileTeamDsl]、spawn-items[extractSpawnItemsFromContent]
 - Task 快照读取当前工作区拓扑与 Agent 定义，`TaskRecord` 本身只保存任务状态与定位信息。store[getTopology]、orchestrator[hydrateTask]、project-agent-source[extractDslAgentsFromTopology]
 - Task 定位索引同样只保存在当前进程内存；删除 Task 时会同步移除对应 locator。store[getTaskLocatorCwd, removeTaskLocator, deleteTask]、orchestrator[resolveTaskCwd]
@@ -64,7 +64,7 @@
 
 ### 3.2 Task 初始化与状态流转
 
-- CLI 通过 `task headless`、`task ui` 创建和驱动当前工作区 Task，GUI 只负责展示与继续发消息；Task 初始化、提交与配置应用由 CLI 和编排层完成。cli[validateTaskHeadlessCommand, validateTaskUiCommand, ensureJsonTopologyApplied]、orchestrator[initializeTask, submitTask]、App[App]
+- CLI 通过 `task headless`、`task ui` 创建和驱动当前工作区 Task，GUI 只负责展示与继续发消息；Task 初始化、提交与配置应用由 CLI 和编排层完成。cli[validateTaskHeadlessCommand, validateTaskUiCommand, ensureJson5TopologyApplied]、orchestrator[initializeTask, submitTask]、App[App]
 - 当前节点完成后若不存在可自动推进的下游，Task 会进入 `finished`，聊天区追加“本轮已完成，可继续 @Agent 发起下一轮。”与“任务已经结束”系统消息，拓扑节点统一显示为 `已完成`；后续再次 `@Agent` 会把 Task 从 `finished` 恢复为 `running`。gating-router[applyAgentResultToGraphState]、langgraph-runtime[resumeTask, runTaskLoop]、orchestrator[completeTask]、task-completion-message[buildTaskCompletionMessageContent]、task-lifecycle-rules[reconcileTaskSnapshotFromMessages]、topology-graph-helpers[getTopologyAgentStatusBadgePresentation]
 - Agent 成功态统一使用 `completed`；判定 Agent 只识别尾段 `<continue>` / `<complete>`，缺失或不合法时默认按 `continue` 处理，并按当前拓扑决定回流、继续派发或结束为“不通过”。同一上游在收到回流后重新交付时，会重新派发本轮满足条件的全部下游，不会跳过上轮已成功节点。gating-rules[resolveAgentStatusFromDecision]、decision-parser[parseDecision, stripStructuredSignals]、decision-response[extractTrailingDecisionSignalBlock]、gating-router[handleActionRequired, continueAfterHandoffBatchResponse, triggerHandoffDownstream]、gating-scheduler[planHandoffDispatch, recordHandoffBatchResponse]、orchestrator[createLangGraphBatchRunners, completeTask]
 
@@ -73,7 +73,7 @@
 - LangGraph 是唯一调度核心，`TopologyRecord` 是真源；运行时会把它编译为图状态、调度索引和 `topology.langgraph` 边界信息。拓扑边只持久化 `source / target / triggerOn`，其中 `triggerOn` 仅允许 `transfer`、`complete`、`continue`；`continue` 边额外带 `maxContinueRounds`，默认 `4`。store[readWorkspaceState, writeWorkspaceState]、langgraph-runtime[resumeTask]、topology-compiler[compileTopology]、gating-router[createGraphTaskState, applyAgentResultToGraphState]、types[createTopologyLangGraphRecord, normalizeActionRequiredMaxRounds, getActionRequiredEdgeLoopLimit, getTopologyEdgeId]
 - `spawn` 仍是拓扑节点：静态工厂节点保留在运行时数据中供调度识别，但前端隐藏，只展示实际展开出来的 runtime agent；父图存在唯一 `spawn` 回流边时，编译阶段会把其 `triggerOn` 记入 `spawn rule`，并由子图唯一终局角色按该触发类型回到外层节点，同时把 `spawn` 标记为已完成。team-dsl[compileTeamDsl]、runtime-topology[instantiateSpawnBundle]、runtime-topology-graph[buildEffectiveTopology]、topology-spawn-drafts[getTopologyDisplayNodeIds]、TopologyGraph[TopologyGraph]
 - 调度上，系统会先放行“直接 `transfer` 到判定节点、且该节点通过 `continue` 直接回流自身、并且没有 `complete` 下游”的直接判定回路；这类回路全部通过后，才继续放行其余直接 `transfer` 下游。若同一轮要触发多个直接 `transfer` 下游 decisionAgent，则整批并发执行，并在整批返回后统一决定回流、补跑或继续。gating-scheduler[planHandoffDispatch, recordHandoffBatchResponse]、gating-router[handleActionRequired, continueAfterHandoffBatchResponse]、orchestrator[createLangGraphBatchRunners]
-- 拓扑顺序与入口规则保持稳定：`nodes` 的有序字符串数组同时是真源节点集合和展示顺序；未显式保存顺序时优先把 `Build` 放最左，否则按声明顺序解析。团队成员列表可直接调整顺序并持久化。漏洞挖掘默认对抗拓扑保持“`线索发现` 先交给 `漏洞挑战` 再进入 `漏洞论证`”这一设计，让漏洞挑战暴露证据链缺口，再进入论证与挑战对抗；当 `线索发现` 认为已经没有新的可疑点时，不会直接结束任务，而是先把完整群聊语义交给 `线索完备性评估` 判断是否还有遗漏，只有它给出 `complete` 才允许结束，若它给出 `continue` 则会把具体补查方向回给 `线索发现` 继续挖掘；当 `spawnRule.exitWhen = "all_completed"` 且同一目标存在多条 `complete` 入边时，运行时只会在这些来源角色都已经给出本轮回应后，才允许继续派发该目标，因此漏洞挑战不能在漏洞论证尚未回应时直接把流程推进到 `讨论总结`。types[resolveBuildAgentId, resolveTopologyAgentOrder, resolvePrimaryTopologyStartTarget, createDefaultTopology]、orchestrator[saveTopology, normalizeTopology]、frontend-agent-order[orderAgentsForFrontend]、config/team-topologies/vulnerability-team.topology.json、scheduler-script-emulator-migration.test.ts、gating-scheduler[planApprovedDispatch]
+- 拓扑顺序与入口规则保持稳定：`nodes` 的有序字符串数组同时是真源节点集合和展示顺序；未显式保存顺序时优先把 `Build` 放最左，否则按声明顺序解析。团队成员列表可直接调整顺序并持久化。漏洞挖掘默认对抗拓扑保持“`线索发现` 先交给 `漏洞挑战` 再进入 `漏洞论证`”这一设计，让漏洞挑战暴露证据链缺口，再进入论证与挑战对抗；当 `线索发现` 认为已经没有新的可疑点时，不会直接结束任务，而是先把完整群聊语义交给 `线索完备性评估` 判断是否还有遗漏，只有它给出 `complete` 才允许结束，若它给出 `continue` 则会把具体补查方向回给 `线索发现` 继续挖掘；当 `spawnRule.exitWhen = "all_completed"` 且同一目标存在多条 `complete` 入边时，运行时只会在这些来源角色都已经给出本轮回应后，才允许继续派发该目标，因此漏洞挑战不能在漏洞论证尚未回应时直接把流程推进到 `讨论总结`。types[resolveBuildAgentId, resolveTopologyAgentOrder, resolvePrimaryTopologyStartTarget, createDefaultTopology]、orchestrator[saveTopology, normalizeTopology]、frontend-agent-order[orderAgentsForFrontend]、config/team-topologies/vulnerability-team.topology.json5、scheduler-script-emulator-migration.test.ts、gating-scheduler[planApprovedDispatch]
 - 前端拓扑图只展示可见 Agent 实例，并在节点头部直接展示状态徽标、颜色和 `attach` 入口；判定类节点显示 `判定通过 / 判定不通过`。布局始终保持“Agent 在上、历史区在下、首尾贴边但留白、顶部预留连线通道”，编辑面板可逐条配置 `action_required` 的最大反驳次数。topology-graph-helpers[getTopologyAgentStatusBadgePresentation, getTopologyNodeHeaderActionOrder]、agent-colors[getAgentColorToken]、topology-canvas[buildTopologyCanvasLayout]、TopologyGraph[TopologyGraph]、App[App]、orchestrator[openAgentTerminal, normalizeTopology]
 
 ### 3.4 聊天与消息传递
@@ -101,8 +101,8 @@
 - `task headless`、`task ui` 在解析 `--cwd`（或默认当前目录）时，要求目标路径必须真实存在且为目录；不存在或传入普通文件时会直接报错，不会静默创建内存工作区。
 - `task headless`、`task ui` 在创建 CLI 上下文前都会先执行一次 `opencode --help` 预检查；只要该命令执行失败，就会直接报错并提示用户先把 `opencode` 配置好。
 - CLI 提供 `task headless`、`task ui`。
-- `task headless --file <topology.json> --message <message>` 会新建当前 Task，打印本轮群聊，任务结束后退出到 shell。
-- `task ui --file <topology.json> --message <message> [--cwd <path>]` 会新建当前 Task，启动本地 Web Host，并在浏览器中打开当前 Task 页面；CLI 进程会继续驻留，直到收到 `Ctrl+C` / `SIGTERM` 才清理当前命令持有的 OpenCode 实例并退出。
+- `task headless --file <topology-file> --message <message>` 会新建当前 Task，打印本轮群聊，任务结束后退出到 shell；`--file` 必须是 `.json5`，并按 JSON5 语法解析。
+- `task ui --file <topology-file> --message <message> [--cwd <path>]` 会新建当前 Task，启动本地 Web Host，并在浏览器中打开当前 Task 页面；CLI 进程会继续驻留，直到收到 `Ctrl+C` / `SIGTERM` 才清理当前命令持有的 OpenCode 实例并退出；`--file` 必须是 `.json5`，并按 JSON5 语法解析。
 - `task ui` 启动前会检查当前选中的 Web 静态目录中是否存在 `index.html`；缺少入口文件时会直接报错，不会继续启动 Web Host 或打开浏览器。
 - `task ui` 打开的浏览器地址与本地 Web Host 监听地址统一使用 `localhost` 回环主机名，而不是 `127.0.0.1`，以兼容 Windows 上仅 `localhost` 可访问的本地浏览器环境。
 - CLI / 终端里所有用户可见 attach 文案都直接显示底层 `opencode attach ...`，不再展示 `task attach` 包装命令。
@@ -114,8 +114,8 @@
 ```bash
 bun run cli -- help
 
-bun run cli -- task headless --file config/team-topologies/development-team.topology.json --message "请开始一轮开发团队协作。"
-bun run cli -- task ui --file config/team-topologies/development-team.topology.json --message "使用node实现一个加法方法" --cwd "D:\empty"
+bun run cli -- task headless --file config/team-topologies/development-team.topology.json5 --message "请开始一轮开发团队协作。"
+bun run cli -- task ui --file config/team-topologies/development-team.topology.json5 --message "使用node实现一个加法方法" --cwd "D:\empty"
 ```
 
 CLI 能力分组：
@@ -154,7 +154,7 @@ bun run dist:mac-x64
 - 涉及调度状态变化、回流顺序、裁决转发、spawn 对话推进等用户可见协作语义时，新增覆盖优先写进 `src/runtime/scheduler-script-emulator-migration.test.ts` 这类 script 测试，用对话脚本直接驱动 `src/runtime/scheduler-script-emulator.ts` 和真实调度核心验证流转；只有当该行为依赖内部暂存状态、且确实无法自然表达为一段用户可见对话脚本时，才保留在 `src/runtime/gating-router.test.ts` / `src/runtime/orchestrator.test.ts` 做纯状态测试。
 - 只要某个问题已经可以通过 emulator / script 测试直接证明真实用户可见流转，就不要再为同一语义额外补 `orchestrator`、`gating-router` 或其他重复层级的测试；只有 emulator 确实无法自然表达该问题时，才允许补其他测试。
 - 所有 Agent 对话顺序类单元测试，在排查和修复前都必须优先补成 `src/runtime/scheduler-script-emulator-migration.test.ts` 这类 script 脚本复现；先用脚本把真实对话顺序跑出失败，再继续修改实现与复验通过。
-- 只要现有 `config/team-topologies/*.topology.json` 或其编译结果足以表达目标协作路径，就必须直接使用这些 JSON 拓扑或基于它们编译出的 topology 做测试；禁止为了省事另写一大堆自定义 DSL、手搓 topology 夹具来替代真实拓扑。只有当目标场景确实无法用现有 JSON 拓扑自然表达，才允许补最小必要的 DSL / 手写 topology 夹具，并在测试里明确说明为什么不能直接复用 JSON 拓扑。
+- 只要现有 `config/team-topologies/*.topology.json5` 或其编译结果足以表达目标协作路径，就必须直接使用这些 JSON5 拓扑或基于它们编译出的 topology 做测试；禁止为了省事另写一大堆自定义 DSL、手搓 topology 夹具来替代真实拓扑。只有当目标场景确实无法用现有 JSON5 拓扑自然表达，才允许补最小必要的 DSL / 手写 topology 夹具，并在测试里明确说明为什么不能直接复用 JSON5 拓扑。
 - 群聊合并、`continue-request`、`message_type = all` 转发这类消息语义测试，测试夹具必须显式写出真实落库形态：例如 `agent-final` 中真实存在的正文与 `<continue>/<complete>` 尾段，以及 `continue-request` 独立落库后的正文与尾部 `@目标Agent`。禁止为了“制造重复”而在测试里手工把同一段正文复制两遍，再倒推出实现应该去重；断言目标必须直接对齐“用户实际看到的群聊语义卡片”或“基于该语义卡片生成的 transcript”。chat-messages[mergeTaskChatMessages]、message-forwarding[buildDownstreamForwardedContextFromMessages]
 
 打包注意事项：

@@ -307,12 +307,12 @@ function isRootGraphShapeIssue(issue: z.ZodIssue): boolean {
 
 function formatGraphDslParseError(error: z.ZodError): string {
   if (error.issues.some((issue) => isRootGraphShapeIssue(issue))) {
-    return "团队拓扑 JSON 只支持递归式 entry + nodes + links DSL。";
+    return "团队拓扑 JSON5 只支持递归式 entry + nodes + links DSL。";
   }
 
   const issue = error.issues[0];
   if (!issue) {
-    return "团队拓扑 JSON 校验失败。";
+    return "团队拓扑 JSON5 校验失败。";
   }
   const path = formatZodIssuePath(issue.path);
   if (

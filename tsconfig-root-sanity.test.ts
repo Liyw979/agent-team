@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
+import { parseJson5 } from "./src/shared/json5";
 
-const ROOT_TSCONFIG = JSON.parse(
-  fs.readFileSync(new URL("./tsconfig.json", import.meta.url), "utf8"),
-) as {
+const ROOT_TSCONFIG = parseJson5<{
   compilerOptions?: {
     allowUnreachableCode?: boolean;
     allowUnusedLabels?: boolean;
@@ -21,7 +20,9 @@ const ROOT_TSCONFIG = JSON.parse(
   };
   include?: string[];
   references?: Array<{ path?: string }>;
-};
+}>(
+  fs.readFileSync(new URL("./tsconfig.json", import.meta.url), "utf8"),
+);
 
 test("根 tsconfig 同时承担 node 与 web 类型检查", () => {
   assert.deepEqual(ROOT_TSCONFIG.compilerOptions?.types ?? [], [
