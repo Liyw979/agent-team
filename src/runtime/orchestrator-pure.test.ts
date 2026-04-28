@@ -17,10 +17,10 @@ type TestMessageInput = {
   timestamp?: string;
   kind?: MessageRecord["kind"];
   targetAgentIds?: string[];
-  agentFinalStatus?: "completed" | "error";
+  agentFinalStatus?: "completed";
   taskCompletedStatus?: "failed";
   finishReason?: string;
-  decision?: "complete" | "continue" | "invalid";
+  decision?: "complete" | "continue";
   senderDisplayName?: string;
   followUpMessageId?: string;
 };
@@ -767,13 +767,15 @@ test("decisionAgent 给出需要修复时应标记为 action_required 而不是 
   assert.equal(status, "continue");
 });
 
-test("decisionAgent 缺少强制标签时应标记为 failed", () => {
-  const status = resolveAgentStatusFromDecision({
-    decision: "invalid",
-    decisionAgent: true,
-  });
-
-  assert.equal(status, "failed");
+test("非判定 Agent 返回 continue 时应直接抛错暴露问题", () => {
+  assert.throws(
+    () =>
+      resolveAgentStatusFromDecision({
+        decision: "continue",
+        decisionAgent: false,
+      }),
+    /非判定 Agent 不应返回 continue/u,
+  );
 });
 
 test("非拓扑驱动的单次执行后，仍有未完成 Agent 时任务进入 finished", () => {

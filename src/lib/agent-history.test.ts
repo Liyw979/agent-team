@@ -9,8 +9,8 @@ function createAgentFinalMessage(input: {
   sender: string;
   content: string;
   timestamp: string;
-  decision?: "complete" | "continue" | "invalid";
-  status?: "completed" | "error";
+  decision?: "complete" | "continue";
+  status?: "completed";
 }): MessageRecord {
   return {
     id: input.id,
@@ -301,7 +301,6 @@ test("buildAgentHistoryItems 会把超限失败的 decisionAgent 标记为继续
       sender: "TaskReview",
       content: "当前 decisionAgent 未提供额外正文。",
       timestamp: "2026-04-20T09:05:00.000Z",
-      status: "error",
     }),
     createTaskCompletedMessage({
       id: "task-failed",

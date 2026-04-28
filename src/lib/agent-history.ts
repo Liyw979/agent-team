@@ -180,7 +180,7 @@ function buildFinalHistoryItems(input: {
       const status =
         message.decision === "continue"
           ? "continue"
-          : decisionAgent && message.status === "error" && finalLoopDecisionAgentName === input.agentId
+          : decisionAgent && finalLoopDecisionAgentName === input.agentId
             ? "final_failed_decision"
             : message.status;
       const presentation = getFinalItemPresentation({

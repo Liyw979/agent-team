@@ -12,7 +12,7 @@ export type TaskStatus =
   | "failed"
   | "continue";
 
-export type Decision = "complete" | "continue" | "invalid";
+export type Decision = "complete" | "continue";
 
 export type PermissionMode = "allow" | "ask" | "deny";
 
@@ -245,7 +245,7 @@ export interface AgentFinalMessageRecord extends BaseMessageRecord {
   decision: Decision;
   decisionNote: string;
   rawResponse: string;
-  status: "completed" | "error";
+  status: "completed";
   senderDisplayName?: string;
 }
 

@@ -1,13 +1,11 @@
 import { extractTrailingDecisionSignalBlock } from "@shared/decision-response";
-
-export type Decision = "complete" | "continue" | "invalid";
+import type { Decision } from "@shared/types";
 
 export interface ParsedDecision {
   cleanContent: string;
   decision: Decision;
-  opinion: string | null;
-  rawDecisionBlock: string | null;
-  validationError: string | null;
+  opinion: string;
+  rawDecisionBlock: string;
 }
 
 export function stripStructuredSignals(content: string): string {
@@ -26,7 +24,6 @@ export function parseDecision(content: string, decisionAgent: boolean): ParsedDe
       decision: signalMatch.kind === "complete" ? "complete" : "continue",
       opinion: signalMatch.response,
       rawDecisionBlock: signalMatch.rawBlock,
-      validationError: null,
     };
   }
 
@@ -35,17 +32,15 @@ export function parseDecision(content: string, decisionAgent: boolean): ParsedDe
     return {
       cleanContent,
       decision: "complete",
-      opinion: null,
-      rawDecisionBlock: null,
-      validationError: null,
+      opinion: "",
+      rawDecisionBlock: "",
     };
   }
 
   return {
     cleanContent,
     decision: "continue",
-    opinion: cleanContent || null,
-    rawDecisionBlock: null,
-    validationError: null,
+    opinion: cleanContent,
+    rawDecisionBlock: "",
   };
 }

@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 
-import type { TopologyRecord } from "@shared/types";
+import type { Decision, TopologyRecord } from "@shared/types";
 
 import {
   applyAgentResultToGraphState,
   createGraphTaskState,
   createUserDispatchDecision,
-  type GraphAgentResult,
+  type GraphCompletedAgentResult,
   type GraphRoutingDecision,
 } from "./gating-router";
 import { buildEffectiveTopology } from "./runtime-topology-graph";
@@ -190,7 +190,7 @@ export function shouldRequireSourceDispatchAssertion(input: {
 
 function collectActualTransitionTargets(input: {
   transitions: Array<{
-    decisionValue: GraphAgentResult["decision"];
+    decisionValue: Decision;
     state: ReturnType<typeof createGraphTaskState>;
     decision: GraphRoutingDecision;
   }>;
@@ -229,7 +229,7 @@ export function getAllowedPendingSendersFromFinishedDecision(
 }
 
 export function preferCompleteDecisionCandidatesForPendingNextSender<T extends {
-  result: GraphAgentResult;
+  result: GraphCompletedAgentResult;
   state: ReturnType<typeof createGraphTaskState>;
   decision: GraphRoutingDecision;
 }>(input: {
@@ -866,7 +866,7 @@ function applyMessageLineAndMatchDecision(input: {
 }): {
   state: ReturnType<typeof createGraphTaskState>;
   decision: GraphRoutingDecision;
-  decisionValue: GraphAgentResult["decision"];
+  decisionValue: Decision;
 } {
   const executableAgentId = input.senderId;
   const decisionAgent = resolveExecutionDecisionAgent({
@@ -878,32 +878,45 @@ function applyMessageLineAndMatchDecision(input: {
 
   const candidateDecisions = decisionAgent ? (["continue", "complete"] as const) : (["complete"] as const);
   const matchedCandidates: Array<{
-    result: GraphAgentResult;
+    result: GraphCompletedAgentResult;
     state: ReturnType<typeof createGraphTaskState>;
     decision: GraphRoutingDecision;
   }> = [];
   const attemptedTransitions: Array<{
-    decisionValue: GraphAgentResult["decision"];
+    decisionValue: Decision;
     state: ReturnType<typeof createGraphTaskState>;
     decision: GraphRoutingDecision;
   }> = [];
   const attemptedDecisions: string[] = [];
 
   for (const decision of candidateDecisions) {
-    const result: GraphAgentResult = {
-      agentId: input.senderId,
-      status: "completed",
-      decisionAgent,
-      decision,
-      // 在顺序脚本 DSL 里，每一条 agent 发言都代表“一次已完成的回复”，
-      // 路由是否继续由 decision 决定，不再把 agentStatus 继续保留成 continue，
-      // 否则已完成的旧 spawn runtime 会在后续 finding 中再次混入目标集合。
-      agentStatus: "completed",
-      agentContextContent: input.line.body,
-      opinion: null,
-      allowDirectFallbackWhenNoBatch: false,
-      signalDone: false,
-    };
+    const messageId = `${input.senderId}:${decision}:${attemptedTransitions.length + 1}`;
+    const result: GraphCompletedAgentResult =
+      decision === "continue"
+        ? {
+            agentId: input.senderId,
+            messageId,
+            status: "completed",
+            decisionAgent: true,
+            decision: "continue",
+            agentStatus: "continue",
+            agentContextContent: input.line.body,
+            opinion: "",
+            allowDirectFallbackWhenNoBatch: false,
+            signalDone: false,
+          }
+        : {
+            agentId: input.senderId,
+            messageId,
+            status: "completed",
+            decisionAgent,
+            decision: "complete",
+            agentStatus: "completed",
+            agentContextContent: input.line.body,
+            opinion: "",
+            allowDirectFallbackWhenNoBatch: false,
+            signalDone: false,
+          };
     const reduced = applyAgentResultToGraphState(input.state, result);
     attemptedTransitions.push({
       decisionValue: decision,
@@ -1066,7 +1079,7 @@ function applyMessageLineAndMatchDecision(input: {
 }
 
 function disambiguateDecisionCandidates<T extends {
-  result: GraphAgentResult;
+  result: GraphCompletedAgentResult;
   state: ReturnType<typeof createGraphTaskState>;
   decision: GraphRoutingDecision;
 }>(input: {
@@ -1142,7 +1155,7 @@ export function matchesExpectedTransition(input: {
   state: ReturnType<typeof createGraphTaskState>;
   routingDecision: GraphRoutingDecision;
   senderId: string;
-  decisionValue: GraphAgentResult["decision"];
+  decisionValue: Decision;
   decisionAgent: boolean;
 }): boolean {
   const deferredDecisionTargets = resolveDeferredDecisionTargets(
@@ -1250,16 +1263,9 @@ function arraysEqual(left: string[], right: string[]): boolean {
 function resolveDeferredDecisionTargets(
   state: ReturnType<typeof createGraphTaskState>,
   senderId: string,
-  decision: GraphAgentResult["decision"],
+  decision: Decision,
 ): string[] {
-  const triggerOn = decision === "continue"
-    ? "continue"
-    : decision === "complete"
-      ? "complete"
-      : null;
-  if (!triggerOn) {
-    return [];
-  }
+  const triggerOn = decision === "continue" ? "continue" : "complete";
 
   const effectiveTopology = buildEffectiveTopology(state);
   return [...new Set(
@@ -1273,7 +1279,7 @@ function resolveActualTransitionTargets(
   state: ReturnType<typeof createGraphTaskState>,
   decision: GraphRoutingDecision,
   senderId: string,
-  decisionValue: GraphAgentResult["decision"],
+  decisionValue: Decision,
 ): string[] {
   if (decision.type === "execute_batch") {
     return getScriptVisibleDecisionTargets(state, decision);

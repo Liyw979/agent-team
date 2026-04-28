@@ -3,7 +3,6 @@ import {
   getActionRequiredEdgeLoopLimit,
   getSpawnRules,
   type AgentStatus,
-  type Decision,
   type TopologyRecord,
   type TopologyEdgeTrigger,
 } from "@shared/types";
@@ -64,19 +63,41 @@ export type GraphRoutingDecision =
       errorMessage: string;
     };
 
-export interface GraphAgentResult {
+interface GraphCompletedAgentResultBase {
   agentId: string;
-  messageId?: string;
-  status: "completed" | "failed";
-  decisionAgent: boolean;
-  decision: Decision;
-  agentStatus: AgentStatus;
+  messageId: string;
+  status: "completed";
   agentContextContent: string;
-  opinion: string | null;
+  opinion: string;
   allowDirectFallbackWhenNoBatch: boolean;
   signalDone: boolean;
-  errorMessage?: string;
 }
+
+export interface GraphApprovedAgentResult extends GraphCompletedAgentResultBase {
+  decision: "complete";
+  decisionAgent: boolean;
+  agentStatus: "completed";
+}
+
+export interface GraphActionRequiredAgentResult extends GraphCompletedAgentResultBase {
+  decision: "continue";
+  decisionAgent: true;
+  agentStatus: "continue";
+}
+
+export type GraphCompletedAgentResult =
+  | GraphApprovedAgentResult
+  | GraphActionRequiredAgentResult;
+
+export interface GraphFailedAgentResult {
+  agentId: string;
+  status: "failed";
+  errorMessage: string;
+}
+
+export type GraphAgentResult =
+  | GraphCompletedAgentResult
+  | GraphFailedAgentResult;
 
 interface ActionRequiredLoopLimitDecision {
   errorMessage: string;
@@ -154,24 +175,25 @@ export function applyAgentResultToGraphState(
   decision: GraphRoutingDecision;
 } {
   const nextState = cloneGraphTaskState(state);
-  const resultMessageId = result.messageId ?? "";
   ensureRuntimeAgentStatuses(nextState);
-  nextState.agentStatusesByName[result.agentId] = result.agentStatus;
-  nextState.agentContextByName[result.agentId] = result.agentContextContent;
   nextState.taskStatus = "running";
   nextState.finishReason = null;
 
   if (result.status === "failed") {
+    nextState.agentStatusesByName[result.agentId] = "failed";
     nextState.taskStatus = "failed";
     return {
       state: nextState,
       decision: {
         type: "failed",
-        errorMessage: result.errorMessage ?? `${result.agentId} 执行失败`,
+        errorMessage: result.errorMessage,
       },
     };
   }
 
+  const resultMessageId = result.messageId;
+  nextState.agentStatusesByName[result.agentId] = result.agentStatus;
+  nextState.agentContextByName[result.agentId] = result.agentContextContent;
   const runtime = graphStateToSchedulerRuntime(nextState);
   const scheduler = new GatingScheduler(buildEffectiveTopology(nextState), runtime);
   const batchContinuation = scheduler.recordHandoffBatchResponse(
@@ -213,17 +235,6 @@ export function applyAgentResultToGraphState(
   }
 
   clearActionRequiredLoopCountsForDecisionAgent(nextState, result.agentId);
-  if (result.decision === "invalid") {
-    nextState.taskStatus = "failed";
-    return {
-      state: nextState,
-      decision: {
-        type: "failed",
-        errorMessage: `${result.agentId} 返回了无效判定结果`,
-      },
-    };
-  }
-
   const primaryDecision = result.decisionAgent
     ? triggerApprovedDownstream(nextState, result.agentId, resultMessageId, result.agentContextContent)
     : triggerHandoffDownstream(nextState, result.agentId, resultMessageId, result.agentContextContent);
@@ -300,11 +311,11 @@ export function resolveRestrictedRepairTargetsForSource(
 
 function handleActionRequired(
   state: GraphTaskState,
-  result: GraphAgentResult,
+  result: GraphCompletedAgentResult,
   continuation: GatingBatchContinuation | null,
 ): GraphRoutingDecision {
   const actionRequiredTargets = getActionRequiredTargetsForSource(state, result.agentId);
-  const sourceMessageId = result.messageId ?? "";
+  const sourceMessageId = result.messageId;
   const continuationAction = resolveActionRequiredRequestContinuationAction({
     continuation,
     fallbackActionWhenNoBatch:
@@ -362,7 +373,7 @@ function handleActionRequired(
       state.pendingHandoffRepairTargetsBySource[repairTargetAgentId] = restrictedRepairTargets;
     }
     const continueContent =
-      storedDecision.opinion?.trim()
+      storedDecision.opinion.trim()
       || storedDecision.agentContextContent
       || "请直接回应当前内容，给出你的判断、补充、澄清、反驳或修改方案。";
     delete state.pendingActionRequiredRequestsByAgent[continuation.repairDecisionAgentId];
@@ -401,9 +412,9 @@ function handleActionRequired(
       state,
       result.agentId,
       storedDecision?.sourceMessageId ?? sourceMessageId,
-      storedDecision?.opinion?.trim()
+      storedDecision?.opinion.trim()
       || storedDecision?.agentContextContent
-      || result.opinion?.trim()
+      || result.opinion.trim()
       || result.agentContextContent
       || "请直接回应当前内容，给出你的判断、补充、澄清、反驳或修改方案。",
     );
@@ -415,7 +426,7 @@ function handleActionRequired(
         state,
         result.agentId,
         sourceMessageId,
-        result.opinion?.trim()
+        result.opinion.trim()
         || result.agentContextContent
         || "请直接回应当前内容，给出你的判断、补充、澄清、反驳或修改方案。",
       );
@@ -472,7 +483,7 @@ function continueAfterHandoffBatchResponse(
       state.pendingHandoffRepairTargetsBySource[continuation.sourceAgentId] = restrictedRepairTargets;
     }
     const continueContent =
-      storedDecision.opinion?.trim()
+      storedDecision.opinion.trim()
       || storedDecision.agentContextContent
       || "请直接回应当前内容，给出你的判断、补充、澄清、反驳或修改方案。";
     delete state.pendingActionRequiredRequestsByAgent[continuation.repairDecisionAgentId];
@@ -528,7 +539,7 @@ function triggerActionRequiredRequestDownstream(
   }
   const sourceContent =
     continueContent
-    || state.pendingActionRequiredRequestsByAgent[sourceAgentId]?.opinion?.trim()
+    || state.pendingActionRequiredRequestsByAgent[sourceAgentId]?.opinion.trim()
     || state.pendingActionRequiredRequestsByAgent[sourceAgentId]?.agentContextContent
     || "请直接回应当前内容，给出你的判断、补充、澄清、反驳或修改方案。";
   let dispatchTargets: string[];
@@ -885,7 +896,7 @@ function isRuntimeNodeFromDispatchedSpawnActivation(
 
 function continueBlockedAllCompletedDebateIfNeeded(
   state: GraphTaskState,
-  result: Pick<GraphAgentResult, "agentId" | "messageId" | "agentContextContent" | "opinion">,
+  result: Pick<GraphCompletedAgentResult, "agentId" | "messageId" | "agentContextContent" | "opinion">,
 ): GraphRoutingDecision | null {
   const pendingDebateTargets = resolvePendingAllCompletedDebateTargets(state, result.agentId);
   if (pendingDebateTargets.length === 0) {
@@ -895,8 +906,8 @@ function continueBlockedAllCompletedDebateIfNeeded(
   return triggerActionRequiredRequestDownstream(
     state,
     result.agentId,
-    result.messageId ?? "",
-    result.opinion?.trim()
+    result.messageId,
+    result.opinion.trim()
     || result.agentContextContent
     || "请直接回应当前内容，给出你的判断、补充、澄清、反驳或修改方案。",
     new Set(pendingDebateTargets),
@@ -1187,7 +1198,7 @@ function continueAfterDecisionLoopLimit(
       state,
       nextDecisionAgentId,
       storedDecision.sourceMessageId,
-      storedDecision.opinion?.trim()
+      storedDecision.opinion.trim()
       || storedDecision.agentContextContent
       || "请直接回应当前内容，给出你的判断、补充、澄清、反驳或修改方案。",
     );
@@ -1225,7 +1236,7 @@ function buildActionRequiredLoopLimitEscalationForwardContent(input: {
   decisionRequest: GraphActionRequiredRequest | undefined;
 }): string {
   const decisionContent =
-    input.decisionRequest?.opinion?.trim()
+    input.decisionRequest?.opinion.trim()
     || input.decisionRequest?.agentContextContent
     || "当前 decisionAgent 未提供额外正文。";
   return decisionContent;
@@ -1302,7 +1313,7 @@ function shouldFinishGraphTask(state: GraphTaskState): boolean {
 
 function shouldFinishGraphTaskFromEndEdge(
   state: GraphTaskState,
-  result: Pick<GraphAgentResult, "agentId" | "signalDone" | "decisionAgent" | "decision">,
+  result: Pick<GraphCompletedAgentResult, "agentId" | "signalDone" | "decisionAgent" | "decision">,
 ): boolean {
   const endNode = state.topology.langgraph?.end;
   const endSources = endNode?.sources ?? [];
@@ -1335,7 +1346,7 @@ function shouldFinishGraphTaskFromEndEdge(
 
 function endTriggerMatchesResult(
   triggerOn: TopologyEdgeTrigger | undefined,
-  result: Pick<GraphAgentResult, "decisionAgent" | "decision">,
+  result: Pick<GraphCompletedAgentResult, "decisionAgent" | "decision">,
 ): boolean {
   if (!triggerOn) {
     return true;

@@ -690,7 +690,7 @@ export class Orchestrator {
     }
 
     const nextTaskStatus = resolveStandaloneTaskStatusAfterAgentRun({
-      latestAgentStatus: result.agentStatus,
+      latestAgentStatus: result.status === "failed" ? "failed" : result.agentStatus,
       agentStatuses: this.store.listTaskAgents(task.cwd, task.id),
     });
 
@@ -951,7 +951,7 @@ export class Orchestrator {
   ): string {
     const candidates = [
       parsedDecision.cleanContent.trim(),
-      parsedDecision.opinion?.trim() ?? "",
+      parsedDecision.opinion.trim(),
       this.stripStructuredSignals(stripDecisionResponseMarkup(rawFinalMessage)).trim(),
     ];
 
@@ -962,51 +962,23 @@ export class Orchestrator {
     return formatAgentDispatchContent(content, targetAgentIds);
   }
 
-  private extractAgentDisplayContent(content: string, options?: { preferTrailingDeliverySection?: boolean }): string {
+  private extractAgentDisplayContent(content: string): string {
     const trimmed = content.trim();
     if (!trimmed) {
       return "";
     }
-
-    const trailingSection = options?.preferTrailingDeliverySection
-      ? this.extractTrailingTopLevelSection(trimmed)
-      : trimmed;
-    return trailingSection
+    return trimmed
       .replace(/\n(?:---|\*\*\*)(?:\s*\n?)*$/u, "")
       .trim();
   }
 
-  private extractTrailingTopLevelSection(content: string): string {
-    const headingPattern = /(^|\n)(#{1,2}\s+[^\n]+)\n/g;
-    let lastHeadingIndex = -1;
-    let match: RegExpExecArray | null = headingPattern.exec(content);
-    while (match) {
-      const prefix = match[1] ?? "";
-      lastHeadingIndex = match.index + prefix.length;
-      match = headingPattern.exec(content);
-    }
-
-    if (lastHeadingIndex < 0) {
-      return content;
-    }
-
-    const trailingSection = content.slice(lastHeadingIndex).trim();
-    return trailingSection || content;
-  }
-
   protected createDisplayContent(parsedDecision: ParsedDecision): string {
-    const preferTrailingDeliverySection = parsedDecision.decision === "invalid";
-    const cleanContent = this.extractAgentDisplayContent(parsedDecision.cleanContent, {
-      preferTrailingDeliverySection,
-    });
-    if (parsedDecision.decision === "invalid" && parsedDecision.validationError) {
-      return [cleanContent, parsedDecision.validationError].filter(Boolean).join("\n\n");
-    }
+    const cleanContent = this.extractAgentDisplayContent(parsedDecision.cleanContent);
     if (cleanContent) {
       return cleanContent;
     }
 
-    const opinion = parsedDecision.opinion?.trim();
+    const opinion = parsedDecision.opinion.trim();
     if (opinion) {
       return opinion;
     }
@@ -1014,13 +986,7 @@ export class Orchestrator {
     if (parsedDecision.decision === "continue") {
       return "（该 Agent 已给出需要响应的结论，但未返回可展示的结果正文。）";
     }
-    if (parsedDecision.decision === "invalid") {
-      return parsedDecision.validationError ?? "（该 Agent 返回了无效的判定结果。）";
-    }
-    if (parsedDecision.decision === "complete") {
-      return "";
-    }
-    return "（该 Agent 未返回可展示的结果正文。）";
+    return "";
   }
 
   private getTaskRuntimeTarget(task: Pick<TaskRecord, "id" | "cwd">): OpenCodeRuntimeTarget {
@@ -1616,13 +1582,6 @@ export class Orchestrator {
       return {
         agentId: runtimeAgentId,
         status: "failed",
-        decisionAgent: false,
-        decision: "invalid",
-        agentStatus: "failed",
-        agentContextContent: "",
-        opinion: null,
-        allowDirectFallbackWhenNoBatch: false,
-        signalDone: false,
         errorMessage: `Task ${task.id} 缺少 Agent ${runtimeAgentId}`,
       };
     }
@@ -1674,6 +1633,10 @@ export class Orchestrator {
         );
       }
       const parsedDecision = this.parseDecision(response.finalMessage, decisionAgent);
+      const agentStatus = resolveAgentStatusFromDecision({
+        decision: parsedDecision.decision,
+        decisionAgent,
+      });
       const agentContextContent = this.resolveAgentContextContent(
         parsedDecision,
         response.finalMessage,
@@ -1689,9 +1652,9 @@ export class Orchestrator {
         sender: runtimeAgentId,
         timestamp: response.timestamp,
         kind: "agent-final",
-        status: response.status,
+        status: "completed",
         decision: parsedDecision.decision,
-        decisionNote: parsedDecision.opinion ?? "",
+        decisionNote: parsedDecision.opinion,
         rawResponse: response.finalMessage,
         senderDisplayName: this.resolveMessageSenderDisplayName(state, runtimeAgentId),
       };
@@ -1701,10 +1664,6 @@ export class Orchestrator {
         parsedDecision.decision === "continue"
           ? this.getOutgoingEdges(topology, runtimeAgentId, "continue")
           : [];
-      const agentStatus = resolveAgentStatusFromDecision({
-        decision: parsedDecision.decision,
-        decisionAgent,
-      });
       this.store.updateTaskAgentStatus(task.cwd, task.id, runtimeAgentId, agentStatus);
       if (parsedDecision.decision === "continue" && actionRequiredTargets.length > 0) {
         this.updateTaskStatusIfActive(
@@ -1713,8 +1672,6 @@ export class Orchestrator {
           concurrentBatchSize > 1 ? "running" : "continue",
           null,
         );
-      } else if (agentStatus === "failed") {
-        this.updateTaskStatusIfActive(task.cwd, task.id, "failed", null);
       } else {
         this.updateTaskStatusIfActive(task.cwd, task.id, "running", null);
       }
@@ -1743,26 +1700,33 @@ export class Orchestrator {
       });
 
       const signal = this.parseSignal(response.finalMessage);
+      if (parsedDecision.decision === "continue") {
+        return {
+          agentId: runtimeAgentId,
+          messageId: taskMessage.id,
+          status: "completed",
+          decisionAgent: true,
+          decision: "continue",
+          agentStatus: "continue",
+          agentContextContent,
+          opinion: parsedDecision.opinion,
+          allowDirectFallbackWhenNoBatch: prompt.allowDirectFallbackWhenNoBatch ?? false,
+          signalDone: signal.done,
+        };
+      }
       return {
         agentId: runtimeAgentId,
         messageId: taskMessage.id,
         status: "completed",
         decisionAgent,
-        decision: parsedDecision.decision,
-        agentStatus,
+        decision: "complete",
+        agentStatus: "completed",
         agentContextContent,
         opinion: parsedDecision.opinion,
         allowDirectFallbackWhenNoBatch: prompt.allowDirectFallbackWhenNoBatch ?? false,
         signalDone: signal.done,
       };
     } catch (error) {
-      const topology = this.store.getTopology(cwd);
-      const decisionAgent = resolveExecutionDecisionAgent({
-        state,
-        topology,
-        runtimeAgentId,
-        executableAgentId,
-      });
       this.store.updateTaskAgentStatus(task.cwd, task.id, runtimeAgentId, "failed");
       const failedMessage: MessageRecord = {
         id: randomUUID(),
@@ -1797,15 +1761,7 @@ export class Orchestrator {
 
       return {
         agentId: runtimeAgentId,
-        messageId: "",
         status: "failed",
-        decisionAgent,
-        decision: "invalid",
-        agentStatus: "failed",
-        agentContextContent: "",
-        opinion: null,
-        allowDirectFallbackWhenNoBatch: false,
-        signalDone: false,
         errorMessage: error instanceof Error ? error.message : String(error),
       };
     }

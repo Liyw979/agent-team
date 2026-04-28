@@ -211,9 +211,6 @@ function resolveAgentStatusFromFinalMessage(
   if (message.decision === "continue") {
     return "continue";
   }
-  if (message.status === "error") {
-    return "failed";
-  }
   return "completed";
 }
 

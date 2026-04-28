@@ -33,13 +33,12 @@ export function shouldStopTaskForUnhandledActionRequiredRequest(input: {
 export function resolveAgentStatusFromDecision(input: {
   decision: Decision;
   decisionAgent: boolean;
-}): AgentStatus {
-  if (input.decision === "invalid") {
-    return "failed";
-  }
-
+}): Extract<AgentStatus, "completed" | "continue"> {
   if (input.decision === "continue") {
-    return input.decisionAgent ? "continue" : "failed";
+    if (!input.decisionAgent) {
+      throw new Error("非判定 Agent 不应返回 continue");
+    }
+    return "continue";
   }
 
   return "completed";

@@ -520,12 +520,13 @@ test("scheduler script emulator 纯函数会在核心 finished 但仍待 decisio
       {
         result: {
           agentId: "TaskReview",
+          messageId: "msg-taskreview-continue",
           status: "completed" as const,
           decisionAgent: true,
           decision: "continue" as const,
-          agentStatus: "completed" as const,
+          agentStatus: "continue" as const,
           agentContextContent: "TaskReview",
-          opinion: null,
+          opinion: "",
           allowDirectFallbackWhenNoBatch: false,
           signalDone: false,
         },
@@ -538,12 +539,13 @@ test("scheduler script emulator 纯函数会在核心 finished 但仍待 decisio
       {
         result: {
           agentId: "TaskReview",
+          messageId: "msg-taskreview-complete",
           status: "completed" as const,
           decisionAgent: true,
           decision: "complete" as const,
           agentStatus: "completed" as const,
           agentContextContent: "TaskReview",
-          opinion: null,
+          opinion: "",
           allowDirectFallbackWhenNoBatch: false,
           signalDone: false,
         },

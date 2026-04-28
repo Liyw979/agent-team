@@ -10,7 +10,7 @@ import type {
 
 export interface GraphActionRequiredRequest {
   sourceMessageId: string;
-  opinion: string | null;
+  opinion: string;
   agentContextContent: string;
 }
 

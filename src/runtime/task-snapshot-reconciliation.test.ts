@@ -9,8 +9,8 @@ function createAgentFinalMessage(input: {
   sender: string;
   timestamp: string;
   content: string;
-  decision?: "complete" | "continue" | "invalid";
-  status?: "completed" | "error";
+  decision?: "complete" | "continue";
+  status?: "completed";
 }): MessageRecord {
   return {
     id: input.id,
