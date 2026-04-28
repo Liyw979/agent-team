@@ -9,6 +9,7 @@ import type {
   SubmitTaskPayload,
   UiSnapshotPayload,
 } from "@shared/types";
+import { parseJson5 } from "@shared/json5";
 import type { Orchestrator } from "../runtime/orchestrator";
 import { buildTaskLogFilePath } from "../runtime/app-log";
 import { UI_LOOPBACK_HOST } from "./ui-host-launch";
@@ -48,7 +49,7 @@ async function readJsonBody(request: http.IncomingMessage): Promise<unknown> {
   if (chunks.length === 0) {
     return {};
   }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  return parseJson5(Buffer.concat(chunks).toString("utf8"));
 }
 
 async function buildUiSnapshotPayload(

@@ -305,7 +305,7 @@ function App() {
         <div className="PANEL-surface max-w-xl rounded-[12px] p-6 text-center">
           <p className="font-display text-[1.8rem] font-bold text-primary">当前没有可展示的 Task</p>
           <p className="mt-3 text-sm leading-7 text-muted-foreground">
-            请先通过命令行执行 <code>task ui --file &lt;topology.json&gt; --message &lt;message&gt;</code>
+            请先通过命令行执行 <code>task ui --file &lt;topology-file&gt; --message &lt;message&gt;</code>
             打开当前任务页面。
           </p>
         </div>

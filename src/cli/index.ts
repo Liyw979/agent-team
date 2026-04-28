@@ -1,9 +1,7 @@
 #!/usr/bin/env node
 
 import { randomUUID } from "node:crypto";
-import fs from "node:fs";
 import net from "node:net";
-import path from "node:path";
 import process from "node:process";
 import { buildCliOpencodeAttachCommand } from "@shared/terminal-commands";
 import type { TaskSnapshot, WorkspaceSnapshot } from "@shared/types";
@@ -23,6 +21,7 @@ import { resolveCliSignalPlan } from "./cli-signal-policy";
 import { ensureRuntimeAssets, isCompiledRuntime } from "./runtime-assets";
 import { resolveCliTaskStreamingPlan } from "./task-streaming-policy";
 import { renderTaskSessionSummary } from "./task-session-summary";
+import { isSupportedTopologyFile, loadTeamDslDefinitionFile } from "./topology-file";
 import {
   collectNewTaskAttachCommandEntries,
   renderTaskAttachCommands,
@@ -119,21 +118,11 @@ async function resolveProject(
   );
 }
 
-async function loadTeamDslDefinition(file: string) {
-  const resolved = path.resolve(file);
-  if (path.extname(resolved).toLowerCase() !== ".json") {
-    throw new Error(`团队拓扑文件必须是 JSON：${resolved}`);
-  }
-  return JSON.parse(fs.readFileSync(resolved, "utf8"));
-}
-
-async function ensureJsonTopologyApplied(
+async function ensureJson5TopologyApplied(
   context: CliContext,
   workspace: WorkspaceSnapshot,
-  file: string,
+  compiled: ReturnType<typeof compileTeamDsl>,
 ): Promise<WorkspaceSnapshot> {
-  const definition = await loadTeamDslDefinition(file);
-  const compiled = compileTeamDsl(definition);
   if (matchesAppliedTeamDsl(workspace.agents, workspace.topology, compiled)) {
     return workspace;
   }
@@ -149,7 +138,10 @@ function validateTaskHeadlessCommand(
   const hasFile = Boolean(command.file?.trim());
   const hasMessage = Boolean(command.message?.trim());
   if (!hasFile) {
-    fail("新建 Task 时必须传 --file <topology.json>。");
+    fail("新建 Task 时必须传 --file <topology-file>。");
+  }
+  if (!isSupportedTopologyFile(command.file!.trim())) {
+    fail("新建 Task 时传入的 --file 必须是 .json5。");
   }
   if (!hasMessage) {
     fail("新建 Task 时必须传 --message <message>。");
@@ -163,7 +155,10 @@ function validateTaskUiCommand(
   const hasMessage = Boolean(command.message?.trim());
 
   if (!hasFile) {
-    fail("新建 Task 打开网页界面时必须传 --file <topology.json>。");
+    fail("新建 Task 打开网页界面时必须传 --file <topology-file>。");
+  }
+  if (!isSupportedTopologyFile(command.file!.trim())) {
+    fail("新建 Task 打开网页界面时传入的 --file 必须是 .json5。");
   }
   if (!hasMessage) {
     fail("新建 Task 打开网页界面时必须传 --message <message>。");
@@ -323,9 +318,10 @@ async function handleTaskHeadlessCommand(
   context: CliContext,
   command: Extract<ParsedCliCommand, { kind: "task.headless" }>,
   diagnostics: TaskRunDiagnostics,
+  compiledTopology: ReturnType<typeof compileTeamDsl>,
 ) {
   let workspace = await resolveProject(context, command.cwd);
-  workspace = await ensureJsonTopologyApplied(context, workspace, command.file!);
+  workspace = await ensureJson5TopologyApplied(context, workspace, compiledTopology);
   const initialMessage = command.message!.trim();
 
   const snapshot = await context.orchestrator.submitTask({
@@ -354,6 +350,7 @@ async function handleTaskUiCommand(
   context: CliContext,
   command: Extract<ParsedCliCommand, { kind: "task.ui" }>,
   diagnostics: TaskRunDiagnostics,
+  compiledTopology: ReturnType<typeof compileTeamDsl>,
 ): Promise<ActiveUiHost> {
   const streamingPlan = resolveCliTaskStreamingPlan({
     command,
@@ -361,7 +358,7 @@ async function handleTaskUiCommand(
   });
 
   let workspace = await resolveProject(context, command.cwd);
-  workspace = await ensureJsonTopologyApplied(context, workspace, command.file!);
+  workspace = await ensureJson5TopologyApplied(context, workspace, compiledTopology);
   const webRoot = await ensureUiAssetsAvailable(context.userDataPath);
   const snapshot = await context.orchestrator.submitTask({
     cwd: workspace.cwd,
@@ -397,14 +394,14 @@ function buildHelp() {
   const appendix = [
     "",
     "补充命令示例：",
-    "  task headless --file <topology-json> --message <message> [--cwd <path>] [--show-message]",
-    "  task ui --file <topology-json> --message <message> [--cwd <path>] [--show-message]",
+    "  task headless --file <topology-file> --message <message> [--cwd <path>] [--show-message]",
+    "  task ui --file <topology-file> --message <message> [--cwd <path>] [--show-message]",
     "",
     "说明：",
     "  - `task headless` 默认打印诊断信息与 attach 调试命令；传 `--show-message` 后再额外展示完整消息记录。",
     "  - `task ui` 默认打印诊断信息与 attach 调试命令；传 `--show-message` 后再额外展示完整消息记录，同时保持网页界面照常打开。",
     "  - `task ui` 会在当前 CLI 进程里启动本地 Web Host，并打开浏览器；命令本身会保持驻留，按 Ctrl+C 后才清理并退出。",
-    "  - 新建任务时必须传 `--file` 和 `--message`。",
+    "  - 新建任务时必须传 `--file` 和 `--message`；`--file` 必须是 `.json5`。",
   ].join("\n");
   return `${commanderHelp}\n${appendix}`;
 }
@@ -418,13 +415,16 @@ async function run() {
 
   let userDataPath: string | null = null;
   let activeTaskDiagnostics: TaskRunDiagnostics | null = null;
+  let compiledTopology: ReturnType<typeof compileTeamDsl> | null = null;
   if (command.kind === "task.headless") {
     validateTaskHeadlessCommand(command);
+    compiledTopology = compileTeamDsl(loadTeamDslDefinitionFile(command.file!));
     userDataPath = resolveCliUserDataPath();
     initAppFileLogger(userDataPath);
     activeTaskDiagnostics = buildTaskRunDiagnostics(userDataPath, randomUUID());
   } else if (command.kind === "task.ui") {
     validateTaskUiCommand(command);
+    compiledTopology = compileTeamDsl(loadTeamDslDefinitionFile(command.file!));
     userDataPath = resolveCliUserDataPath();
     initAppFileLogger(userDataPath);
     activeTaskDiagnostics = buildTaskRunDiagnostics(userDataPath, randomUUID());
@@ -474,11 +474,11 @@ async function run() {
   process.once("SIGTERM", handleSignal);
   try {
     if (command.kind === "task.headless") {
-      await handleTaskHeadlessCommand(context, command, activeTaskDiagnostics!);
+      await handleTaskHeadlessCommand(context, command, activeTaskDiagnostics!, compiledTopology!);
       didPrintTaskDiagnosticsForCrash = true;
       observedSettledTaskState = true;
     } else if (command.kind === "task.ui") {
-      activeUiHost = await handleTaskUiCommand(context, command, activeTaskDiagnostics!);
+      activeUiHost = await handleTaskUiCommand(context, command, activeTaskDiagnostics!, compiledTopology!);
       didPrintTaskDiagnosticsForCrash = true;
       observedSettledTaskState = true;
       const disposeOptions = resolveCliDisposeOptions({

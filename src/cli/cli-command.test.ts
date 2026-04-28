@@ -13,7 +13,7 @@ test("parseCliCommand 解析新建 task headless", () => {
     "task",
     "headless",
     "--file",
-    "config/team-topologies/development-team.topology.json",
+    "config/team-topologies/development-team.topology.json5",
     "--message",
     "请开始执行",
     "--cwd",
@@ -22,7 +22,7 @@ test("parseCliCommand 解析新建 task headless", () => {
 
   assert.deepEqual(parsed, {
     kind: "task.headless",
-    file: "config/team-topologies/development-team.topology.json",
+    file: "config/team-topologies/development-team.topology.json5",
     message: "请开始执行",
     cwd: "/tmp/project",
     showMessage: false,
@@ -34,7 +34,7 @@ test("parseCliCommand 解析 task headless 的 --show-message", () => {
     "task",
     "headless",
     "--file",
-    "config/team-topologies/development-team.topology.json",
+    "config/team-topologies/development-team.topology.json5",
     "--message",
     "请开始执行",
     "--show-message",
@@ -43,7 +43,7 @@ test("parseCliCommand 解析 task headless 的 --show-message", () => {
   assert.deepEqual(parsed, {
     kind: "task.headless",
     cwd: undefined,
-    file: "config/team-topologies/development-team.topology.json",
+    file: "config/team-topologies/development-team.topology.json5",
     message: "请开始执行",
     showMessage: true,
   });
@@ -73,7 +73,7 @@ test("parseCliCommand 解析 task ui 新建任务", () => {
     "task",
     "ui",
     "--file",
-    "config/team-topologies/development-team.topology.json",
+    "config/team-topologies/development-team.topology.json5",
     "--message",
     "请开始执行",
     "--cwd",
@@ -82,7 +82,7 @@ test("parseCliCommand 解析 task ui 新建任务", () => {
 
   assert.deepEqual(parsed, {
     kind: "task.ui",
-    file: "config/team-topologies/development-team.topology.json",
+    file: "config/team-topologies/development-team.topology.json5",
     message: "请开始执行",
     cwd: "/tmp/project",
     showMessage: false,
@@ -94,7 +94,7 @@ test("parseCliCommand 解析 task ui 的 --show-message", () => {
     "task",
     "ui",
     "--file",
-    "config/team-topologies/development-team.topology.json",
+    "config/team-topologies/development-team.topology.json5",
     "--message",
     "请开始执行",
     "--show-message",
@@ -103,9 +103,28 @@ test("parseCliCommand 解析 task ui 的 --show-message", () => {
   assert.deepEqual(parsed, {
     kind: "task.ui",
     cwd: undefined,
-    file: "config/team-topologies/development-team.topology.json",
+    file: "config/team-topologies/development-team.topology.json5",
     message: "请开始执行",
     showMessage: true,
+  });
+});
+
+test("parseCliCommand 接受 .json5 拓扑文件路径", () => {
+  const parsed = parseCliCommand([
+    "task",
+    "headless",
+    "--file",
+    "config/team-topologies/development-team.topology.json5",
+    "--message",
+    "请开始执行",
+  ]);
+
+  assert.deepEqual(parsed, {
+    kind: "task.headless",
+    cwd: undefined,
+    file: "config/team-topologies/development-team.topology.json5",
+    message: "请开始执行",
+    showMessage: false,
   });
 });
 
@@ -135,14 +154,14 @@ test("parseCliCommand 允许 task ui 单独接收 --cwd", () => {
     "--cwd",
     "/tmp/project",
     "--file",
-    "config/team-topologies/development-team.topology.json",
+    "config/team-topologies/development-team.topology.json5",
     "--message",
     "请开始执行",
   ]);
 
   assert.deepEqual(parsed, {
     kind: "task.ui",
-    file: "config/team-topologies/development-team.topology.json",
+    file: "config/team-topologies/development-team.topology.json5",
     message: "请开始执行",
     cwd: "/tmp/project",
     showMessage: false,
@@ -163,7 +182,7 @@ test("旧 task run 与旧 --ui 入口都会被拒绝", () => {
     "task",
     "run",
     "--file",
-    "config/team-topologies/development-team.topology.json",
+    "config/team-topologies/development-team.topology.json5",
     "--message",
     "请开始执行",
   ]));
@@ -178,13 +197,13 @@ test("旧 task run 与旧 --ui 入口都会被拒绝", () => {
 test("Commander help 只包含 task headless/task ui 命令", () => {
   assert.match(CLI_COMMAND_SOURCE, /\.name\("agent-team"\)/);
   assert.doesNotMatch(CLI_COMMAND_SOURCE, new RegExp(`\\.name\\("${LEGACY_CLI_NAME}"\\)`));
-  assert.match(CLI_SOURCE, /task headless --file <topology-json> --message <message> \[--cwd <path>\] \[--show-message\]/);
-  assert.match(CLI_SOURCE, /task ui --file <topology-json> --message <message> \[--cwd <path>\] \[--show-message\]/);
+  assert.match(CLI_SOURCE, /task headless --file <topology-file> --message <message> \[--cwd <path>\] \[--show-message\]/);
+  assert.match(CLI_SOURCE, /task ui --file <topology-file> --message <message> \[--cwd <path>\] \[--show-message\]/);
   assert.doesNotMatch(CLI_SOURCE, /task ui <taskId> \[--cwd <path>\]/);
   assert.doesNotMatch(CLI_SOURCE, /task attach <taskId> <agentId>/);
-  assert.doesNotMatch(CLI_SOURCE, /task run --file <topology-json> --message <message>/);
+  assert.doesNotMatch(CLI_SOURCE, /task run --file <topology-file> --message <message>/);
   assert.doesNotMatch(CLI_SOURCE, /task show <taskId>/);
-  assert.doesNotMatch(CLI_SOURCE, /task chat --file <topology-json> --message <message>/);
+  assert.doesNotMatch(CLI_SOURCE, /task chat --file <topology-file> --message <message>/);
   assert.doesNotMatch(CLI_SOURCE, /task chat --task <taskId>/);
   assert.doesNotMatch(CLI_SOURCE, /--ui/);
   assert.doesNotMatch(CLI_SOURCE, /task attach-agent <taskId> <agentId>/);

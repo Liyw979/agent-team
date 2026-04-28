@@ -1,6 +1,7 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { parseJson5 } from "@shared/json5";
 import { withOptionalString, withOptionalValue } from "@shared/object-utils";
 import { buildSubmitMessageBody } from "./opencode-request-body";
 import { toOpenCodeAgentId } from "./opencode-agent-id";
@@ -859,7 +860,7 @@ export class OpenCodeClient {
             }
 
             try {
-              const event = JSON.parse(dataLine) as OpenCodeEvent;
+              const event = parseJson5<OpenCodeEvent>(dataLine);
               this.handleEvent(event);
               onEvent(event);
             } catch {
@@ -1289,7 +1290,7 @@ export class OpenCodeClient {
     }
 
     try {
-      return JSON.parse(trimmed) as unknown;
+      return parseJson5(trimmed);
     } catch {
       return null;
     }
@@ -1655,7 +1656,7 @@ export class OpenCodeClient {
       }
       if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
         try {
-          return this.extractStructuredArgsDetail(JSON.parse(trimmed), depth + 1);
+          return this.extractStructuredArgsDetail(parseJson5(trimmed), depth + 1);
         } catch {
           return this.shortenText(trimmed, 160);
         }

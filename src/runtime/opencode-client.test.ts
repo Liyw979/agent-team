@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { parseJson5 } from "@shared/json5";
 
 import { buildTaskLogFilePath, initAppFileLogger } from "./app-log";
 import type { OpenCodeNormalizedMessage, OpenCodeSessionRuntime } from "./opencode-client";
@@ -130,9 +131,34 @@ test("createSession logs invalid responses into the task log file when runtimeKe
   );
 
   const lines = fs.readFileSync(buildTaskLogFilePath(userDataPath, taskId), "utf8").trim().split("\n");
-  const record = JSON.parse(lines.at(-1) ?? "{}");
-  assert.equal(record.event, "opencode.create_session_invalid_response");
-  assert.equal(record.taskId, taskId);
+  const record = parseJson5<Record<string, unknown>>(lines.at(-1) ?? "{}");
+  assert.equal(record["event"], "opencode.create_session_invalid_response");
+  assert.equal(record["taskId"], taskId);
+});
+
+test("createSession 在响应体不是合法 JSON5 时仍走 invalid response 分支并记录日志", async () => {
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  const taskId = "task-malformed";
+  initAppFileLogger(userDataPath);
+
+  const client = new OpenCodeClient() as OpenCodeClient & {
+    request: () => Promise<Response>;
+  };
+  client.request = async () => new Response("oops", { status: 200 });
+
+  await assert.rejects(
+    client.createSession({
+      runtimeKey: taskId,
+      projectPath,
+    }, "demo"),
+    /session id/,
+  );
+
+  const lines = fs.readFileSync(buildTaskLogFilePath(userDataPath, taskId), "utf8").trim().split("\n");
+  const record = parseJson5<Record<string, unknown>>(lines.at(-1) ?? "{}");
+  assert.equal(record["event"], "opencode.create_session_invalid_response");
+  assert.equal(record["taskId"], taskId);
 });
 
 test("session message 请求不注入 AbortSignal，确保长任务不会被请求层超时中断", async () => {
@@ -529,15 +555,15 @@ test("recoverExecutionResultAfterTransportError 不会跨到后续 user 子树�
 
   assert.equal(recovered, null);
   const logFilePath = buildTaskLogFilePath(userDataPath, runtimeTarget.runtimeKey);
-  const records = fs.readFileSync(logFilePath, "utf8").trim().split("\n").map((line) => JSON.parse(line));
-  assert.deepEqual(records.map((record) => record.event), [
+  const records = fs.readFileSync(logFilePath, "utf8").trim().split("\n").map((line) => parseJson5<Record<string, unknown>>(line));
+  assert.deepEqual(records.map((record) => record["event"]), [
     "opencode.transport_recovery_started",
     "opencode.transport_recovery_timed_out",
   ]);
-  assert.equal(records[1]?.recoveryState, "waiting-with-related-reply");
-  assert.equal(records[1]?.relatedReplyCount, 1);
-  assert.equal(records[1]?.latestRelatedMessageId, "msg-placeholder");
-  assert.equal(records[1]?.latestRelatedParentMessageId, "msg-user");
+  assert.equal(records[1]?.["recoveryState"], "waiting-with-related-reply");
+  assert.equal(records[1]?.["relatedReplyCount"], 1);
+  assert.equal(records[1]?.["latestRelatedMessageId"], "msg-placeholder");
+  assert.equal(records[1]?.["latestRelatedParentMessageId"], "msg-user");
 });
 
 test("recoverExecutionResultAfterTransportError 默认会等待超过 45 秒的晚到正式回复", async () => {
@@ -631,13 +657,13 @@ test("recoverExecutionResultAfterTransportError 默认会等待超过 45 秒的�
     assert.equal(recovered?.finalMessage, "最终总结已生成");
 
     const logFilePath = buildTaskLogFilePath(userDataPath, runtimeTarget.runtimeKey);
-    const records = fs.readFileSync(logFilePath, "utf8").trim().split("\n").map((line) => JSON.parse(line));
-    assert.deepEqual(records.map((record) => record.event), [
+    const records = fs.readFileSync(logFilePath, "utf8").trim().split("\n").map((line) => parseJson5<Record<string, unknown>>(line));
+    assert.deepEqual(records.map((record) => record["event"]), [
       "opencode.transport_recovery_started",
       "opencode.transport_recovery_succeeded",
     ]);
-    assert.equal(records[0]?.timeoutMs, 180000);
-    assert.equal(records[1]?.recoveredMessageId, "msg-final");
+    assert.equal(records[0]?.["timeoutMs"], 180000);
+    assert.equal(records[1]?.["recoveredMessageId"], "msg-final");
   } finally {
     Date.now = originalDateNow;
     globalThis.setTimeout = originalSetTimeout;
@@ -696,16 +722,16 @@ test("recoverExecutionResultAfterTransportError 没有正式回复时不能把 t
 
   assert.equal(recovered, null);
   const logFilePath = buildTaskLogFilePath(userDataPath, runtimeTarget.runtimeKey);
-  const records = fs.readFileSync(logFilePath, "utf8").trim().split("\n").map((line) => JSON.parse(line));
-  assert.deepEqual(records.map((record) => record.event), [
+  const records = fs.readFileSync(logFilePath, "utf8").trim().split("\n").map((line) => parseJson5<Record<string, unknown>>(line));
+  assert.deepEqual(records.map((record) => record["event"]), [
     "opencode.transport_recovery_started",
     "opencode.transport_recovery_timed_out",
   ]);
-  assert.equal(records[1]?.recoveryState, "waiting-with-related-reply");
-  assert.equal(records[1]?.relatedReplyCount, 1);
-  assert.equal(records[1]?.latestRelatedMessageId, "msg-tool-calls");
-  assert.equal(records[1]?.latestRelatedParentMessageId, "msg-user");
-  assert.equal(records[1]?.latestRelatedFinish, "tool-calls");
+  assert.equal(records[1]?.["recoveryState"], "waiting-with-related-reply");
+  assert.equal(records[1]?.["relatedReplyCount"], 1);
+  assert.equal(records[1]?.["latestRelatedMessageId"], "msg-tool-calls");
+  assert.equal(records[1]?.["latestRelatedParentMessageId"], "msg-user");
+  assert.equal(records[1]?.["latestRelatedFinish"], "tool-calls");
 });
 
 test("配置变更时不应触发 shutdown", async () => {
@@ -987,4 +1013,70 @@ test("buildRuntimeSnapshot 不会因为后续活动超过全局显示窗口而�
     snapshot.activities.some((activity) => activity.detail.includes("Prioritizing instructions")),
     true,
   );
+});
+
+test("buildRuntimeSnapshot 在工具参数形似 JSON5 但非法时回退为原始字符串摘要", () => {
+  const { client } = createClient();
+  const typed = client as OpenCodeClient & {
+    buildRuntimeSnapshot: (sessionId: string, messages: unknown[]) => {
+      activities: Array<{ kind: string; detail: string; label: string }>;
+    };
+  };
+
+  const snapshot = typed.buildRuntimeSnapshot("session-1", [
+    {
+      id: "msg-1",
+      role: "assistant",
+      createdAt: "2026-04-21T12:52:26.000Z",
+      completedAt: "2026-04-21T12:52:26.000Z",
+      parts: [
+        {
+          type: "tool-call",
+          tool: { id: "glob" },
+          input: "{bad}",
+        },
+      ],
+    },
+  ]);
+
+  assert.equal(snapshot.activities.length, 1);
+  assert.equal(snapshot.activities[0]?.kind, "tool");
+  assert.equal(snapshot.activities[0]?.label, "glob");
+  assert.equal(snapshot.activities[0]?.detail, "参数: {bad}");
+  assert.equal(snapshot.activities[0]?.timestamp, "2026-04-21T12:52:26.000Z");
+});
+
+test("startEventPump 在单条 SSE 数据非法时保留原始载荷并继续消费后续事件", async () => {
+  const { client, projectPath } = createClient();
+  const typed = client as unknown as {
+    startEventPump: (
+      onEvent: (event: Record<string, unknown>) => void,
+      server: { process: null; port: number },
+      runtimeKey: string,
+    ) => Promise<void>;
+  };
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(
+        "data: not-json\n\ndata: {type:'session.idle',properties:{sessionID:'session-1'}}\n\n",
+      ));
+      controller.close();
+    },
+  }), { status: 200 })) as typeof fetch;
+
+  const events: Array<Record<string, unknown>> = [];
+  try {
+    await typed.startEventPump((event: Record<string, unknown>) => {
+      events.push(event);
+    }, { process: null, port: 43127 }, projectPath);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(events, [
+    { payload: { raw: "not-json" } },
+    { type: "session.idle", properties: { sessionID: "session-1" } },
+  ]);
 });

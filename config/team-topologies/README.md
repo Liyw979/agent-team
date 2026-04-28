@@ -1,6 +1,6 @@
-# 拓扑 JSON 配置说明
+# 拓扑 JSON5 配置说明
 
-当前仓库里的团队拓扑 JSON 只支持一种 DSL：
+当前仓库里的团队拓扑配置只支持一种 DSL，并统一按 JSON5 语法解析：
 
 - 递归式 `entry + nodes + links`
 
@@ -130,7 +130,7 @@
 语义：
 
 - `spawn` 不是 agent，所以没有 `prompt`
-- `spawn` 固定读取上游输出 JSON 对象里的 `items` 数组，不支持配置其他字段名
+- `spawn` 固定读取上游输出 JSON5 对象里的 `items` 数组，不支持配置其他字段名
 - 每个输入项都会实例化一份 `graph`
 - 子图全部完成后，`spawn` 节点自身视为完成
 - 完成后按父图里的普通 `links` 继续流转
@@ -250,7 +250,7 @@
 
 ## 4. 研发团队示例
 
-`development-team.topology.json` 现在使用的就是递归式 DSL：
+`development-team.topology.json5` 现在使用的就是递归式 DSL：
 
 ```json
 {
@@ -276,7 +276,7 @@
 
 ## 5. 漏洞团队示例
 
-`vulnerability-team.topology.json` 展示了递归 `spawn` 的写法：
+`vulnerability-team.topology.json5` 展示了递归 `spawn` 的写法：
 
 - 根图入口是 `线索发现`
 - `线索发现 -> 疑点辩论` 不是无条件流转：有新的 finding 时，`线索发现` 的回复开头先输出 `<continue>`，再输出 finding 正文，并命中 `{ "from": "线索发现", "to": "疑点辩论", "trigger_type": "continue", "message_type": "last-all" }`
@@ -293,7 +293,7 @@
 
 ## 6. 当前硬约束
 
-- 团队拓扑 JSON 只支持递归式 `entry + nodes + links`
+- 团队拓扑 JSON5 只支持递归式 `entry + nodes + links`
 - 节点 `type` 是判别字段，只允许 `agent` 或 `spawn`
 - 当 `type = "agent"` 时，节点按执行型结构解析：使用 `prompt` / `writable`，不使用 `graph`
 - 当 `type = "spawn"` 时，节点按展开型结构解析：使用 `graph`，不使用 `prompt`

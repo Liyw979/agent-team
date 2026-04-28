@@ -7,6 +7,7 @@ import type {
   TaskSnapshot,
   UiSnapshotPayload,
 } from "@shared/types";
+import { parseJson5 } from "@shared/json5";
 import { normalizeOptionalString } from "@shared/object-utils";
 
 function buildQuery(params: Record<string, string>) {
@@ -19,7 +20,7 @@ async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit): Promi
     const message = await response.text();
     throw new Error(message || `请求失败：${response.status}`);
   }
-  return response.json() as Promise<T>;
+  return parseJson5<T>(await response.text());
 }
 
 export function readLaunchTaskIdFromSearch(search: string): string | null {
@@ -71,15 +72,11 @@ export function subscribeAgentTeamEvents(
 ) {
   const source = new EventSource(`/api/events?${buildQuery(params)}`);
   source.onmessage = (message) => {
-    try {
-      const payload = JSON.parse(message.data) as AgentTeamEvent | { type: "connected" };
-      if (payload.type === "connected") {
-        return;
-      }
-      listener(payload);
-    } catch {
-      // ignore malformed events
+    const payload = parseJson5<AgentTeamEvent | { type: "connected" }>(message.data);
+    if (payload.type === "connected") {
+      return;
     }
+    listener(payload);
   };
   return () => {
     source.close();
