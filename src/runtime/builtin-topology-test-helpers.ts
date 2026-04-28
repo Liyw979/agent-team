@@ -12,7 +12,7 @@ export function readBuiltinTopology(fileName: string): TeamDslDefinition {
 }
 
 export function readBuiltinVulnerabilityTopology(): TeamDslDefinition {
-  return readBuiltinTopology("vulnerability-team.topology.json5");
+  return readBuiltinTopology("vulnerability.json5");
 }
 
 export function compileBuiltinTopology(fileName: string) {
@@ -20,5 +20,5 @@ export function compileBuiltinTopology(fileName: string) {
 }
 
 export function compileBuiltinVulnerabilityTopology() {
-  return compileBuiltinTopology("vulnerability-team.topology.json5");
+  return compileBuiltinTopology("vulnerability.json5");
 }

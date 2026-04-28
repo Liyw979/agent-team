@@ -276,7 +276,7 @@
 
 ## 5. 漏洞团队示例
 
-`vulnerability-team.topology.json5` 展示了递归 `spawn` 的写法：
+`vulnerability.json5` 展示了递归 `spawn` 的写法：
 
 - 根图入口是 `线索发现`
 - `线索发现 -> 疑点辩论` 不是无条件流转：有新的 finding 时，`线索发现` 的回复开头先输出 `<continue>`，再输出 finding 正文，并命中 `{ "from": "线索发现", "to": "疑点辩论", "trigger_type": "continue", "message_type": "last-all" }`
