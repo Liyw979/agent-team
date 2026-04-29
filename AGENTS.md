@@ -5,7 +5,7 @@
 ## 0. 约束
 
 - 禁用词：`收口`。新增或修改文案、注释、提示词、日志、界面文案时都不得使用该表述，统一改为含义更准确的描述。
-- 禁止未经同意加入“兜底”， “兼容”代码，当前属于项目初期，尽可能暴露问题，不需要考虑兼容
+- 禁止未经同意加入“兜底”， “兼容”代码，当前属于项目初期，尽可能暴露问题，不需要考虑兼容，禁止加入兼容代码
 
 ## 1. 项目概览
 
@@ -150,7 +150,7 @@ bun run dist:mac-x64
 
 - 每次交付前必须在仓库根目录运行 `bun tsc --noEmit`，并以类型检查通过作为交付前置条件。
 - 每次交付前必须在仓库根目录运行 `bun test --only-failures; bun run knip --fix`，并确认没有遗留失败用例与可自动修复的未使用项。
-- 新增或修改字段、函数入参、返回值时，尽量避免引入 `prop?: T`、`T | null`、`T | undefined` 这类宽松可空类型；优先通过更稳定的模型表达状态差异。确实需要“缺失值”语义时，也要先统一该字段在当前层级到底使用“必填值”“可选字段”还是“显式 `null`”，避免同一语义同时混用 optional、`undefined`、`null` 三套表达。
+- 代码中避免出现 null undefined optional 等可空类型, 优先通过更稳定的模型表达状态差异。
 - 涉及调度状态变化、回流顺序、裁决转发、spawn 对话推进等用户可见协作语义时，新增覆盖优先写进 `src/runtime/scheduler-script-emulator-migration.test.ts` 这类 script 测试，用对话脚本直接驱动 `src/runtime/scheduler-script-emulator.ts` 和真实调度核心验证流转；只有当该行为依赖内部暂存状态、且确实无法自然表达为一段用户可见对话脚本时，才保留在 `src/runtime/gating-router.test.ts` / `src/runtime/orchestrator.test.ts` 做纯状态测试。
 - 只要某个问题已经可以通过 emulator / script 测试直接证明真实用户可见流转，就不要再为同一语义额外补 `orchestrator`、`gating-router` 或其他重复层级的测试；只有 emulator 确实无法自然表达该问题时，才允许补其他测试。
 - 所有 Agent 对话顺序类单元测试，在排查和修复前都必须优先补成 `src/runtime/scheduler-script-emulator-migration.test.ts` 这类 script 脚本复现；先用脚本把真实对话顺序跑出失败，再继续修改实现与复验通过。
