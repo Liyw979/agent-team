@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { AgentRuntimeSnapshot, MessageRecord, TopologyRecord } from "@shared/types";
+import { renderAgentHistoryDetailToStaticHtml } from "./agent-history-markdown";
 import { buildAgentExecutionHistoryItems, buildAgentHistoryItems } from "./agent-history";
 
 function createAgentFinalMessage(input: {
@@ -462,6 +463,97 @@ test("buildAgentHistoryItems 会保留同一条最终回复里的 thinking，并
         detail: "这次我认可最终交付结论。",
       },
     ],
+  );
+});
+
+test("buildAgentHistoryItems 会按当前 agent 的 trigger 集合去掉 runtime 消息里的判定标签，并保留 markdown 加粗", () => {
+  const messages: MessageRecord[] = [];
+  const runtimeSnapshot: AgentRuntimeSnapshot = {
+    taskId: "task-1",
+    agentId: "TaskReview",
+    sessionId: "session-decision",
+    status: "running",
+    runtimeStatus: "running",
+    messageCount: 1,
+    updatedAt: "2026-04-20T14:34:44.000Z",
+    headline: "TaskReview 正在继续判定",
+    activeToolNames: [],
+    activities: [
+      {
+        id: "decision-message",
+        kind: "message",
+        label: "消息",
+        detail: "<continue> 我直接挑战这轮的结论： **这里应该加粗**",
+        timestamp: "2026-04-20T14:34:44.000Z",
+      },
+    ],
+  };
+
+  const [historyItem] = buildAgentHistoryItems({
+    agentId: "TaskReview",
+    messages,
+    topology,
+    runtimeSnapshot,
+  });
+  const html = renderAgentHistoryDetailToStaticHtml(historyItem?.detailSnippet ?? "");
+
+  assert.deepEqual(
+    historyItem && {
+      label: historyItem.label,
+      detailSnippet: historyItem.detailSnippet,
+      detail: historyItem.detail,
+    },
+    {
+      label: "消息",
+      detailSnippet: "我直接挑战这轮的结论： **这里应该加粗**",
+      detail: "我直接挑战这轮的结论： **这里应该加粗**",
+    },
+  );
+  assert.match(html, /<strong data-chat-markdown-role="strong">这里应该加粗<\/strong>/);
+  assert.doesNotMatch(html, /&lt;continue&gt;/);
+});
+
+test("buildAgentHistoryItems 不会误删普通 agent 正文里以 <default> 开头的内容", () => {
+  const messages: MessageRecord[] = [];
+  const runtimeSnapshot: AgentRuntimeSnapshot = {
+    taskId: "task-1",
+    agentId: "Build",
+    sessionId: "session-build",
+    status: "running",
+    runtimeStatus: "running",
+    messageCount: 1,
+    updatedAt: "2026-04-20T14:40:00.000Z",
+    headline: "Build 正在整理说明",
+    activeToolNames: [],
+    activities: [
+      {
+        id: "build-message",
+        kind: "message",
+        label: "消息",
+        detail: "<default> 这是正文，不是判定标签",
+        timestamp: "2026-04-20T14:40:00.000Z",
+      },
+    ],
+  };
+
+  const [historyItem] = buildAgentHistoryItems({
+    agentId: "Build",
+    messages,
+    topology,
+    runtimeSnapshot,
+  });
+
+  assert.deepEqual(
+    historyItem && {
+      label: historyItem.label,
+      detailSnippet: historyItem.detailSnippet,
+      detail: historyItem.detail,
+    },
+    {
+      label: "消息",
+      detailSnippet: "<default> 这是正文，不是判定标签",
+      detail: "<default> 这是正文，不是判定标签",
+    },
   );
 });
 

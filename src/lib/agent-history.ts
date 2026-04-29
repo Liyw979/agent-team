@@ -5,7 +5,11 @@ import type {
   TopologyRecord,
 } from "@shared/types";
 import { withOptionalValue } from "@shared/object-utils";
-import { isAgentFinalMessageRecord, isDecisionAgentInTopology } from "@shared/types";
+import {
+  isAgentFinalMessageRecord,
+  isDecisionAgentInTopology,
+  normalizeTopologyEdgeTrigger,
+} from "@shared/types";
 import { stripDecisionResponseMarkup } from "@shared/decision-response";
 import { getLoopLimitFailedDecisionAgentName } from "./decision-loop-limit";
 
@@ -38,8 +42,22 @@ function hasActionRequiredFollowUp(messages: MessageRecord[], finalMessageId: st
   );
 }
 
-function normalizeHistoryDetail(content: string | null | undefined) {
-  const normalized = stripDecisionResponseMarkup(content ?? "")
+function getAgentAllowedTriggers(
+  topology: Pick<TopologyRecord, "edges">,
+  agentId: string,
+): string[] {
+  return [...new Set(
+    topology.edges
+      .filter((edge) => edge.source === agentId)
+      .map((edge) => normalizeTopologyEdgeTrigger(edge.trigger)),
+  )];
+}
+
+function normalizeHistoryDetail(
+  content: string,
+  allowedTriggers: readonly string[],
+) {
+  const normalized = stripDecisionResponseMarkup(content, allowedTriggers)
     .replace(/\r\n?/gu, "\n")
     .replace(/[ \t]+\n/gu, "\n")
     .trim();
@@ -57,6 +75,7 @@ function normalizeToolHistory(toolName: string, detail: string) {
   const normalizedDetail = detail.replace(/^参数:\s*/u, "").trim();
   return normalizeHistoryDetail(
     normalizedDetail ? `${toolName.trim()} · 参数: ${normalizedDetail}` : toolName.trim(),
+    [],
   );
 }
 
@@ -170,6 +189,7 @@ function buildFinalHistoryItems(input: {
 }) {
   const decisionAgent = isDecisionAgentInTopology(input.topology, input.agentId);
   const finalLoopDecisionAgentName = getLoopLimitFailedDecisionAgentName(input.messages);
+  const allowedTriggers = decisionAgent ? getAgentAllowedTriggers(input.topology, input.agentId) : [];
 
   return input.messages
     .filter(
@@ -193,7 +213,7 @@ function buildFinalHistoryItems(input: {
         decisionAgent,
         status,
       });
-      const detail = normalizeHistoryDetail(message.content);
+      const detail = normalizeHistoryDetail(message.content, allowedTriggers);
 
       return {
         id: message.id,
@@ -212,6 +232,7 @@ function buildRuntimeHistoryItems(input: {
   runtimeSnapshot?: AgentRuntimeSnapshot;
   finalHistoryItems?: AgentHistoryItem[];
   range?: AgentHistoryRange;
+  allowedTriggers: readonly string[];
 }) {
   if (!input.runtimeSnapshot) {
     return [];
@@ -232,7 +253,7 @@ function buildRuntimeHistoryItems(input: {
         const detail =
           activity.kind === "tool"
             ? normalizeToolHistory(activity.label, activity.detail)
-            : normalizeHistoryDetail(activity.detail || activity.label);
+            : normalizeHistoryDetail(activity.detail || activity.label, input.allowedTriggers);
         const runtimeItem = {
           id: `${input.agentId}-runtime-${activity.id}-${index}`,
           label: presentation.label,
@@ -270,12 +291,16 @@ export function buildAgentHistoryItems(input: {
   topology: Pick<TopologyRecord, "edges">;
   runtimeSnapshot?: AgentRuntimeSnapshot;
 }) {
+  const allowedTriggers = isDecisionAgentInTopology(input.topology, input.agentId)
+    ? getAgentAllowedTriggers(input.topology, input.agentId)
+    : [];
   const finalHistoryItems = buildFinalHistoryItems(input);
   return [
     ...finalHistoryItems,
     ...buildRuntimeHistoryItems({
       ...input,
       finalHistoryItems,
+      allowedTriggers,
     }),
   ].sort((left, right) => left.sortTimestamp.localeCompare(right.sortTimestamp));
 }
@@ -289,6 +314,9 @@ export function buildAgentExecutionHistoryItems(input: {
   finalMessageId?: string;
   completedAt?: string;
 }) {
+  const allowedTriggers = isDecisionAgentInTopology(input.topology, input.agentId)
+    ? getAgentAllowedTriggers(input.topology, input.agentId)
+    : [];
   const range = withOptionalValue({
     startedAt: input.startedAt,
   }, "endedAt", input.completedAt) satisfies AgentHistoryRange;
@@ -304,6 +332,7 @@ export function buildAgentExecutionHistoryItems(input: {
       agentId: input.agentId,
       finalHistoryItems,
       range,
+      allowedTriggers,
     }, "runtimeSnapshot", input.runtimeSnapshot)),
     ...finalHistoryItems,
   ].sort((left, right) => left.sortTimestamp.localeCompare(right.sortTimestamp));
