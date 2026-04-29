@@ -42,7 +42,7 @@
 - 当前工作区的拓扑、Task、消息与运行态由当前 CLI 进程内存维护；不会再物化旧的 `<cwd>/.agent-team/state.json`。store[getState, hasWorkspaceState]、orchestrator[hydrateWorkspace, hydrateTask]
 - 新建 Task 需要显式传入团队拓扑 JSON5 文件，CLI 会先校验参数再加载并应用定义。cli[validateTaskHeadlessCommand, validateTaskUiCommand, loadTeamDslDefinitionFile, ensureJson5TopologyApplied]
 - 团队拓扑 JSON5 只支持递归式 `entry + nodes + links` DSL；每条 `link` 都必须显式写出 `from / to / trigger / message_type`，其中 `trigger` 必须是尖括号包裹的字面值，例如 `<default>`、`<continue>`、`<complete>`、`<abcd>`。根图若需要显式结束来源，也直接通过 `{ "from": "...", "to": "__end__", "trigger": "<done>", "message_type": "none" }` 这类终止边表达。team-dsl[compileTeamDsl]
-- 递归式 DSL 中，节点 `type` 只允许 `agent` 或 `spawn`；`spawn` 自身不带 `prompt`，并固定从上游结果里的 `items` 数组展开子图，不支持通过拓扑配置改字段名。team-dsl[compileTeamDsl]、spawn-items[extractSpawnItemsFromContent]
+- 递归式 DSL 中，节点 `type` 只允许 `agent` 或 `spawn`；`spawn` 自身不带 `prompt`，运行时会按上游结果的第一条非空行展开单个子图项。team-dsl[compileTeamDsl]、gating-router[materializeSpawnNodeTargets]
 - Task 快照读取当前工作区拓扑与 Agent 定义，`TaskRecord` 本身只保存任务状态与定位信息。store[getTopology]、orchestrator[hydrateTask]、project-agent-source[extractDslAgentsFromTopology]
 - Task 定位索引同样只保存在当前进程内存；删除 Task 时会同步移除对应 locator。store[getTaskLocatorCwd, removeTaskLocator, deleteTask]、orchestrator[resolveTaskCwd]
 - LangGraph 运行时同样只在当前进程内存里维护每个 Task 的 checkpoint；删除 Task 时会同步清掉对应 thread。orchestrator[getLangGraphRuntime]、langgraph-runtime[deleteTask]

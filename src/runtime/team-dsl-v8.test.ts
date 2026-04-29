@@ -4,7 +4,7 @@ import test from "node:test";
 import { readBuiltinVulnerabilityTopology } from "./builtin-topology-test-helpers";
 import { compileTeamDsl } from "./team-dsl";
 
-test("compileTeamDsl 支持 v8 递归式图 DSL，并固定使用 items 字段展开 spawn", () => {
+test("compileTeamDsl 支持 v8 递归式图 DSL，并保留 spawn 子图定义", () => {
   const compiled = compileTeamDsl(readBuiltinVulnerabilityTopology());
 
   assert.deepEqual(compiled.topology.edges, [

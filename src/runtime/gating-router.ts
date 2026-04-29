@@ -37,7 +37,6 @@ import {
 } from "./runtime-topology-graph";
 import { compileTopology } from "./topology-compiler";
 import { spawnRuntimeAgentsForItems } from "./gating-spawn";
-import { extractSpawnItemsFromContent } from "./spawn-items";
 
 export interface GraphRawDispatchJob {
   agentId: string;
@@ -522,7 +521,7 @@ function resolveRequiredActionRequiredSpawnSourceContent(
 ): string {
   const content = request.agentContextContent.trim();
   if (!content) {
-    throw new Error(`${decisionAgentId} 的 action_required 结果缺少可供 spawn 展开的 JSON 正文`);
+    throw new Error(`${decisionAgentId} 的 action_required 结果缺少可供 spawn 展开的 finding 正文`);
   }
   return content;
 }
@@ -861,6 +860,17 @@ function buildSpawnActivationItemId(
   return total <= 1 ? base : `${base}-${index + 1}`;
 }
 
+function buildSpawnItemTitle(sourceContent: string): string {
+  const firstLine = sourceContent
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!firstLine) {
+    throw new Error("spawn 上游输出缺少可展开的 finding 正文");
+  }
+  return firstLine;
+}
+
 function materializeSpawnNodeTargets(
   state: GraphTaskState,
   targetName: string,
@@ -875,12 +885,13 @@ function materializeSpawnNodeTargets(
   }
 
   const sequence = getNextSpawnSequence(state, spawnRuleId);
-  const parsed = extractSpawnItemsFromContent(sourceContent);
-  if (parsed.items.length === 0) {
-    throw new Error(`${targetName} 的 spawn items 不能为空`);
-  }
   const activationId = buildSpawnActivationId(spawnRuleId, sequence);
-  const items = parsed.items.map((item, index, itemsList) => ({
+  const items = [
+    {
+      id: buildSpawnItemId(spawnRuleId, sequence),
+      title: buildSpawnItemTitle(sourceContent),
+    },
+  ].map((item, index, itemsList) => ({
     ...item,
     id: buildSpawnActivationItemId(spawnRuleId, sequence, index, itemsList.length),
   }));

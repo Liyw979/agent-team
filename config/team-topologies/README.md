@@ -131,7 +131,7 @@
 语义：
 
 - `spawn` 不是 agent，所以没有 `prompt`
-- `spawn` 固定读取上游输出 JSON5 对象里的 `items` 数组，不支持配置其他字段名
+- `spawn` 会把上游正文的第一条非空行作为本轮展开项标题
 - 每个输入项都会实例化一份 `graph`
 - 子图全部完成后，`spawn` 节点自身视为完成
 - 完成后按父图里的普通 `links` 继续流转
@@ -299,6 +299,6 @@
 - `links` 必须使用对象格式，并显式写出 `from` / `to` / `trigger` / `message_type`
 - `links` 里的 `from` / `to` 必须都能在当前层 `nodes` 中找到
 - `spawn` 节点没有 `prompt`
-- `spawn` 固定从上游输出的 `items` 数组展开子图
+- `spawn` 会按上游正文第一条非空行展开单个子图项
 - agent 必须显式提供 `prompt` 与 `writable`
 - `Build` 不允许覆盖 `prompt`
