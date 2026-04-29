@@ -1037,6 +1037,7 @@ function dispatchActionRequiredRequest(
       decisionAgentId,
       preparedDispatch.limitedTargetIds[0]!,
       preparedDispatch.firstLoopLimitDecision,
+      request,
     );
   }
   if (preparedDispatch.dispatchTargetIds.length === 0) {
@@ -1424,8 +1425,8 @@ function resolveActionRequiredLoopLimitTransition(
   decisionAgentId: string,
   repairTargetAgentId: string,
   loopLimitDecision: ActionRequiredLoopLimitDecision,
+  decisionRequest: GraphActionRequiredRequest,
 ): GraphRoutingDecision {
-  const limitedDecisionAgentRequest = requirePendingActionRequiredRequest(state, decisionAgentId);
   state.agentStatusesByName[decisionAgentId] = "failed";
   delete state.pendingActionRequiredRequestsByAgent[decisionAgentId];
 
@@ -1457,11 +1458,10 @@ function resolveActionRequiredLoopLimitTransition(
   const loopLimitEscalationDecision = triggerLabeledDownstream(
     state,
     decisionAgentId,
-    limitedDecisionAgentRequest.sourceMessageId,
+    decisionRequest.sourceMessageId,
     buildActionRequiredLoopLimitEscalationForwardContent({
       decisionAgentId,
-      repairTargetAgentId,
-      decisionRequest: limitedDecisionAgentRequest,
+      decisionRequest,
     }),
     buildActionRequiredLoopLimitEscalationDisplayContent({
       decisionAgentId,
@@ -1530,7 +1530,6 @@ function resolveLoopLimitEscalationTrigger(
 
 function buildActionRequiredLoopLimitEscalationForwardContent(input: {
   decisionAgentId: string;
-  repairTargetAgentId: string;
   decisionRequest: GraphActionRequiredRequest;
 }): string {
   return resolveRequiredActionRequiredDisplayContent(input.decisionAgentId, input.decisionRequest);
