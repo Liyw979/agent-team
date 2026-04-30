@@ -5,20 +5,15 @@ import fs from "node:fs";
 import {
   fetchUiSnapshot,
   readLaunchTaskIdFromSearch,
-  subscribeAgentTeamEvents,
 } from "./web-api";
 
 const WEB_API_SOURCE = fs.readFileSync(new URL("./web-api.ts", import.meta.url), "utf8");
-const LEGACY_EVENT_NAME = ["Agent", "Flow", "Event"].join("");
-const LEGACY_SUBSCRIBE_NAME = ["subscribe", "Agent", "Flow", "Events"].join("");
-
-test("web-api 改用 AgentTeamEvent 与 subscribeAgentTeamEvents", () => {
-  assert.match(WEB_API_SOURCE, /AgentTeamEvent/);
-  assert.match(WEB_API_SOURCE, /export function subscribeAgentTeamEvents/);
+test("web-api 暴露 ui-snapshot 轮询接口", () => {
   assert.match(WEB_API_SOURCE, /export function fetchUiSnapshot/);
   assert.match(WEB_API_SOURCE, /\/api\/ui-snapshot/);
-  assert.doesNotMatch(WEB_API_SOURCE, new RegExp(LEGACY_EVENT_NAME));
-  assert.doesNotMatch(WEB_API_SOURCE, new RegExp(LEGACY_SUBSCRIBE_NAME));
+  assert.doesNotMatch(WEB_API_SOURCE, /subscribeAgentTeamEvents/);
+  assert.doesNotMatch(WEB_API_SOURCE, /\/api\/events/);
+  assert.doesNotMatch(WEB_API_SOURCE, /getTaskRuntime/);
 });
 
 test("readLaunchTaskIdFromSearch 会把缺失或空白 taskId 统一归一成 null", () => {
@@ -46,37 +41,4 @@ test("fetchUiSnapshot 会按 JSON5 解析响应体", async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
-});
-
-test("subscribeAgentTeamEvents 会按 JSON5 解析 SSE 消息", () => {
-  class FakeEventSource {
-    static lastInstance: FakeEventSource | null = null;
-    onmessage: ((event: { data: string }) => void) | null = null;
-    url: string;
-
-    constructor(url: string) {
-      this.url = url;
-      FakeEventSource.lastInstance = this;
-    }
-
-    close() {}
-  }
-
-  const originalEventSource = globalThis.EventSource;
-  globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
-
-  const received: string[] = [];
-  try {
-    const unsubscribe = subscribeAgentTeamEvents({ taskId: "task-123" }, (event) => {
-      received.push(`${event.type}:${event.cwd}`);
-    });
-    FakeEventSource.lastInstance?.onmessage?.({
-      data: "{type:'task-updated',cwd:'/tmp/demo',payload:{taskId:'task-123'}}",
-    });
-    unsubscribe();
-  } finally {
-    globalThis.EventSource = originalEventSource;
-  }
-
-  assert.deepEqual(received, ["task-updated:/tmp/demo"]);
 });

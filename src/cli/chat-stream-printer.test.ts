@@ -28,6 +28,7 @@ function createMessage(input: {
       scope: "task",
       taskTitle: "demo",
       targetAgentIds: input.targetAgentIds ?? [],
+      targetRunCounts: (input.targetAgentIds ?? []).map(() => 1),
     };
   }
   if (input.kind === "agent-final") {
@@ -38,6 +39,7 @@ function createMessage(input: {
       timestamp: input.timestamp,
       content: input.content,
       kind: "agent-final",
+      runCount: 1,
       status: "completed",
       routingKind: "default",
       responseNote: "",
@@ -53,6 +55,7 @@ function createMessage(input: {
       content: input.content,
       kind: "agent-dispatch",
       targetAgentIds: input.targetAgentIds ?? [],
+      targetRunCounts: (input.targetAgentIds ?? []).map(() => 1),
       dispatchDisplayContent: input.content,
     };
   }
@@ -66,6 +69,7 @@ function createMessage(input: {
       kind: "action-required-request",
       followUpMessageId: input.id,
       targetAgentIds: input.targetAgentIds ?? [],
+      targetRunCounts: (input.targetAgentIds ?? []).map(() => 1),
     };
   }
   if (input.kind === "task-completed") {
@@ -176,6 +180,7 @@ test("renderChatStreamEntries 输出的是群聊文本，不包含 agent runtime
           timestamp: "2026-04-19T10:00:00.000Z",
           content: "Build 已完成。",
           kind: "agent-final",
+          runCount: 1,
           status: "completed",
           routingKind: "default",
           responseNote: "",
@@ -189,6 +194,7 @@ test("renderChatStreamEntries 输出的是群聊文本，不包含 agent runtime
           content: "@CodeReview",
           kind: "agent-dispatch",
           targetAgentIds: ["CodeReview"],
+          targetRunCounts: [1],
           dispatchDisplayContent: "@CodeReview",
         },
       ],
@@ -242,5 +248,8 @@ test("renderChatStreamEntries 不再输出状态行样式文本", () => {
 test("measureDisplayWidth 会把中文按终端双列宽处理，避免消息框右边界错位", () => {
   assert.equal(measureDisplayWidth("Build"), 5);
   assert.equal(measureDisplayWidth("可以。"), 6);
-  assert.equal(measureDisplayWidth("你想把这轮协作测试聚焦在哪一类任务上？"), 38);
+  assert.equal(
+    measureDisplayWidth("你想把这轮协作测试聚焦在哪一类任务上？"),
+    38,
+  );
 });

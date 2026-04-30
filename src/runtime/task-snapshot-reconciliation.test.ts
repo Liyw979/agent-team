@@ -4,22 +4,25 @@ import assert from "node:assert/strict";
 import type { MessageRecord, TaskAgentRecord, TaskRecord } from "@shared/types";
 import { reconcileTaskSnapshotFromMessages } from "./task-lifecycle-rules";
 
-function createAgentFinalMessage(input: {
-  id: string;
-  sender: string;
-  timestamp: string;
-  content: string;
-  status?: "completed" | "error";
-} & (
-  | {
-      routingKind: "default" | "invalid";
-      trigger?: never;
-    }
-  | {
-      routingKind: "labeled";
-      trigger: string;
-    }
-)): MessageRecord {
+function createAgentFinalMessage(
+  input: {
+    id: string;
+    sender: string;
+    timestamp: string;
+    content: string;
+    runCount?: number;
+    status?: "completed" | "error";
+  } & (
+    | {
+        routingKind: "default" | "invalid";
+        trigger?: never;
+      }
+    | {
+        routingKind: "labeled";
+        trigger: string;
+      }
+  ),
+): MessageRecord {
   const base = {
     id: input.id,
     taskId: "task-1",
@@ -27,6 +30,7 @@ function createAgentFinalMessage(input: {
     timestamp: input.timestamp,
     content: input.content,
     kind: "agent-final" as const,
+    runCount: input.runCount ?? 1,
     status: input.status ?? "completed",
     responseNote: "",
     rawResponse: input.content,
@@ -73,7 +77,7 @@ test("task-round-finished 与更晚的 agent-final 必须纠正滞后的 task/ag
   };
   const agents: TaskAgentRecord[] = [
     {
-          taskId: "task-1",
+      taskId: "task-1",
       id: "BA",
       opencodeSessionId: null,
       opencodeAttachBaseUrl: null,
@@ -81,7 +85,7 @@ test("task-round-finished 与更晚的 agent-final 必须纠正滞后的 task/ag
       runCount: 1,
     },
     {
-          taskId: "task-1",
+      taskId: "task-1",
       id: "Build",
       opencodeSessionId: null,
       opencodeAttachBaseUrl: null,
@@ -89,7 +93,7 @@ test("task-round-finished 与更晚的 agent-final 必须纠正滞后的 task/ag
       runCount: 4,
     },
     {
-          taskId: "task-1",
+      taskId: "task-1",
       id: "CodeReview",
       opencodeSessionId: null,
       opencodeAttachBaseUrl: null,
@@ -121,7 +125,10 @@ test("task-round-finished 与更晚的 agent-final 必须纠正滞后的 task/ag
 
   assert.equal(reconciled.task.status, "finished");
   assert.equal(reconciled.task.completedAt, "2026-04-21T03:48:00.910Z");
-  assert.equal(reconciled.agents.find((agent) => agent.id === "CodeReview")?.status, "completed");
+  assert.equal(
+    reconciled.agents.find((agent) => agent.id === "CodeReview")?.status,
+    "completed",
+  );
 });
 
 test("旧的 task-round-finished 后面出现新的用户消息时，补偿逻辑不能把 reopen 中的任务误判回 finished", () => {
@@ -162,6 +169,7 @@ test("旧的 task-round-finished 后面出现新的用户消息时，补偿逻�
       scope: "task",
       taskTitle: "demo",
       targetAgentIds: ["BA"],
+      targetRunCounts: [1],
     },
   ];
 

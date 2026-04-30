@@ -1,7 +1,4 @@
 import type {
-  AgentTeamEvent,
-  AgentRuntimeSnapshot,
-  GetTaskRuntimePayload,
   OpenAgentTerminalPayload,
   SubmitTaskPayload,
   TaskSnapshot,
@@ -38,12 +35,6 @@ export function fetchUiSnapshot(params: { taskId: string }) {
   return fetchJson<UiSnapshotPayload>(`/api/ui-snapshot?${buildQuery(params)}`);
 }
 
-export function getTaskRuntime(payload: Pick<GetTaskRuntimePayload, "taskId">) {
-  return fetchJson<AgentRuntimeSnapshot[]>(`/api/tasks/runtime?${buildQuery({
-    taskId: payload.taskId,
-  })}`);
-}
-
 export function submitTask(payload: SubmitTaskPayload) {
   return fetchJson<TaskSnapshot>("/api/tasks/submit", {
     method: "POST",
@@ -62,23 +53,4 @@ export async function openAgentTerminal(payload: OpenAgentTerminalPayload) {
     },
     body: JSON.stringify(payload),
   });
-}
-
-export function subscribeAgentTeamEvents(
-  params: {
-    taskId: string;
-  },
-  listener: (event: AgentTeamEvent) => void,
-) {
-  const source = new EventSource(`/api/events?${buildQuery(params)}`);
-  source.onmessage = (message) => {
-    const payload = parseJson5<AgentTeamEvent | { type: "connected" }>(message.data);
-    if (payload.type === "connected") {
-      return;
-    }
-    listener(payload);
-  };
-  return () => {
-    source.close();
-  };
 }

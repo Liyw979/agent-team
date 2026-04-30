@@ -4,16 +4,17 @@ import { withOptionalValue } from "@shared/object-utils";
 import {
   resolveAgentAttachButtonState,
   resolveSessionStateFromSessionIdText,
-  resolveRuntimePreferredSessionState,
 } from "@/lib/agent-attach-state";
 import { getAgentColorToken } from "@/lib/agent-colors";
-import { buildAgentHistoryItems, type AgentHistoryItem } from "@/lib/agent-history";
+import {
+  buildAgentHistoryItems,
+  EMPTY_AGENT_HISTORY_DETAIL,
+  type AgentHistoryItem,
+} from "@/lib/agent-history";
 import { AgentHistoryMarkdown } from "@/lib/agent-history-markdown";
 import { resolveFullscreenOverlayStrategy } from "@/lib/fullscreen-overlay-strategy";
 import { getTopologyHistoryItemButtonClassName } from "@/lib/topology-history-layout";
-import {
-  createTopologyHistoryAutoScrollTracker,
-} from "@/lib/topology-history-scroll";
+import { createTopologyHistoryAutoScrollTracker } from "@/lib/topology-history-scroll";
 import {
   PANEL_HEADER_CLASS,
   PANEL_HEADER_LEADING_CLASS,
@@ -31,16 +32,8 @@ import {
 import { getTopologyDisplayNodeIds } from "@/components/topology-spawn-drafts";
 import { buildTopologyCanvasLayout } from "@/lib/topology-canvas";
 import { getTopologyCanvasViewportMeasurementKey } from "@/lib/topology-canvas-viewport-measure";
-import {
-  filterTopologyAgentIdsWithDisplayableHistory,
-  selectTopologyHistoryItemsForDisplay,
-} from "@/lib/topology-history-items";
 import { getTopologyPanelBodyClassName } from "@/lib/topology-panel-layout";
-import type {
-  AgentRuntimeSnapshot,
-  TaskSnapshot,
-  WorkspaceSnapshot,
-} from "@shared/types";
+import type { TaskSnapshot, WorkspaceSnapshot } from "@shared/types";
 
 interface TopologyGraphProps {
   workspace: WorkspaceSnapshot;
@@ -51,7 +44,6 @@ interface TopologyGraphProps {
   onToggleMaximize?: () => void;
   openingAgentTerminalId?: string;
   onOpenAgentTerminal?: (agentId: string) => void;
-  runtimeSnapshots?: Record<string, AgentRuntimeSnapshot>;
 }
 
 const NODE_WIDTH = 248;
@@ -108,17 +100,13 @@ function formatHistoryTimestamp(timestamp: string) {
   });
 }
 
-function resolveTopologyNodeDisplayStatus(input: {
-  taskAgentStatus?: string;
-  runtimeSnapshotStatus?: string;
-}) {
-  if (input.runtimeSnapshotStatus === "running") {
-    return "running";
-  }
-  return input.taskAgentStatus ?? input.runtimeSnapshotStatus ?? "idle";
+function resolveTopologyNodeDisplayStatus(input: { taskAgentStatus?: string }) {
+  return input.taskAgentStatus ?? "idle";
 }
 
-function renderStatusBadgeIcon(presentation: TopologyAgentStatusBadgePresentation) {
+function renderStatusBadgeIcon(
+  presentation: TopologyAgentStatusBadgePresentation,
+) {
   if (presentation.icon === "idle") {
     return (
       <svg
@@ -236,16 +224,23 @@ export function TopologyGraph({
   onToggleMaximize,
   openingAgentTerminalId = "",
   onOpenAgentTerminal,
-  runtimeSnapshots = {},
 }: TopologyGraphProps) {
   const topologyPanelBodyClassName = getTopologyPanelBodyClassName();
   const fullscreenButtonCopy = getPanelFullscreenButtonCopy(isMaximized);
   const canvasViewportRef = useRef<HTMLDivElement | null>(null);
-  const historyScrollTrackerByNodeIdRef = useRef<Record<string, ReturnType<typeof createTopologyHistoryAutoScrollTracker>>>({});
-  const maximizedHistoryScrollTrackerRef = useRef(createTopologyHistoryAutoScrollTracker());
-  const [canvasViewport, setCanvasViewport] = useState<{ width: number; height: number } | null>(null);
+  const historyScrollTrackerByNodeIdRef = useRef<
+    Record<string, ReturnType<typeof createTopologyHistoryAutoScrollTracker>>
+  >({});
+  const maximizedHistoryScrollTrackerRef = useRef(
+    createTopologyHistoryAutoScrollTracker(),
+  );
+  const [canvasViewport, setCanvasViewport] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
   const [maximizedAgentId, setMaximizedAgentId] = useState<string | null>(null);
-  const [selectedHistoryItem, setSelectedHistoryItem] = useState<SelectedHistoryItemState | null>(null);
+  const [selectedHistoryItem, setSelectedHistoryItem] =
+    useState<SelectedHistoryItemState | null>(null);
 
   function renderViewportOverlay(content: ReactNode) {
     if (
@@ -265,15 +260,22 @@ export function TopologyGraph({
     [task?.agents],
   );
   const visibleTopologyCandidateNodeIds = useMemo(
-    () => Array.from(new Set([
-      ...(task?.agents.map((agent) => agent.id) ?? []),
-      ...Object.keys(runtimeSnapshots),
-    ])),
-    [runtimeSnapshots, task?.agents],
+    () =>
+      Array.from(
+        new Set(
+          task?.agents
+            .filter((agent) => agent.runCount > 0)
+            .map((agent) => agent.id) ?? [],
+        ),
+      ),
+    [task?.agents],
   );
 
   const orderedNodeIds = useMemo(
-    () => (topology ? getTopologyDisplayNodeIds(topology, visibleTopologyCandidateNodeIds) : []),
+    () =>
+      topology
+        ? getTopologyDisplayNodeIds(topology, visibleTopologyCandidateNodeIds)
+        : [],
     [topology, visibleTopologyCandidateNodeIds],
   );
   const rawHistoryByAgent = useMemo(() => {
@@ -288,24 +290,22 @@ export function TopologyGraph({
     return new Map(
       orderedNodeIds.map((agentId) => [
         agentId,
-        selectTopologyHistoryItemsForDisplay(buildAgentHistoryItems(withOptionalValue({
+        buildAgentHistoryItems({
           agentId: agentId,
           messages: task.messages,
           topology,
-        }, "runtimeSnapshot", runtimeSnapshots[agentId]))),
+        }).filter((item) => item.detail !== EMPTY_AGENT_HISTORY_DETAIL),
       ]),
     );
-  }, [orderedNodeIds, runtimeSnapshots, task, topology]);
-  const visibleNodeIds = useMemo(
-    () => filterTopologyAgentIdsWithDisplayableHistory(orderedNodeIds, rawHistoryByAgent),
-    [orderedNodeIds, rawHistoryByAgent],
-  );
+  }, [orderedNodeIds, task, topology]);
+  const visibleNodeIds = orderedNodeIds;
   const canvasViewportMeasurementKey = useMemo(
-    () => getTopologyCanvasViewportMeasurementKey({
-      topologyNodeCount: topology?.nodes.length ?? 0,
-      topologyNodeRecordCount: topology?.nodeRecords?.length ?? 0,
-      hasRenderableCanvas: Boolean(topology && visibleNodeIds.length > 0),
-    }),
+    () =>
+      getTopologyCanvasViewportMeasurementKey({
+        topologyNodeCount: topology?.nodes.length ?? 0,
+        topologyNodeRecordCount: topology?.nodeRecords?.length ?? 0,
+        hasRenderableCanvas: Boolean(topology && visibleNodeIds.length > 0),
+      }),
     [topology, visibleNodeIds.length],
   );
 
@@ -368,11 +368,15 @@ export function TopologyGraph({
   }, [canvasViewport?.height, canvasViewport?.width, topology, visibleNodeIds]);
   const historyByAgent = useMemo(() => {
     return new Map(
-      visibleNodeIds.map((agentId) => [agentId, rawHistoryByAgent.get(agentId) ?? []]),
+      visibleNodeIds.map((agentId) => [
+        agentId,
+        rawHistoryByAgent.get(agentId) ?? [],
+      ]),
     );
   }, [rawHistoryByAgent, visibleNodeIds]);
   const finalLoopDecisionAgentName = useMemo(
-    () => (task ? getTopologyLoopLimitFailedDecisionAgentName(task.messages) : null),
+    () =>
+      task ? getTopologyLoopLimitFailedDecisionAgentName(task.messages) : null,
     [task],
   );
 
@@ -458,7 +462,6 @@ export function TopologyGraph({
 
   function buildNodePresentation(agentId: string): TopologyNodePresentation {
     const taskAgent = taskAgents.get(agentId);
-    const runtimeSnapshot = runtimeSnapshots[agentId];
     const color = getAgentColorToken(agentId);
     const historyItems = historyByAgent.get(agentId) ?? [];
     const statusBadge = getTopologyAgentStatusBadgePresentation(
@@ -466,11 +469,6 @@ export function TopologyGraph({
       agentId,
       resolveTopologyNodeDisplayStatus({
         ...withOptionalValue({}, "taskAgentStatus", taskAgent?.status),
-        ...withOptionalValue(
-          {},
-          "runtimeSnapshotStatus",
-          runtimeSnapshot?.runtimeStatus ?? runtimeSnapshot?.status,
-        ),
       }),
       {
         finalLoopDecisionAgentName,
@@ -481,21 +479,11 @@ export function TopologyGraph({
       showFullscreenButton: true,
       showAttachButton,
     });
-    const runtimeSnapshotSessionIdText =
-      runtimeSnapshot && typeof runtimeSnapshot.sessionId === "string" ? runtimeSnapshot.sessionId : "";
     const attachState = resolveAgentAttachButtonState({
       agentId,
-      sessionState: resolveRuntimePreferredSessionState({
-        taskSessionState: resolveSessionStateFromSessionIdText(taskAgent?.opencodeSessionId ?? ""),
-        runtimeSnapshotState: Object.hasOwn(runtimeSnapshots, agentId)
-          ? {
-              kind: "known",
-              sessionState: resolveSessionStateFromSessionIdText(runtimeSnapshotSessionIdText),
-            }
-          : {
-              kind: "unknown",
-            },
-      }),
+      sessionState: resolveSessionStateFromSessionIdText(
+        taskAgent?.opencodeSessionId ?? "",
+      ),
       openingState: openingAgentTerminalId === agentId ? "opening" : "idle",
     });
     const isAttachOpening = attachState.label === "打开中";
@@ -509,16 +497,22 @@ export function TopologyGraph({
       isAttachOpening,
       attachDisabled,
       attachTitle,
-      agentFullscreenButtonCopy: getPanelFullscreenButtonCopy(maximizedAgentId === agentId),
+      agentFullscreenButtonCopy: getPanelFullscreenButtonCopy(
+        maximizedAgentId === agentId,
+      ),
     };
   }
 
   const maximizedNode = maximizedAgentId
     ? (canvasLayout?.nodes.find((node) => node.id === maximizedAgentId) ?? null)
     : null;
-  const maximizedNodePresentation = maximizedNode ? buildNodePresentation(maximizedNode.id) : null;
+  const maximizedNodePresentation = maximizedNode
+    ? buildNodePresentation(maximizedNode.id)
+    : null;
 
-  function getHistoryScrollTracker(nodeId: string): ReturnType<typeof createTopologyHistoryAutoScrollTracker> {
+  function getHistoryScrollTracker(
+    nodeId: string,
+  ): ReturnType<typeof createTopologyHistoryAutoScrollTracker> {
     const existing = historyScrollTrackerByNodeIdRef.current[nodeId];
     if (existing) {
       return existing;
@@ -689,7 +683,9 @@ export function TopologyGraph({
                                 className="inline-flex h-6 items-center justify-center gap-1 rounded-full border border-[#d8cdbd] bg-[#fffaf2] px-2 text-[10px] font-semibold text-foreground/76 shadow-[0_1px_0_rgba(255,255,255,0.45)] transition hover:border-[#cda27d] hover:bg-white disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:border-[#d8cdbd] disabled:hover:bg-[#fffaf2]"
                               >
                                 {renderAttachButtonIcon()}
-                                <span>{isAttachOpening ? "打开中" : "attach"}</span>
+                                <span>
+                                  {isAttachOpening ? "打开中" : "attach"}
+                                </span>
                               </button>
                             );
                           }
@@ -713,7 +709,9 @@ export function TopologyGraph({
                     {historyItems.length > 0 ? (
                       <div
                         ref={(element) => {
-                          getHistoryScrollTracker(node.id).bindViewport(element);
+                          getHistoryScrollTracker(node.id).bindViewport(
+                            element,
+                          );
                         }}
                         onScroll={(event) => {
                           getHistoryScrollTracker(node.id).updateStickState({
@@ -742,8 +740,12 @@ export function TopologyGraph({
                           >
                             <div className="min-w-0 flex-1 select-text">
                               <div className="flex items-center justify-between gap-2">
-                                <span className="text-[11px] font-semibold">{item.label}</span>
-                                <span className="text-[11px] opacity-70">{formatHistoryTimestamp(item.timestamp)}</span>
+                                <span className="text-[11px] font-semibold">
+                                  {item.label}
+                                </span>
+                                <span className="text-[11px] opacity-70">
+                                  {formatHistoryTimestamp(item.timestamp)}
+                                </span>
                               </div>
                               <AgentHistoryMarkdown
                                 content={item.detailSnippet}
@@ -763,196 +765,224 @@ export function TopologyGraph({
         </div>
       </div>
 
-      {maximizedNode && maximizedNodePresentation ? renderViewportOverlay(
-        <div
-          className="fixed inset-0 z-[60] bg-black/28"
-          onClick={() => setMaximizedAgentId(null)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label={`${maximizedNode.id} 全屏详情`}
-            className="flex h-full w-full flex-col overflow-hidden bg-background"
-            onClick={(event) => event.stopPropagation()}
-          >
+      {maximizedNode && maximizedNodePresentation
+        ? renderViewportOverlay(
             <div
-              className="border-b px-3 py-2"
-              style={{
-                background: maximizedNodePresentation.color.soft,
-                borderColor: maximizedNodePresentation.color.border,
-              }}
+              className="fixed inset-0 z-[60] bg-black/28"
+              onClick={() => setMaximizedAgentId(null)}
             >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-3">
-                    <span
-                      className="inline-flex max-w-full shrink-0 rounded-[10px] px-3 py-1 text-center text-[18px] font-semibold leading-[1.2] tracking-[0.02em]"
-                      style={{
-                        background: maximizedNodePresentation.color.solid,
-                        color: maximizedNodePresentation.color.badgeText,
-                      }}
-                    >
-                      {maximizedNode.id}
-                    </span>
-                    <span className="text-sm text-foreground/68">
-                      {maximizedNodePresentation.statusBadge.label}
-                    </span>
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-label={`${maximizedNode.id} 全屏详情`}
+                className="flex h-full w-full flex-col overflow-hidden bg-background"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div
+                  className="border-b px-3 py-2"
+                  style={{
+                    background: maximizedNodePresentation.color.soft,
+                    borderColor: maximizedNodePresentation.color.border,
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-3">
+                        <span
+                          className="inline-flex max-w-full shrink-0 rounded-[10px] px-3 py-1 text-center text-[18px] font-semibold leading-[1.2] tracking-[0.02em]"
+                          style={{
+                            background: maximizedNodePresentation.color.solid,
+                            color: maximizedNodePresentation.color.badgeText,
+                          }}
+                        >
+                          {maximizedNode.id}
+                        </span>
+                        <span className="text-sm text-foreground/68">
+                          {maximizedNodePresentation.statusBadge.label}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="shrink-0 flex items-center gap-2">
+                      {maximizedNodePresentation.headerActions.map((action) => {
+                        if (action === "fullscreen") {
+                          return (
+                            <button
+                              key={action}
+                              type="button"
+                              aria-label={`${maximizedNodePresentation.agentFullscreenButtonCopy.ariaLabel} ${maximizedNode.id} 详情`}
+                              onClick={() => setMaximizedAgentId(null)}
+                              className={`${PANEL_HEADER_ACTION_BUTTON_CLASS} no-drag`}
+                            >
+                              {
+                                maximizedNodePresentation
+                                  .agentFullscreenButtonCopy.label
+                              }
+                            </button>
+                          );
+                        }
+
+                        if (action === "attach") {
+                          return (
+                            <button
+                              key={action}
+                              type="button"
+                              aria-label={`打开 ${maximizedNode.id} 的 attach 终端`}
+                              title={maximizedNodePresentation.attachTitle}
+                              disabled={
+                                maximizedNodePresentation.attachDisabled
+                              }
+                              onClick={() => {
+                                if (
+                                  maximizedNodePresentation.attachDisabled ||
+                                  !onOpenAgentTerminal
+                                ) {
+                                  return;
+                                }
+                                onOpenAgentTerminal(maximizedNode.id);
+                              }}
+                              className="inline-flex h-8 items-center justify-center gap-1 rounded-full border border-[#d8cdbd] bg-[#fffaf2] px-3 text-[12px] font-semibold text-foreground/76 shadow-[0_1px_0_rgba(255,255,255,0.45)] transition hover:border-[#cda27d] hover:bg-white disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:border-[#d8cdbd] disabled:hover:bg-[#fffaf2]"
+                            >
+                              {renderAttachButtonIcon()}
+                              <span>
+                                {maximizedNodePresentation.isAttachOpening
+                                  ? "打开中"
+                                  : "attach"}
+                              </span>
+                            </button>
+                          );
+                        }
+
+                        return (
+                          <span
+                            key={action}
+                            aria-label={
+                              maximizedNodePresentation.statusBadge.label
+                            }
+                            title={maximizedNodePresentation.statusBadge.label}
+                            className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-semibold shadow-[0_1px_0_rgba(255,255,255,0.45)] ${maximizedNodePresentation.statusBadge.className} ${maximizedNodePresentation.statusBadge.effectClassName}`}
+                          >
+                            {renderStatusBadgeIcon(
+                              maximizedNodePresentation.statusBadge,
+                            )}
+                          </span>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
-                <div className="shrink-0 flex items-center gap-2">
-                  {maximizedNodePresentation.headerActions.map((action) => {
-                    if (action === "fullscreen") {
-                      return (
-                        <button
-                          key={action}
-                          type="button"
-                          aria-label={`${maximizedNodePresentation.agentFullscreenButtonCopy.ariaLabel} ${maximizedNode.id} 详情`}
-                          onClick={() => setMaximizedAgentId(null)}
-                          className={`${PANEL_HEADER_ACTION_BUTTON_CLASS} no-drag`}
-                        >
-                          {maximizedNodePresentation.agentFullscreenButtonCopy.label}
-                        </button>
-                      );
-                    }
 
-                    if (action === "attach") {
-                      return (
-                        <button
-                          key={action}
-                          type="button"
-                          aria-label={`打开 ${maximizedNode.id} 的 attach 终端`}
-                          title={maximizedNodePresentation.attachTitle}
-                          disabled={maximizedNodePresentation.attachDisabled}
-                          onClick={() => {
-                            if (maximizedNodePresentation.attachDisabled || !onOpenAgentTerminal) {
-                              return;
-                            }
-                            onOpenAgentTerminal(maximizedNode.id);
-                          }}
-                          className="inline-flex h-8 items-center justify-center gap-1 rounded-full border border-[#d8cdbd] bg-[#fffaf2] px-3 text-[12px] font-semibold text-foreground/76 shadow-[0_1px_0_rgba(255,255,255,0.45)] transition hover:border-[#cda27d] hover:bg-white disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:border-[#d8cdbd] disabled:hover:bg-[#fffaf2]"
-                        >
-                          {renderAttachButtonIcon()}
-                          <span>{maximizedNodePresentation.isAttachOpening ? "打开中" : "attach"}</span>
-                        </button>
-                      );
-                    }
-
-                    return (
-                      <span
-                        key={action}
-                        aria-label={maximizedNodePresentation.statusBadge.label}
-                        title={maximizedNodePresentation.statusBadge.label}
-                        className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-semibold shadow-[0_1px_0_rgba(255,255,255,0.45)] ${maximizedNodePresentation.statusBadge.className} ${maximizedNodePresentation.statusBadge.effectClassName}`}
-                      >
-                        {renderStatusBadgeIcon(maximizedNodePresentation.statusBadge)}
-                      </span>
+                <div
+                  ref={(element) => {
+                    maximizedHistoryScrollTrackerRef.current.bindViewport(
+                      element,
                     );
-                  })}
+                  }}
+                  data-testid="topology-fullscreen-history-viewport"
+                  onScroll={(event) => {
+                    maximizedHistoryScrollTrackerRef.current.updateStickState({
+                      scrollHeight: event.currentTarget.scrollHeight,
+                      clientHeight: event.currentTarget.clientHeight,
+                      scrollTop: event.currentTarget.scrollTop,
+                    });
+                  }}
+                  className="min-h-0 flex-1 overflow-y-auto px-2.5 py-2"
+                >
+                  {maximizedNodePresentation.historyItems.length > 0 ? (
+                    <div className="space-y-1.5">
+                      {maximizedNodePresentation.historyItems.map((item) => (
+                        <article
+                          key={item.id}
+                          className={`rounded-[12px] border px-2 py-1.5 ${getHistoryItemClassName(item)}`}
+                        >
+                          <div className="min-w-0 flex-1 select-text">
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-[13px] font-semibold">
+                                {item.label}
+                              </span>
+                              <span className="text-[12px] opacity-70">
+                                {formatHistoryTimestamp(item.timestamp)}
+                              </span>
+                            </div>
+                            <AgentHistoryMarkdown
+                              content={item.detail}
+                              className="mt-1 text-[13px] leading-[1.5] text-inherit opacity-95 select-text"
+                              style={{ marginTop: "0.125rem" }}
+                            />
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               </div>
-            </div>
+            </div>,
+          )
+        : null}
 
+      {selectedHistoryItem
+        ? renderViewportOverlay(
             <div
-              ref={(element) => {
-                maximizedHistoryScrollTrackerRef.current.bindViewport(element);
-              }}
-              data-testid="topology-fullscreen-history-viewport"
-              onScroll={(event) => {
-                maximizedHistoryScrollTrackerRef.current.updateStickState({
-                  scrollHeight: event.currentTarget.scrollHeight,
-                  clientHeight: event.currentTarget.clientHeight,
-                  scrollTop: event.currentTarget.scrollTop,
-                });
-              }}
-              className="min-h-0 flex-1 overflow-y-auto px-2.5 py-2"
+              className="fixed inset-0 z-[70] flex items-center justify-center bg-black/28 px-6 py-6"
+              onClick={() => setSelectedHistoryItem(null)}
             >
-              {maximizedNodePresentation.historyItems.length > 0 ? (
-                <div className="space-y-1.5">
-                  {maximizedNodePresentation.historyItems.map((item) => (
-                    <article
-                      key={item.id}
-                      className={`rounded-[12px] border px-2 py-1.5 ${getHistoryItemClassName(item)}`}
-                    >
-                      <div className="min-w-0 flex-1 select-text">
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-[13px] font-semibold">{item.label}</span>
-                          <span className="text-[12px] opacity-70">{formatHistoryTimestamp(item.timestamp)}</span>
-                        </div>
-                        <AgentHistoryMarkdown
-                          content={item.detail}
-                          className="mt-1 text-[13px] leading-[1.5] text-inherit opacity-95 select-text"
-                          style={{ marginTop: "0.125rem" }}
-                        />
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </div>,
-      ) : null}
-
-      {selectedHistoryItem ? renderViewportOverlay(
-        <div
-          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/28 px-6 py-6"
-          onClick={() => setSelectedHistoryItem(null)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label={`${selectedHistoryItem.agentId} 历史详情`}
-            className="flex max-h-[min(82vh,720px)] w-full max-w-[720px] flex-col overflow-hidden rounded-[14px] border bg-background shadow-[0_24px_80px_rgba(23,32,25,0.22)]"
-            style={{
-              borderColor: selectedHistoryItem.color.border,
-            }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div
-              className="flex items-center justify-between gap-3 border-b px-5 py-3"
-              style={{
-                background: selectedHistoryItem.color.soft,
-                borderColor: selectedHistoryItem.color.border,
-              }}
-            >
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span
-                    className="inline-flex max-w-full shrink-0 rounded-[8px] px-2 py-px text-center text-[14px] font-semibold leading-[1.2] tracking-[0.02em]"
-                    style={{
-                      background: selectedHistoryItem.color.solid,
-                      color: selectedHistoryItem.color.badgeText,
-                    }}
-                  >
-                    {selectedHistoryItem.agentId}
-                  </span>
-                  <span className="text-sm font-semibold text-foreground/86">
-                    {selectedHistoryItem.item.label}
-                  </span>
-                </div>
-                <p className="mt-1 text-xs text-foreground/60">
-                  {formatHistoryTimestamp(selectedHistoryItem.item.timestamp)}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedHistoryItem(null)}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border/70 bg-background/90 text-lg leading-none text-foreground/68 transition hover:bg-background"
-                aria-label="关闭历史详情"
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-label={`${selectedHistoryItem.agentId} 历史详情`}
+                className="flex max-h-[min(82vh,720px)] w-full max-w-[720px] flex-col overflow-hidden rounded-[14px] border bg-background shadow-[0_24px_80px_rgba(23,32,25,0.22)]"
+                style={{
+                  borderColor: selectedHistoryItem.color.border,
+                }}
+                onClick={(event) => event.stopPropagation()}
               >
-                ×
-              </button>
-            </div>
+                <div
+                  className="flex items-center justify-between gap-3 border-b px-5 py-3"
+                  style={{
+                    background: selectedHistoryItem.color.soft,
+                    borderColor: selectedHistoryItem.color.border,
+                  }}
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="inline-flex max-w-full shrink-0 rounded-[8px] px-2 py-px text-center text-[14px] font-semibold leading-[1.2] tracking-[0.02em]"
+                        style={{
+                          background: selectedHistoryItem.color.solid,
+                          color: selectedHistoryItem.color.badgeText,
+                        }}
+                      >
+                        {selectedHistoryItem.agentId}
+                      </span>
+                      <span className="text-sm font-semibold text-foreground/86">
+                        {selectedHistoryItem.item.label}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-foreground/60">
+                      {formatHistoryTimestamp(
+                        selectedHistoryItem.item.timestamp,
+                      )}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedHistoryItem(null)}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border/70 bg-background/90 text-lg leading-none text-foreground/68 transition hover:bg-background"
+                    aria-label="关闭历史详情"
+                  >
+                    ×
+                  </button>
+                </div>
 
-            <div className="min-h-0 overflow-y-auto px-5 py-4">
-              <AgentHistoryMarkdown
-                content={selectedHistoryItem.item.detail}
-                className="text-[14px] leading-[1.35] text-foreground/84"
-              />
-            </div>
-          </div>
-        </div>,
-      ) : null}
+                <div className="min-h-0 overflow-y-auto px-5 py-4">
+                  <AgentHistoryMarkdown
+                    content={selectedHistoryItem.item.detail}
+                    className="text-[14px] leading-[1.35] text-foreground/84"
+                  />
+                </div>
+              </div>
+            </div>,
+          )
+        : null}
     </section>
   );
 }

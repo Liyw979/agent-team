@@ -1,13 +1,13 @@
 import type {
   AgentFinalMessageRecord,
-  AgentRuntimeSnapshot,
+  AgentProgressMessageRecord,
   MessageRecord,
   TopologyRecord,
 } from "@shared/types";
 import { withOptionalValue } from "@shared/object-utils";
 import {
   isAgentFinalMessageRecord,
-  isDecisionAgentInTopology,
+  isAgentProgressMessageRecord,
   normalizeTopologyEdgeTrigger,
 } from "@shared/types";
 import { stripDecisionResponseMarkup } from "@shared/decision-response";
@@ -43,14 +43,73 @@ function hasActionRequiredFollowUp(messages: MessageRecord[], finalMessageId: st
 }
 
 function getAgentAllowedTriggers(
-  topology: Pick<TopologyRecord, "edges">,
+  topology: Pick<TopologyRecord, "edges" | "langgraph" | "nodeRecords" | "spawnRules">,
   agentId: string,
 ): string[] {
+  const sourceAgentIds = getHistorySourceAgentIds(topology, agentId);
   return [...new Set(
-    topology.edges
-      .filter((edge) => edge.source === agentId)
-      .map((edge) => normalizeTopologyEdgeTrigger(edge.trigger)),
+    [
+      ...topology.edges
+        .filter((edge) => sourceAgentIds.includes(edge.source))
+        .map((edge) => normalizeTopologyEdgeTrigger(edge.trigger)),
+      ...(topology.langgraph?.end?.incoming ?? [])
+        .filter((edge) => sourceAgentIds.includes(edge.source))
+        .map((edge) => normalizeTopologyEdgeTrigger(edge.trigger)),
+      ...sourceAgentIds.flatMap((templateName) => getUniqueSpawnRuleTriggersForTemplate(topology, templateName)),
+    ],
   )];
+}
+
+function getUniqueSpawnRuleTriggersForTemplate(
+  topology: Pick<TopologyRecord, "spawnRules">,
+  templateName: string,
+): string[] {
+  const matchedRules = (topology.spawnRules ?? []).filter((rule) =>
+    rule.spawnedAgents.some((agent) => agent.templateName === templateName),
+  );
+  if (matchedRules.length !== 1) {
+    return [];
+  }
+
+  const sourceRoles = matchedRules[0]!.spawnedAgents
+    .filter((agent) => agent.templateName === templateName)
+    .map((agent) => agent.role);
+  return matchedRules[0]!.edges
+    .filter((edge) => sourceRoles.includes(edge.sourceRole))
+    .map((edge) => normalizeTopologyEdgeTrigger(edge.trigger));
+}
+
+function getHistorySourceAgentIds(
+  topology: Pick<TopologyRecord, "edges" | "nodeRecords">,
+  agentId: string,
+): string[] {
+  const resolved = new Set([agentId]);
+  if (topology.edges.some((edge) => edge.source === agentId)) {
+    return [...resolved];
+  }
+
+  const runtimeTemplateName = resolveRuntimeAgentTemplateName(agentId);
+  if (!runtimeTemplateName) {
+    return [...resolved];
+  }
+  const matchedNode = (topology.nodeRecords ?? []).find((node) => node.templateName === runtimeTemplateName);
+  if (matchedNode) {
+    resolved.add(matchedNode.templateName);
+  }
+  return [...resolved];
+}
+
+function resolveRuntimeAgentTemplateName(agentId: string): string {
+  const match = /^(.*)-(\d+)$/u.exec(agentId);
+  const templateName = match?.[1]?.trim() ?? "";
+  return templateName;
+}
+
+function isHistoryDecisionAgent(
+  topology: Pick<TopologyRecord, "edges" | "langgraph" | "nodeRecords" | "spawnRules">,
+  agentId: string,
+): boolean {
+  return getAgentAllowedTriggers(topology, agentId).some((trigger) => trigger !== "<default>");
 }
 
 function normalizeHistoryDetail(
@@ -123,7 +182,7 @@ function mergeAdjacentRuntimeToolHistoryItems(items: AgentHistoryItem[]) {
   return mergedItems;
 }
 
-function getRuntimeItemPresentation(kind: AgentRuntimeSnapshot["activities"][number]["kind"]) {
+function getRuntimeItemPresentation(kind: AgentProgressMessageRecord["activityKind"]) {
   switch (kind) {
     case "tool":
       return { label: "工具", tone: "runtime-tool" as const };
@@ -183,11 +242,11 @@ function isTimestampWithinAgentHistoryRange(
 function buildFinalHistoryItems(input: {
   agentId: string;
   messages: MessageRecord[];
-  topology: Pick<TopologyRecord, "edges">;
+  topology: Pick<TopologyRecord, "edges" | "langgraph" | "nodeRecords" | "spawnRules">;
   range?: AgentHistoryRange;
   finalMessageId?: string;
 }) {
-  const decisionAgent = isDecisionAgentInTopology(input.topology, input.agentId);
+  const decisionAgent = isHistoryDecisionAgent(input.topology, input.agentId);
   const finalLoopDecisionAgentName = getLoopLimitFailedDecisionAgentName(input.messages);
   const allowedTriggers = decisionAgent ? getAgentAllowedTriggers(input.topology, input.agentId) : [];
 
@@ -227,52 +286,45 @@ function buildFinalHistoryItems(input: {
     });
 }
 
-function buildRuntimeHistoryItems(input: {
+function buildProgressHistoryItems(input: {
   agentId: string;
-  runtimeSnapshot?: AgentRuntimeSnapshot;
+  messages: MessageRecord[];
   finalHistoryItems?: AgentHistoryItem[];
   range?: AgentHistoryRange;
   allowedTriggers: readonly string[];
 }) {
-  if (!input.runtimeSnapshot) {
-    return [];
-  }
-
   const finalMessageSignatures = new Set(
     (input.finalHistoryItems ?? []).map((item) => `${item.timestamp}:::${item.detail}`),
   );
-  const finalMessageIds = new Set((input.finalHistoryItems ?? []).map((item) => item.id));
-  const belongsToFinalMessage = (activityId: string) =>
-    [...finalMessageIds].some((messageId) => activityId.startsWith(`${messageId}:`));
 
   return mergeAdjacentRuntimeToolHistoryItems(
-    input.runtimeSnapshot.activities
-      .filter((activity) => isTimestampWithinAgentHistoryRange(activity.timestamp, input.range ?? {}))
-      .map((activity, index) => {
-        const presentation = getRuntimeItemPresentation(activity.kind);
+    input.messages
+      .filter(
+        (message): message is AgentProgressMessageRecord =>
+          message.sender === input.agentId && isAgentProgressMessageRecord(message),
+      )
+      .filter((message) => isTimestampWithinAgentHistoryRange(message.timestamp, input.range ?? {}))
+      .map((message, index) => {
+        const presentation = getRuntimeItemPresentation(message.activityKind);
         const detail =
-          activity.kind === "tool"
-            ? normalizeToolHistory(activity.label, activity.detail)
-            : normalizeHistoryDetail(activity.detail || activity.label, input.allowedTriggers);
+          message.activityKind === "tool"
+            ? normalizeToolHistory(message.label, message.detail)
+            : normalizeHistoryDetail(message.detail || message.label, input.allowedTriggers);
         const runtimeItem = {
-          id: `${input.agentId}-runtime-${activity.id}-${index}`,
+          id: `${input.agentId}-runtime-${message.id}-${index}`,
           label: presentation.label,
           detailSnippet: buildHistoryDetailSnippet(detail),
           detail,
-          timestamp: activity.timestamp,
-          sortTimestamp: `${activity.timestamp}#a-runtime-${String(index).padStart(6, "0")}`,
+          timestamp: message.timestamp,
+          sortTimestamp: `${message.timestamp}#a-runtime-${String(index).padStart(6, "0")}`,
           tone: presentation.tone,
         } satisfies AgentHistoryItem;
         return {
           runtimeItem,
-          activityId: activity.id,
+          message,
         };
       })
       .filter((item) => {
-        if (item.runtimeItem.tone === "runtime-message" && belongsToFinalMessage(item.activityId)) {
-          return false;
-        }
-
         if (item.runtimeItem.tone !== "runtime-message") {
           return true;
         }
@@ -288,17 +340,17 @@ function buildRuntimeHistoryItems(input: {
 export function buildAgentHistoryItems(input: {
   agentId: string;
   messages: MessageRecord[];
-  topology: Pick<TopologyRecord, "edges">;
-  runtimeSnapshot?: AgentRuntimeSnapshot;
+  topology: Pick<TopologyRecord, "edges" | "langgraph" | "nodeRecords" | "spawnRules">;
 }) {
-  const allowedTriggers = isDecisionAgentInTopology(input.topology, input.agentId)
+  const allowedTriggers = isHistoryDecisionAgent(input.topology, input.agentId)
     ? getAgentAllowedTriggers(input.topology, input.agentId)
     : [];
   const finalHistoryItems = buildFinalHistoryItems(input);
   return [
     ...finalHistoryItems,
-    ...buildRuntimeHistoryItems({
-      ...input,
+    ...buildProgressHistoryItems({
+      agentId: input.agentId,
+      messages: input.messages,
       finalHistoryItems,
       allowedTriggers,
     }),
@@ -308,13 +360,12 @@ export function buildAgentHistoryItems(input: {
 export function buildAgentExecutionHistoryItems(input: {
   agentId: string;
   messages: MessageRecord[];
-  topology: Pick<TopologyRecord, "edges">;
-  runtimeSnapshot?: AgentRuntimeSnapshot;
+  topology: Pick<TopologyRecord, "edges" | "langgraph" | "nodeRecords" | "spawnRules">;
   startedAt: string;
   finalMessageId?: string;
   completedAt?: string;
 }) {
-  const allowedTriggers = isDecisionAgentInTopology(input.topology, input.agentId)
+  const allowedTriggers = isHistoryDecisionAgent(input.topology, input.agentId)
     ? getAgentAllowedTriggers(input.topology, input.agentId)
     : [];
   const range = withOptionalValue({
@@ -328,12 +379,13 @@ export function buildAgentExecutionHistoryItems(input: {
   }, "finalMessageId", input.finalMessageId));
 
   return [
-    ...buildRuntimeHistoryItems(withOptionalValue({
+    ...buildProgressHistoryItems({
       agentId: input.agentId,
+      messages: input.messages,
       finalHistoryItems,
       range,
       allowedTriggers,
-    }, "runtimeSnapshot", input.runtimeSnapshot)),
+    }),
     ...finalHistoryItems,
   ].sort((left, right) => left.sortTimestamp.localeCompare(right.sortTimestamp));
 }

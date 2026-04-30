@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { decideUiSnapshotRefreshAcceptance } from "./ui-snapshot-refresh-gate";
+import {
+  decideUiSnapshotRefreshAcceptance,
+  isSemanticallyNewerUiSnapshot,
+} from "./ui-snapshot-refresh-gate";
 import type { MessageRecord, UiSnapshotPayload } from "@shared/types";
 
 function createSystemMessage(id: string, sender: "system" | "BA", content: string, timestamp: string): MessageRecord {
@@ -23,6 +26,7 @@ function createSystemMessage(id: string, sender: "system" | "BA", content: strin
     content,
     timestamp,
     kind: "agent-final",
+    runCount: 1,
     status: "completed",
     routingKind: "default",
     responseNote: "",
@@ -274,6 +278,24 @@ test("较小请求号若晚返回且语义上更新，门禁仍必须接受，�
     acceptedFreshLowerRequest.payload?.task?.agents.find((agent) => agent.id === "UnitTest")?.status,
     "running",
   );
+});
+
+test("语义前进判定会把消息条数增加识别为更新，供事件追平停止条件复用", () => {
+  const baselinePayload = createUiSnapshotPayload({
+    baStatus: "completed",
+    unitTestStatus: "idle",
+    buildStatus: "idle",
+    messageCount: 1,
+  });
+  const newerPayload = createUiSnapshotPayload({
+    baStatus: "completed",
+    unitTestStatus: "idle",
+    buildStatus: "idle",
+    messageCount: 2,
+  });
+
+  assert.equal(isSemanticallyNewerUiSnapshot(baselinePayload, newerPayload), true);
+  assert.equal(isSemanticallyNewerUiSnapshot(newerPayload, baselinePayload), false);
 });
 
 test("较小请求号若仅补齐 session 与 attach，也必须被视为语义更新并接受", () => {

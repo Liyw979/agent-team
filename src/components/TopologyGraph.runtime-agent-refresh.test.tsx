@@ -3,21 +3,12 @@ import assert from "node:assert/strict";
 
 import { act } from "react";
 
-import type { AgentRuntimeSnapshot, TaskSnapshot, TopologyRecord, WorkspaceSnapshot } from "@shared/types";
+import type { TaskSnapshot, TopologyRecord, WorkspaceSnapshot } from "@shared/types";
 
 import { renderTopologyGraphInDom } from "./topology-graph.test-helpers";
 
 const TASK_ID = "task-runtime-refresh";
 const WORKSPACE_CWD = "/tmp/agent-team-topology-runtime-refresh";
-
-type SessionFixtureState =
-  | {
-      kind: "present";
-      sessionId: string;
-    }
-  | {
-      kind: "absent";
-    };
 
 const topology: TopologyRecord = {
   nodes: ["线索发现", "漏洞挑战"],
@@ -56,6 +47,7 @@ const workspace: WorkspaceSnapshot = {
 
 function createTask(input: {
   agents: TaskSnapshot["agents"];
+  messages: TaskSnapshot["messages"];
 }): TaskSnapshot {
   return {
     task: {
@@ -70,37 +62,9 @@ function createTask(input: {
       initializedAt: "2026-04-29T10:00:00.000Z",
     },
     agents: input.agents,
-    messages: [],
+    messages: input.messages,
     topology,
   };
-}
-
-function createRuntimeSnapshots(input: Record<string, SessionFixtureState>): Record<string, AgentRuntimeSnapshot> {
-  return Object.fromEntries(
-    Object.entries(input).map(([agentId, session]) => [
-      agentId,
-      {
-        taskId: TASK_ID,
-        agentId,
-        sessionId: session.kind === "present" ? session.sessionId : null,
-        status: "running",
-        runtimeStatus: "running",
-        messageCount: 1,
-        updatedAt: "2026-04-29T10:00:01.000Z",
-        headline: `${agentId} 正在处理`,
-        activeToolNames: [],
-        activities: [
-          {
-            id: `${agentId}-thinking`,
-            kind: "thinking",
-            label: "思考",
-            detail: `${agentId} 正在处理当前输入`,
-            timestamp: "2026-04-29T10:00:01.000Z",
-          },
-        ],
-      },
-    ]),
-  );
 }
 
 function findAttachButton(agentId: string) {
@@ -127,6 +91,7 @@ test("TopologyGraph 会把静态模板节点刷新成最新 runtime agent，并�
         runCount: 1,
       },
     ],
+    messages: [],
   });
   const secondRoundTask = createTask({
     agents: [
@@ -140,6 +105,7 @@ test("TopologyGraph 会把静态模板节点刷新成最新 runtime agent，并�
         runCount: 1,
       },
     ],
+    messages: [],
   });
 
   const rendered = await renderTopologyGraphInDom({
@@ -147,12 +113,6 @@ test("TopologyGraph 会把静态模板节点刷新成最新 runtime agent，并�
     task: firstRoundTask,
     selectedAgentId: null,
     openingAgentTerminalId: "",
-    runtimeSnapshots: createRuntimeSnapshots({
-      "漏洞挑战-1": {
-        kind: "present",
-        sessionId: "session-challenge-1",
-      },
-    }),
     onSelectAgent: () => {},
     onToggleMaximize: () => {},
     onOpenAgentTerminal: () => {},
@@ -173,12 +133,6 @@ test("TopologyGraph 会把静态模板节点刷新成最新 runtime agent，并�
       task: secondRoundTask,
       selectedAgentId: null,
       openingAgentTerminalId: "",
-      runtimeSnapshots: createRuntimeSnapshots({
-        "漏洞挑战-2": {
-          kind: "present",
-          sessionId: "session-challenge-2",
-        },
-      }),
       onSelectAgent: () => {},
       onToggleMaximize: () => {},
       onOpenAgentTerminal: () => {},
@@ -197,7 +151,7 @@ test("TopologyGraph 会把静态模板节点刷新成最新 runtime agent，并�
   }
 });
 
-test("task snapshot 尚未带上 session 时，TopologyGraph 仍会采用 runtime snapshot 的结果启用 attach", async () => {
+test("task snapshot 尚未带上 session 时，TopologyGraph 不会启用 attach", async () => {
   const task = createTask({
     agents: [
       {
@@ -217,6 +171,7 @@ test("task snapshot 尚未带上 session 时，TopologyGraph 仍会采用 runtim
         runCount: 1,
       },
     ],
+    messages: [],
   });
 
   const rendered = await renderTopologyGraphInDom({
@@ -224,12 +179,6 @@ test("task snapshot 尚未带上 session 时，TopologyGraph 仍会采用 runtim
     task,
     selectedAgentId: null,
     openingAgentTerminalId: "",
-    runtimeSnapshots: createRuntimeSnapshots({
-      "漏洞挑战-2": {
-        kind: "present",
-        sessionId: "session-challenge-2",
-      },
-    }),
     onSelectAgent: () => {},
     onToggleMaximize: () => {},
     onOpenAgentTerminal: () => {},
@@ -241,9 +190,70 @@ test("task snapshot 尚未带上 session 时，TopologyGraph 仍会采用 runtim
     });
 
     const attachButton = findAttachButton("漏洞挑战-2");
-    assert.ok(attachButton instanceof HTMLButtonElement, "应展示 runtime snapshot 驱动的 attach 按钮");
+    assert.ok(attachButton instanceof HTMLButtonElement, "应展示已运行 agent 的 attach 按钮");
+    assert.equal(attachButton.disabled, true);
+    assert.equal(attachButton.title, "漏洞挑战-2 当前还没有可 attach 的 OpenCode session。");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("TopologyGraph 会继续展示刚完成的运行实例", async () => {
+  const task = createTask({
+    agents: [
+      {
+        id: "线索发现",
+        taskId: TASK_ID,
+        opencodeSessionId: "session-clue",
+        opencodeAttachBaseUrl: "http://localhost:4310",
+        status: "completed",
+        runCount: 1,
+      },
+      {
+        id: "漏洞挑战-1",
+        taskId: TASK_ID,
+        opencodeSessionId: "session-challenge-1",
+        opencodeAttachBaseUrl: "http://localhost:4310",
+        status: "completed",
+        runCount: 1,
+      },
+    ],
+    messages: [
+      {
+        id: "challenge-final",
+        taskId: TASK_ID,
+        sender: "漏洞挑战-1",
+        content: "漏洞挑战-1 已经完成本轮回应。",
+        timestamp: "2026-04-29T10:00:02.000Z",
+        kind: "agent-final",
+        runCount: 1,
+        status: "completed",
+        routingKind: "default",
+        responseNote: "",
+        rawResponse: "漏洞挑战-1 已经完成本轮回应。",
+      },
+    ],
+  });
+
+  const rendered = await renderTopologyGraphInDom({
+    workspace,
+    task,
+    selectedAgentId: null,
+    openingAgentTerminalId: "",
+    onSelectAgent: () => {},
+    onToggleMaximize: () => {},
+    onOpenAgentTerminal: () => {},
+  });
+
+  try {
+    await act(async () => {
+      await rendered.flushAnimationFrames();
+    });
+
+    const attachButton = findAttachButton("漏洞挑战-1");
+    assert.ok(attachButton instanceof HTMLButtonElement, "刚完成的 runtime agent 仍应保留在拓扑里");
     assert.equal(attachButton.disabled, false);
-    assert.equal(attachButton.title, "attach 到 漏洞挑战-2");
+    assert.equal(rendered.window.document.body.textContent?.includes("漏洞挑战-1 已经完成本轮回应。"), true);
   } finally {
     await rendered.cleanup();
   }

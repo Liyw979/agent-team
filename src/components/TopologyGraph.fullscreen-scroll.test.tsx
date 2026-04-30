@@ -29,6 +29,7 @@ function createAgentFinalMessage(input: {
     content: input.content,
     timestamp: input.timestamp,
     kind: "agent-final",
+    runCount: 1,
     status: "completed",
     routingKind: "default",
     responseNote: "",
@@ -231,7 +232,6 @@ async function renderTopologyGraph(task: TaskSnapshot) {
           selectedAgentId={null}
           onSelectAgent={() => {}}
           onToggleMaximize={() => {}}
-          runtimeSnapshots={{}}
         />,
       );
     });

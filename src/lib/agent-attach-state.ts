@@ -7,15 +7,6 @@ type AttachSessionState =
       kind: "absent";
     };
 
-type RuntimeSnapshotSessionState =
-  | {
-      kind: "known";
-      sessionState: AttachSessionState;
-    }
-  | {
-      kind: "unknown";
-    };
-
 interface AgentAttachButtonState {
   disabled: boolean;
   title: string;
@@ -47,14 +38,4 @@ export function resolveAgentAttachButtonState(input: {
       : `${input.agentId} 当前还没有可 attach 的 OpenCode session。`,
     label: isAttachOpening ? "打开中" : "attach",
   };
-}
-
-export function resolveRuntimePreferredSessionState(input: {
-  taskSessionState: AttachSessionState;
-  runtimeSnapshotState: RuntimeSnapshotSessionState;
-}): AttachSessionState {
-  if (input.runtimeSnapshotState.kind === "known") {
-    return input.runtimeSnapshotState.sessionState;
-  }
-  return input.taskSessionState;
 }

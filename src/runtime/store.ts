@@ -19,8 +19,45 @@ function sortByCreatedAtDesc<T extends { createdAt: string }>(items: T[]): T[] {
   return [...items].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
+function getMessageKindSortRank(message: MessageRecord): number {
+  switch (message.kind) {
+    case "task-created":
+      return 10;
+    case "user":
+      return 20;
+    case "system-message":
+      return 30;
+    case "agent-progress":
+      return 40;
+    case "agent-final":
+      return 50;
+    case "agent-dispatch":
+      return 60;
+    case "action-required-request":
+      return 70;
+    case "task-round-finished":
+      return 80;
+    case "task-completed":
+      return 90;
+    default:
+      return 999;
+  }
+}
+
 function sortMessages(messages: MessageRecord[]): MessageRecord[] {
-  return [...messages].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
+  return [...messages].sort((left, right) => {
+    const timestampComparison = left.timestamp.localeCompare(right.timestamp);
+    if (timestampComparison !== 0) {
+      return timestampComparison;
+    }
+
+    const rankComparison = getMessageKindSortRank(left) - getMessageKindSortRank(right);
+    if (rankComparison !== 0) {
+      return rankComparison;
+    }
+
+    return left.id.localeCompare(right.id);
+  });
 }
 
 function uniqueById<T extends { id: string }>(items: T[]): T[] {

@@ -102,7 +102,7 @@ function isSemanticallyOlderUiSnapshot(
   return false;
 }
 
-function isSemanticallyNewerUiSnapshot(
+export function isSemanticallyNewerUiSnapshot(
   baseline: UiSnapshotPayload,
   candidate: UiSnapshotPayload,
 ) {

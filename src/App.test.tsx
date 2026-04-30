@@ -15,7 +15,7 @@ test("App 已裁成单 Task 展示面板", () => {
 
 test("App 保留聊天输入，但团队面板不再提供 attach 按钮", () => {
   assert.match(APP_SOURCE, /<ChatWindow/);
-  assert.match(APP_SOURCE, /runtimeSnapshots=\{runtimeSnapshots\}/);
+  assert.doesNotMatch(APP_SOURCE, /runtimeSnapshots/);
   assert.match(APP_SOURCE, /resolveAppPanelVisibility/);
   assert.match(APP_SOURCE, /panelMode/);
   assert.doesNotMatch(APP_SOURCE, /buildAgentPanelAttachButtonState/);
@@ -97,21 +97,19 @@ test("App 不再从 uiSnapshot.project 读取当前工作区", () => {
   assert.doesNotMatch(APP_SOURCE, /ProjectSnapshot/);
 });
 
-test("App 改走浏览器 fetch 与 EventSource，而不是旧的桌面桥接 API", () => {
+test("App 改走浏览器 fetch 轮询，而不是旧的桌面桥接 API", () => {
   assert.match(APP_SOURCE, /from "\.\/lib\/web-api"/);
   assert.match(APP_SOURCE, /fetchUiSnapshot/);
-  assert.match(APP_SOURCE, /subscribeAgentTeamEvents/);
+  assert.doesNotMatch(APP_SOURCE, /subscribeAgentTeamEvents/);
   assert.doesNotMatch(APP_SOURCE, new RegExp(LEGACY_SUBSCRIBE_NAME));
   assert.doesNotMatch(APP_SOURCE, /launchParams\.cwd/);
   assert.doesNotMatch(APP_SOURCE, /cwd: launchParams\.cwd/);
   assert.doesNotMatch(APP_SOURCE, new RegExp(LEGACY_BRIDGE_NAME.replace(".", "\\.")));
 });
 
-test("App 会按 taskId 过滤 runtime-updated，而不是按旧 session 集合忽略 spawn 新实例", () => {
-  assert.match(APP_SOURCE, /shouldRefreshForRuntimeEvent/);
-  assert.match(APP_SOURCE, /currentTaskId: currentUiSnapshot\.task\.task\.id/);
-  assert.doesNotMatch(APP_SOURCE, /sessionIds = new Set/);
-  assert.doesNotMatch(APP_SOURCE, /!sessionIds\.has\(payload\.sessionId\)/);
+test("App 不再依赖 runtime-updated 事件追平界面", () => {
+  assert.doesNotMatch(APP_SOURCE, /shouldRefreshForRuntimeEvent/);
+  assert.doesNotMatch(APP_SOURCE, /runtime-updated/);
 });
 
 test("App 的 ui snapshot 刷新链路会先经过最新请求门禁，不能把任意返回结果直接写回 state", () => {

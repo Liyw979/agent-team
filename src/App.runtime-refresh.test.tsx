@@ -5,7 +5,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
 
-import type { AgentRuntimeSnapshot, TaskSnapshot, UiSnapshotPayload } from "@shared/types";
+import type { TaskSnapshot, UiSnapshotPayload } from "@shared/types";
 
 import App from "./App";
 
@@ -28,7 +28,6 @@ type GlobalPatchKey =
   | "clearInterval"
   | "getComputedStyle"
   | "fetch"
-  | "EventSource"
   | "IS_REACT_ACT_ENVIRONMENT";
 
 type GlobalPatch = {
@@ -42,31 +41,11 @@ class MockResizeObserver {
   unobserve() {}
 }
 
-class MockEventSource {
-  static lastInstance: MockEventSource | null = null;
-  onmessage: ((event: MessageEvent<string>) => void) | null = null;
-
-  constructor(_url: string) {
-    MockEventSource.lastInstance = this;
-  }
-
-  close() {}
-}
-
 const TASK_ID = "task-app-runtime-refresh";
 const WORKSPACE_CWD = "/tmp/agent-team-app-runtime-refresh";
 
-type SessionFixtureState =
-  | {
-      kind: "present";
-      sessionId: string;
-    }
-  | {
-      kind: "absent";
-    };
-
 function createUiSnapshot(input: {
-  agentSession: SessionFixtureState;
+  agentSessionId: string | null;
   messages: TaskSnapshot["messages"];
 }): UiSnapshotPayload {
   return {
@@ -103,8 +82,8 @@ function createUiSnapshot(input: {
         {
           id: "漏洞挑战-1",
           taskId: TASK_ID,
-          opencodeSessionId: input.agentSession.kind === "present" ? input.agentSession.sessionId : null,
-          opencodeAttachBaseUrl: input.agentSession.kind === "present" ? "http://localhost:4310" : null,
+          opencodeSessionId: input.agentSessionId,
+          opencodeAttachBaseUrl: input.agentSessionId ? "http://localhost:4310" : null,
           status: "completed",
           runCount: 1,
         },
@@ -122,53 +101,20 @@ function createUiSnapshot(input: {
   };
 }
 
-function createRuntimeSnapshot(): AgentRuntimeSnapshot[] {
-  return [
-    {
-      taskId: TASK_ID,
-      agentId: "漏洞挑战-1",
-      sessionId: "session-challenge-1",
-      status: "completed",
-      runtimeStatus: "completed",
-      messageCount: 1,
-      updatedAt: "2026-04-29T10:00:02.000Z",
-      headline: "挑战已完成",
-      activeToolNames: [],
-      activities: [],
-    },
-  ];
-}
-
 function createAgentFinalMessage() {
   return [
     {
       id: "challenge-final-1",
       taskId: TASK_ID,
       sender: "漏洞挑战-1",
-      content: "挑战结论：这里的消息应当在 runtime 完成后自动出现。",
+      content: "挑战结论：这里的消息应当在轮询拿到全量 snapshot 后立即出现。",
       timestamp: "2026-04-29T10:00:02.000Z",
       kind: "agent-final" as const,
+      runCount: 1,
       status: "completed" as const,
       routingKind: "default" as const,
       responseNote: "",
-      rawResponse: "挑战结论：这里的消息应当在 runtime 完成后自动出现。",
-    },
-  ];
-}
-
-function createMarkdownAgentFinalMessage() {
-  return [
-    {
-      id: "challenge-final-markdown-1",
-      taskId: TASK_ID,
-      sender: "漏洞挑战-1",
-      content: "## 挑战结论\n\n**这里会自动渲染为 markdown**",
-      timestamp: "2026-04-29T10:00:03.000Z",
-      kind: "agent-final" as const,
-      status: "completed" as const,
-      routingKind: "default" as const,
-      responseNote: "",
-      rawResponse: "## 挑战结论\n\n**这里会自动渲染为 markdown**",
+      rawResponse: "挑战结论：这里的消息应当在轮询拿到全量 snapshot 后立即出现。",
     },
   ];
 }
@@ -179,6 +125,7 @@ function setupDom(fetchImpl: typeof fetch) {
     pretendToBeVisual: true,
   });
   const previousValues = new Map<GlobalPatchKey, GlobalPatch>();
+  const intervalCallbacks: Array<() => void | Promise<void>> = [];
 
   function setGlobal(key: GlobalPatchKey, value: unknown) {
     previousValues.set(key, {
@@ -206,15 +153,25 @@ function setupDom(fetchImpl: typeof fetch) {
   setGlobal("ResizeObserver", MockResizeObserver);
   setGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => setTimeout(() => callback(dom.window.performance.now()), 0));
   setGlobal("cancelAnimationFrame", (id: ReturnType<typeof setTimeout>) => clearTimeout(id));
-  setGlobal("setInterval", (_handler: TimerHandler, _timeout?: number, ..._args: unknown[]) => 1);
+  setGlobal("setInterval", (handler: TimerHandler) => {
+    if (typeof handler === "function") {
+      intervalCallbacks.push(handler as () => void | Promise<void>);
+    }
+    return intervalCallbacks.length;
+  });
   setGlobal("clearInterval", (_id: ReturnType<typeof setInterval>) => undefined);
   setGlobal("getComputedStyle", dom.window.getComputedStyle.bind(dom.window));
   setGlobal("fetch", fetchImpl);
-  setGlobal("EventSource", MockEventSource);
   setGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 
   return {
     dom,
+    async tickIntervals() {
+      for (const callback of intervalCallbacks) {
+        await callback();
+      }
+      await Promise.resolve();
+    },
     cleanup() {
       for (const [key, patch] of previousValues) {
         if (patch.existed) {
@@ -232,162 +189,41 @@ function setupDom(fetchImpl: typeof fetch) {
   };
 }
 
-async function waitForAssertion(assertion: () => void) {
+async function waitForAssertion(assertion: () => void, attempts = 20) {
   let lastError: unknown = null;
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let index = 0; index < attempts; index += 1) {
     try {
       assertion();
       return;
     } catch (error) {
       lastError = error;
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
     }
   }
   throw lastError;
 }
 
-function createDeferredResponse() {
-  let resolve: (response: Response) => void = (_response: Response) => {
-    throw new Error("deferred response resolver is not initialized");
-  };
-  const promise = new Promise<Response>((actualResolve) => {
-    resolve = actualResolve;
-  });
-  return {
-    promise,
-    resolve,
-  };
-}
-
-test("App 会在同一轮 runtime 发现落后后持续补拉 uiSnapshot，直到消息与 attach 无需手动刷新即可出现", async () => {
+test("App 只靠 ui-snapshot 轮询也会把新 final 消息展示出来", async () => {
   let uiSnapshotRequestCount = 0;
-  const fetchImpl: typeof fetch = async (input) => {
-    const requestUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-    if (requestUrl.includes("/api/ui-snapshot")) {
-      uiSnapshotRequestCount += 1;
-      const payload = uiSnapshotRequestCount <= 2
-        ? createUiSnapshot({
-            agentSession: {
-              kind: "absent",
-            },
-            messages: [],
-          })
-        : createUiSnapshot({
-            agentSession: {
-              kind: "present",
-              sessionId: "session-challenge-1",
-            },
-            messages: createAgentFinalMessage(),
-          });
-      return new Response(JSON.stringify(payload), {
-        status: 200,
-        headers: {
-          "content-type": "application/json",
-        },
-      });
-    }
+  const snapshots = [
+    createUiSnapshot({
+      agentSessionId: null,
+      messages: [],
+    }),
+    createUiSnapshot({
+      agentSessionId: "session-challenge-1",
+      messages: createAgentFinalMessage(),
+    }),
+  ];
+  const fetchImpl = (async () => {
+    const next = snapshots[Math.min(uiSnapshotRequestCount, snapshots.length - 1)]!;
+    uiSnapshotRequestCount += 1;
+    return new Response(JSON.stringify(next), { status: 200 });
+  }) as typeof fetch;
 
-    if (requestUrl.includes("/api/tasks/runtime")) {
-      return new Response(JSON.stringify(createRuntimeSnapshot()), {
-        status: 200,
-        headers: {
-          "content-type": "application/json",
-        },
-      });
-    }
-
-    throw new Error(`unexpected request: ${requestUrl}`);
-  };
-
-  const { cleanup } = setupDom(fetchImpl);
-  const container = document.createElement("div");
-  document.body.append(container);
-  const root = createRoot(container);
-
-  try {
-    await act(async () => {
-      root.render(<App />);
-    });
-
-    await waitForAssertion(() => {
-      assert.match(document.body.textContent ?? "", /挑战结论：这里的消息应当在 runtime 完成后自动出现。/u);
-      const attachButton = document.querySelector('button[aria-label="打开 漏洞挑战-1 的 attach 终端"]');
-      assert.ok(attachButton instanceof HTMLButtonElement, "应显示漏洞挑战-1 的 attach 按钮");
-      assert.equal(attachButton.disabled, false);
-    });
-
-    assert.equal(uiSnapshotRequestCount, 3, "应在同一轮发现落后后连续补拉到第三次才追平，而不是等待下一轮 runtime 轮询");
-  } finally {
-    await act(async () => {
-      root.unmount();
-    });
-    cleanup();
-  }
-});
-
-test("App 在 uiSnapshot 请求乱序返回时，仍会保留语义更新后的群聊消息，而不是被旧快照卡住直到手动刷新", async () => {
-  let uiSnapshotRequestCount = 0;
-  const secondUiSnapshot = createDeferredResponse();
-
-  const fetchImpl: typeof fetch = async (input) => {
-    const requestUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-    if (requestUrl.includes("/api/ui-snapshot")) {
-      uiSnapshotRequestCount += 1;
-
-      if (uiSnapshotRequestCount === 1) {
-        return new Response(JSON.stringify(createUiSnapshot({
-          agentSession: {
-            kind: "present",
-            sessionId: "session-challenge-1",
-          },
-          messages: [],
-        })), {
-          status: 200,
-          headers: {
-            "content-type": "application/json",
-          },
-        });
-      }
-
-      if (uiSnapshotRequestCount === 2) {
-        return secondUiSnapshot.promise;
-      }
-
-      if (uiSnapshotRequestCount === 3) {
-        return new Response(JSON.stringify(createUiSnapshot({
-          agentSession: {
-            kind: "present",
-            sessionId: "session-challenge-1",
-          },
-          messages: [],
-        })), {
-          status: 200,
-          headers: {
-            "content-type": "application/json",
-          },
-        });
-      }
-
-      throw new Error(`unexpected uiSnapshot request count: ${uiSnapshotRequestCount}`);
-    }
-
-    if (requestUrl.includes("/api/tasks/runtime")) {
-      return new Response(JSON.stringify([]), {
-        status: 200,
-        headers: {
-          "content-type": "application/json",
-        },
-      });
-    }
-
-    throw new Error(`unexpected request: ${requestUrl}`);
-  };
-
-  const { cleanup } = setupDom(fetchImpl);
-  const container = document.createElement("div");
-  document.body.append(container);
+  const domContext = setupDom(fetchImpl);
+  const container = domContext.dom.window.document.createElement("div");
+  domContext.dom.window.document.body.append(container);
   const root = createRoot(container);
 
   try {
@@ -398,118 +234,44 @@ test("App 在 uiSnapshot 请求乱序返回时，仍会保留语义更新后的�
     await waitForAssertion(() => {
       assert.match(document.body.textContent ?? "", /还没有消息/u);
       assert.equal(uiSnapshotRequestCount >= 1, true);
-      assert.ok(MockEventSource.lastInstance, "初始 uiSnapshot 到达后应建立 SSE 订阅");
     });
 
     await act(async () => {
-      MockEventSource.lastInstance?.onmessage?.({
-        data: JSON.stringify({
-          type: "task-updated",
-          cwd: WORKSPACE_CWD,
-          payload: { taskId: TASK_ID },
-        }),
-      } as MessageEvent<string>);
-      MockEventSource.lastInstance?.onmessage?.({
-        data: JSON.stringify({
-          type: "message-created",
-          cwd: WORKSPACE_CWD,
-          payload: { taskId: TASK_ID },
-        }),
-      } as MessageEvent<string>);
+      await domContext.tickIntervals();
     });
 
     await waitForAssertion(() => {
-      assert.equal(uiSnapshotRequestCount, 3);
-    });
-
-    secondUiSnapshot.resolve(new Response(JSON.stringify(createUiSnapshot({
-      agentSession: {
-        kind: "present",
-        sessionId: "session-challenge-1",
-      },
-      messages: createMarkdownAgentFinalMessage(),
-    })), {
-      status: 200,
-      headers: {
-        "content-type": "application/json",
-      },
-    }));
-
-    await waitForAssertion(() => {
-      assert.match(document.body.textContent ?? "", /挑战结论/u);
-      const strong = document.querySelector('strong[data-chat-markdown-role="strong"]');
-      assert.ok(strong instanceof HTMLElement, "乱序返回的新消息应直接渲染出 markdown strong 元素");
-      assert.match(strong.textContent ?? "", /这里会自动渲染为 markdown/u);
+      assert.match(document.body.textContent ?? "", /挑战结论：这里的消息应当在轮询拿到全量 snapshot 后立即出现。/u);
     });
   } finally {
     await act(async () => {
       root.unmount();
     });
-    cleanup();
-    MockEventSource.lastInstance = null;
+    domContext.cleanup();
   }
 });
 
-test("App 在 uiSnapshot 乱序时，session 与 attach 的更新也会立即体现在界面上", async () => {
+test("App 会把 snapshot 里的 attach 状态更新到界面", async () => {
   let uiSnapshotRequestCount = 0;
-  const secondUiSnapshot = createDeferredResponse();
-  const initialMessages = createAgentFinalMessage();
+  const snapshots = [
+    createUiSnapshot({
+      agentSessionId: null,
+      messages: createAgentFinalMessage(),
+    }),
+    createUiSnapshot({
+      agentSessionId: "session-challenge-1",
+      messages: createAgentFinalMessage(),
+    }),
+  ];
+  const fetchImpl = (async () => {
+    const next = snapshots[Math.min(uiSnapshotRequestCount, snapshots.length - 1)]!;
+    uiSnapshotRequestCount += 1;
+    return new Response(JSON.stringify(next), { status: 200 });
+  }) as typeof fetch;
 
-  const fetchImpl: typeof fetch = async (input) => {
-    const requestUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-    if (requestUrl.includes("/api/ui-snapshot")) {
-      uiSnapshotRequestCount += 1;
-
-      if (uiSnapshotRequestCount === 1) {
-        return new Response(JSON.stringify(createUiSnapshot({
-          agentSession: {
-            kind: "absent",
-          },
-          messages: initialMessages,
-        })), {
-          status: 200,
-          headers: {
-            "content-type": "application/json",
-          },
-        });
-      }
-
-      if (uiSnapshotRequestCount === 2) {
-        return secondUiSnapshot.promise;
-      }
-
-      if (uiSnapshotRequestCount === 3) {
-        return new Response(JSON.stringify(createUiSnapshot({
-          agentSession: {
-            kind: "absent",
-          },
-          messages: initialMessages,
-        })), {
-          status: 200,
-          headers: {
-            "content-type": "application/json",
-          },
-        });
-      }
-
-      throw new Error(`unexpected uiSnapshot request count: ${uiSnapshotRequestCount}`);
-    }
-
-    if (requestUrl.includes("/api/tasks/runtime")) {
-      return new Response(JSON.stringify([]), {
-        status: 200,
-        headers: {
-          "content-type": "application/json",
-        },
-      });
-    }
-
-    throw new Error(`unexpected request: ${requestUrl}`);
-  };
-
-  const { cleanup } = setupDom(fetchImpl);
-  const container = document.createElement("div");
-  document.body.append(container);
+  const domContext = setupDom(fetchImpl);
+  const container = domContext.dom.window.document.createElement("div");
+  domContext.dom.window.document.body.append(container);
   const root = createRoot(container);
 
   try {
@@ -519,55 +281,23 @@ test("App 在 uiSnapshot 乱序时，session 与 attach 的更新也会立即体
 
     await waitForAssertion(() => {
       const attachButton = document.querySelector('button[aria-label="打开 漏洞挑战-1 的 attach 终端"]');
-      assert.ok(attachButton instanceof HTMLButtonElement, "初始快照应存在 attach 按钮");
+      assert.ok(attachButton instanceof HTMLButtonElement);
       assert.equal(attachButton.disabled, true);
-      assert.ok(MockEventSource.lastInstance, "初始 uiSnapshot 到达后应建立 SSE 订阅");
     });
 
     await act(async () => {
-      MockEventSource.lastInstance?.onmessage?.({
-        data: JSON.stringify({
-          type: "task-updated",
-          cwd: WORKSPACE_CWD,
-          payload: { taskId: TASK_ID },
-        }),
-      } as MessageEvent<string>);
-      MockEventSource.lastInstance?.onmessage?.({
-        data: JSON.stringify({
-          type: "agent-status-changed",
-          cwd: WORKSPACE_CWD,
-          payload: { taskId: TASK_ID, agentId: "漏洞挑战-1" },
-        }),
-      } as MessageEvent<string>);
+      await domContext.tickIntervals();
     });
-
-    await waitForAssertion(() => {
-      assert.equal(uiSnapshotRequestCount, 3);
-    });
-
-    secondUiSnapshot.resolve(new Response(JSON.stringify(createUiSnapshot({
-      agentSession: {
-        kind: "present",
-        sessionId: "session-challenge-1",
-      },
-      messages: initialMessages,
-    })), {
-      status: 200,
-      headers: {
-        "content-type": "application/json",
-      },
-    }));
 
     await waitForAssertion(() => {
       const attachButton = document.querySelector('button[aria-label="打开 漏洞挑战-1 的 attach 终端"]');
-      assert.ok(attachButton instanceof HTMLButtonElement, "session 更新后 attach 按钮应继续存在");
+      assert.ok(attachButton instanceof HTMLButtonElement);
       assert.equal(attachButton.disabled, false);
     });
   } finally {
     await act(async () => {
       root.unmount();
     });
-    cleanup();
-    MockEventSource.lastInstance = null;
+    domContext.cleanup();
   }
 });

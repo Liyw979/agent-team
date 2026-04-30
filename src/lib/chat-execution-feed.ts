@@ -1,9 +1,8 @@
 import type {
-  AgentRuntimeSnapshot,
+  AgentFinalMessageRecord,
   MessageRecord,
   TopologyRecord,
 } from "@shared/types";
-import { withOptionalValue } from "@shared/object-utils";
 import { parseTargetAgentIds } from "@shared/chat-message-format";
 import {
   buildAgentExecutionHistoryItems,
@@ -11,16 +10,29 @@ import {
 } from "./agent-history";
 import { mergeTaskChatMessages, type ChatMessageItem } from "./chat-messages";
 
-interface ChatExecutionWindow {
+interface ChatExecutionWindowBase {
   id: string;
   agentId: string;
+  runCount: number;
   anchorMessageId: string;
   triggerMessageId: string;
   startedAt: string;
-  finalMessageId?: string;
-  finalRawMessageId?: string;
-  completedAt?: string;
 }
+
+type RunningChatExecutionWindow = ChatExecutionWindowBase & {
+  status: "running";
+};
+
+type SettledChatExecutionWindow = ChatExecutionWindowBase & {
+  status: "settled";
+  finalMessageId: string;
+  finalRawMessageId: string;
+  completedAt: string;
+};
+
+type ChatExecutionWindow =
+  | RunningChatExecutionWindow
+  | SettledChatExecutionWindow;
 
 type ChatFeedMessageItem = {
   type: "message";
@@ -32,7 +44,7 @@ export type ChatFeedExecutionItem =
   | {
       type: "execution";
       id: string;
-      state: "running";
+      status: "running";
       agentId: string;
       anchorMessageId: string;
       startedAt: string;
@@ -41,7 +53,7 @@ export type ChatFeedExecutionItem =
   | {
       type: "execution";
       id: string;
-      state: "completed";
+      status: "settled";
       agentId: string;
       anchorMessageId: string;
       startedAt: string;
@@ -49,14 +61,14 @@ export type ChatFeedExecutionItem =
       message: ChatMessageItem;
     };
 
-type ChatFeedItem =
-  | ChatFeedMessageItem
-  | ChatFeedExecutionItem;
+type ChatFeedItem = ChatFeedMessageItem | ChatFeedExecutionItem;
 
 function isVisibleChatExecutionTrigger(message: MessageRecord) {
-  return message.kind === "user"
-    || message.kind === "agent-dispatch"
-    || message.kind === "action-required-request";
+  return (
+    message.kind === "user" ||
+    message.kind === "agent-dispatch" ||
+    message.kind === "action-required-request"
+  );
 }
 
 function getVisibleChatExecutionTargets(message: MessageRecord): string[] {
@@ -66,7 +78,18 @@ function getVisibleChatExecutionTargets(message: MessageRecord): string[] {
   return parseTargetAgentIds(message.targetAgentIds);
 }
 
-function getMergedMessageIndexByRawMessageId(mergedMessages: ChatMessageItem[]) {
+function getVisibleChatExecutionTargetRunCounts(
+  message: MessageRecord,
+): number[] {
+  if (!isVisibleChatExecutionTrigger(message)) {
+    return [];
+  }
+  return message.targetRunCounts;
+}
+
+function getMergedMessageIndexByRawMessageId(
+  mergedMessages: ChatMessageItem[],
+) {
   const indexByRawMessageId = new Map<string, number>();
 
   for (const [index, message] of mergedMessages.entries()) {
@@ -78,109 +101,33 @@ function getMergedMessageIndexByRawMessageId(mergedMessages: ChatMessageItem[]) 
   return indexByRawMessageId;
 }
 
-function getFinalRawMessageFromMergedMessage(message: ChatMessageItem): MessageRecord | null {
+function getFinalRawMessageFromMergedMessage(
+  message: ChatMessageItem,
+): AgentFinalMessageRecord | undefined {
   for (const chainedMessage of message.messageChain) {
     if (chainedMessage.kind === "agent-final") {
       return chainedMessage;
     }
   }
-  return null;
+  return undefined;
 }
 
-function getRuntimeExecutionStartedAtHint(runtimeSnapshot: AgentRuntimeSnapshot): string {
-  const timestamps = [
-    runtimeSnapshot.updatedAt ?? "",
-    ...runtimeSnapshot.activities.map((activity) => activity.timestamp),
-  ].filter((timestamp) => timestamp.length > 0);
-
-  if (timestamps.length === 0) {
-    return "";
-  }
-
-  return timestamps.reduce((earliest, current) => (current < earliest ? current : earliest));
-}
-
-function resolveRuntimeOnlyExecutionAnchor(
-  mergedMessages: ChatMessageItem[],
-  startedAtHint: string,
-): {
-  anchorMessageId: string;
-  anchorTimestamp: string;
-} | null {
-  if (mergedMessages.length === 0) {
-    return null;
-  }
-
-  const anchorMessage = [...mergedMessages]
-    .reverse()
-    .find((message) => startedAtHint.length === 0 || message.timestamp <= startedAtHint)
-    ?? mergedMessages.at(-1)
-    ?? null;
-  if (!anchorMessage) {
-    return null;
-  }
-
-  return {
-    anchorMessageId: anchorMessage.id,
-    anchorTimestamp: anchorMessage.timestamp,
-  };
-}
-
-function buildRuntimeOnlyExecutionWindows(input: {
-  topology: Pick<TopologyRecord, "nodes">;
-  mergedMessages: ChatMessageItem[];
-  runtimeSnapshots: Record<string, AgentRuntimeSnapshot>;
-  visibleWindows: ChatExecutionWindow[];
-}): ChatExecutionWindow[] {
-  const staticTopologyAgentIds = new Set(input.topology.nodes);
-  const visibleRunningAgentIds = new Set(
-    input.visibleWindows
-      .filter((window) => !window.finalMessageId)
-      .map((window) => window.agentId),
-  );
-  const completedAgentIds = new Set(
-    input.visibleWindows
-      .filter((window) => Boolean(window.finalMessageId))
-      .map((window) => window.agentId),
-  );
-  for (const mergedMessage of input.mergedMessages) {
-    const finalRawMessage = getFinalRawMessageFromMergedMessage(mergedMessage);
-    if (finalRawMessage) {
-      completedAgentIds.add(finalRawMessage.sender);
-    }
-  }
-
-  return Object.entries(input.runtimeSnapshots)
-    .filter(([, runtimeSnapshot]) => runtimeSnapshot.runtimeStatus === "running")
-    .filter(([agentId]) => !staticTopologyAgentIds.has(agentId))
-    .filter(([agentId]) => !visibleRunningAgentIds.has(agentId))
-    .filter(([agentId]) => !completedAgentIds.has(agentId))
-    .flatMap(([agentId, runtimeSnapshot]) => {
-      const startedAtHint = getRuntimeExecutionStartedAtHint(runtimeSnapshot);
-      const anchor = resolveRuntimeOnlyExecutionAnchor(input.mergedMessages, startedAtHint);
-      if (!anchor) {
-        return [];
-      }
-
-      return [{
-        id: `runtime:${agentId}:${runtimeSnapshot.sessionId ?? "no-session"}:${runtimeSnapshot.updatedAt ?? "no-update"}`,
-        agentId,
-        anchorMessageId: anchor.anchorMessageId,
-        triggerMessageId: "",
-        startedAt: startedAtHint && startedAtHint > anchor.anchorTimestamp
-          ? startedAtHint
-          : anchor.anchorTimestamp,
-      }];
-    });
+function compareExecutionWindows(
+  left: ChatExecutionWindow,
+  right: ChatExecutionWindow,
+): number {
+  return left.startedAt.localeCompare(right.startedAt);
 }
 
 export function buildChatExecutionWindows(
   messages: MessageRecord[],
   mergedMessages: ChatMessageItem[],
 ): ChatExecutionWindow[] {
-  const mergedMessageIndexByRawMessageId = getMergedMessageIndexByRawMessageId(mergedMessages);
+  const mergedMessageIndexByRawMessageId =
+    getMergedMessageIndexByRawMessageId(mergedMessages);
   const windows: ChatExecutionWindow[] = messages.flatMap((message) => {
     const targets = getVisibleChatExecutionTargets(message);
+    const targetRunCounts = getVisibleChatExecutionTargetRunCounts(message);
     if (targets.length === 0) {
       return [];
     }
@@ -195,20 +142,31 @@ export function buildChatExecutionWindows(
       return [];
     }
 
-    return targets.map((agentId, targetIndex) => ({
-      id: `${message.id}:${agentId}:${targetIndex}`,
-      agentId,
-      anchorMessageId,
-      triggerMessageId: message.id,
-      startedAt: message.timestamp,
-    }));
+    return targets.map((agentId, targetIndex) => {
+      const runCount = targetRunCounts[targetIndex];
+      if (runCount === undefined) {
+        throw new Error(
+          `消息 ${message.id} 缺少 ${agentId} 的 targetRunCounts`,
+        );
+      }
+      return {
+        id: `${message.id}:${agentId}:${targetIndex}`,
+        status: "running" as const,
+        agentId,
+        runCount,
+        anchorMessageId,
+        triggerMessageId: message.id,
+        startedAt: message.timestamp,
+      };
+    });
   });
 
-  const pendingWindowsByAgent = new Map<string, ChatExecutionWindow[]>();
-  for (const window of windows) {
-    const agentWindows = pendingWindowsByAgent.get(window.agentId) ?? [];
-    agentWindows.push(window);
-    pendingWindowsByAgent.set(window.agentId, agentWindows);
+  const pendingWindowIndexesByExecutionKey = new Map<string, number>();
+  for (const [index, window] of windows.entries()) {
+    pendingWindowIndexesByExecutionKey.set(
+      `${window.agentId}::${window.runCount}`,
+      index,
+    );
   }
 
   for (const mergedMessage of mergedMessages) {
@@ -217,47 +175,59 @@ export function buildChatExecutionWindows(
       continue;
     }
 
-    const candidateWindows = pendingWindowsByAgent.get(finalRawMessage.sender) ?? [];
-    const matchedWindow = candidateWindows.find((window) =>
-      !window.finalRawMessageId
-      && window.startedAt.localeCompare(finalRawMessage.timestamp) <= 0,
+    const matchedWindowIndex = pendingWindowIndexesByExecutionKey.get(
+      `${finalRawMessage.sender}::${finalRawMessage.runCount}`,
     );
-    if (!matchedWindow) {
+    if (matchedWindowIndex === undefined) {
       continue;
     }
 
-    matchedWindow.finalMessageId = mergedMessage.id;
-    matchedWindow.finalRawMessageId = finalRawMessage.id;
-    matchedWindow.completedAt = finalRawMessage.timestamp;
+    const matchedWindow = windows[matchedWindowIndex];
+    if (!matchedWindow || matchedWindow.status !== "running") {
+      continue;
+    }
+
+    windows[matchedWindowIndex] = {
+      ...matchedWindow,
+      status: "settled",
+      finalMessageId: mergedMessage.id,
+      finalRawMessageId: finalRawMessage.id,
+      completedAt: finalRawMessage.timestamp,
+    };
   }
 
-  return windows;
+  return windows.sort(compareExecutionWindows);
 }
 
 export function buildChatFeedItems(input: {
   messages: MessageRecord[];
-  topology: Pick<TopologyRecord, "edges" | "nodes">;
-  runtimeSnapshots: Record<string, AgentRuntimeSnapshot>;
+  topology: Pick<
+    TopologyRecord,
+    "edges" | "nodes" | "nodeRecords" | "langgraph" | "spawnRules"
+  >;
 }): ChatFeedItem[] {
-  const orderedMessages = [...input.messages].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
-  const mergedMessages = mergeTaskChatMessages(orderedMessages);
-  const visibleExecutionWindows = buildChatExecutionWindows(orderedMessages, mergedMessages);
-  const executionWindows = [
-    ...visibleExecutionWindows,
-    ...buildRuntimeOnlyExecutionWindows({
-      topology: input.topology,
-      mergedMessages,
-      runtimeSnapshots: input.runtimeSnapshots,
-      visibleWindows: visibleExecutionWindows,
-    }),
-  ];
+  const orderedMessages = [...input.messages].sort((left, right) =>
+    left.timestamp.localeCompare(right.timestamp),
+  );
+  const mergedMessages = mergeTaskChatMessages(
+    orderedMessages.filter((message) => message.kind !== "agent-progress"),
+  );
+  const executionWindows = buildChatExecutionWindows(
+    orderedMessages,
+    mergedMessages,
+  ).sort(compareExecutionWindows);
   const absorbedMergedMessageIds = new Set(
     executionWindows
-      .map((window) => window.finalMessageId)
-      .filter((messageId): messageId is string => typeof messageId === "string"),
+      .filter(
+        (window): window is SettledChatExecutionWindow =>
+          window.status === "settled",
+      )
+      .map((window) => window.finalMessageId),
   );
   const windowsByAnchorMessageId = new Map<string, ChatExecutionWindow[]>();
-  const mergedMessageById = new Map(mergedMessages.map((message) => [message.id, message]));
+  const mergedMessageById = new Map(
+    mergedMessages.map((message) => [message.id, message]),
+  );
 
   for (const window of executionWindows) {
     const windows = windowsByAnchorMessageId.get(window.anchorMessageId) ?? [];
@@ -275,18 +245,19 @@ export function buildChatFeedItems(input: {
       });
     }
 
-    const anchoredWindows = windowsByAnchorMessageId.get(mergedMessage.id) ?? [];
+    const anchoredWindows =
+      windowsByAnchorMessageId.get(mergedMessage.id) ?? [];
     for (const window of anchoredWindows) {
-      if (window.finalMessageId) {
+      if (window.status === "settled") {
         const finalMessage = mergedMessageById.get(window.finalMessageId);
-        if (!finalMessage || !window.completedAt) {
+        if (!finalMessage) {
           continue;
         }
 
         feedItems.push({
           type: "execution",
           id: window.id,
-          state: "completed",
+          status: "settled",
           agentId: window.agentId,
           anchorMessageId: window.anchorMessageId,
           startedAt: window.startedAt,
@@ -299,7 +270,7 @@ export function buildChatFeedItems(input: {
       feedItems.push({
         type: "execution",
         id: window.id,
-        state: "running",
+        status: "running",
         agentId: window.agentId,
         anchorMessageId: window.anchorMessageId,
         startedAt: window.startedAt,
@@ -308,7 +279,6 @@ export function buildChatFeedItems(input: {
           messages: orderedMessages,
           topology: input.topology,
           startedAt: window.startedAt,
-          ...withOptionalValue({}, "runtimeSnapshot", input.runtimeSnapshots[window.agentId]),
         }),
       });
     }

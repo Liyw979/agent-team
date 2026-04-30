@@ -3,7 +3,6 @@ import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
 
 import type {
-  AgentRuntimeSnapshot,
   TaskSnapshot,
   WorkspaceSnapshot,
 } from "@shared/types";
@@ -37,7 +36,6 @@ interface RenderTopologyGraphInput {
   task: TaskSnapshot;
   selectedAgentId: string | null;
   openingAgentTerminalId: string;
-  runtimeSnapshots: Record<string, AgentRuntimeSnapshot>;
   onSelectAgent: (agentId: string) => void;
   onToggleMaximize: () => void;
   onOpenAgentTerminal?: (agentId: string) => void;
@@ -138,7 +136,6 @@ export async function renderTopologyGraphInDom(input: RenderTopologyGraphInput) 
           onToggleMaximize={nextInput.onToggleMaximize}
           openingAgentTerminalId={nextInput.openingAgentTerminalId}
           {...(nextInput.onOpenAgentTerminal ? { onOpenAgentTerminal: nextInput.onOpenAgentTerminal } : {})}
-          runtimeSnapshots={nextInput.runtimeSnapshots}
         />,
       );
     });

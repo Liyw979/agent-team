@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import { withOptionalString } from "@shared/object-utils";
 import {
   resolvePrimaryTopologyStartTarget,
-  type AgentRuntimeSnapshot,
   type TaskSnapshot,
   type WorkspaceSnapshot,
 } from "@shared/types";
@@ -44,7 +43,6 @@ interface ChatWindowProps {
   availableAgents: string[];
   taskLogFilePath: string | null;
   taskUrl: string | null;
-  runtimeSnapshots?: Record<string, AgentRuntimeSnapshot>;
   isMaximized?: boolean;
   onToggleMaximize?: () => void;
   openingAgentTerminalId?: string;
@@ -60,7 +58,16 @@ const MENTION_MENU_VERTICAL_PADDING = 16;
 const MENTION_MENU_GAP = 12;
 const MENTION_MENU_VIEWPORT_MARGIN = 12;
 const CHAT_EXECUTION_BUBBLE_MAX_HEIGHT_PX = 300;
-type RunningChatFeedExecutionItem = Extract<ChatFeedExecutionItem, { state: "running" }>;
+type RunningChatFeedExecutionItem = Exclude<ChatFeedExecutionItem, { status: "settled" }>;
+
+function getRuntimeExecutionBadgePresentation() {
+  return {
+    ariaLabel: "运行中",
+    title: "运行中",
+    className: "border border-[#d8b14a]/70 bg-[linear-gradient(180deg,#fff7d8_0%,#ffedb8_100%)] text-[#6b5208] topology-status-badge-running",
+    iconClassName: "animate-spin motion-reduce:animate-none",
+  };
+}
 
 function getCaretCoordinates(textarea: HTMLTextAreaElement, position: number) {
   const div = document.createElement("div");
@@ -134,13 +141,11 @@ function getDefaultAgentId(
 function MessageBubble({
   message,
   taskAgentEntries,
-  runtimeSnapshots,
   openingAgentTerminalId,
   onOpenAgentTerminal,
 }: {
   message: ChatMessageItem;
   taskAgentEntries: ReadonlyArray<Pick<TaskSnapshot["agents"][number], "id" | "opencodeSessionId">>;
-  runtimeSnapshots: Record<string, AgentRuntimeSnapshot>;
   openingAgentTerminalId: string;
   onOpenAgentTerminal: ((agentId: string) => void) | undefined;
 }) {
@@ -196,7 +201,6 @@ function MessageBubble({
   const attachButtonState = resolveChatMessageAttachButtonState({
     sender: message.sender,
     taskAgents: taskAgentEntries,
-    runtimeSnapshots,
     openingAgentTerminalId,
   });
 
@@ -300,7 +304,6 @@ function getExecutionHistoryItemClassName(item: AgentHistoryItem) {
 function RunningExecutionBubble({
   item,
   taskAgentEntries,
-  runtimeSnapshots,
   openingAgentTerminalId,
   onOpenAgentTerminal,
   viewportRef,
@@ -308,7 +311,6 @@ function RunningExecutionBubble({
 }: {
   item: RunningChatFeedExecutionItem;
   taskAgentEntries: ReadonlyArray<Pick<TaskSnapshot["agents"][number], "id" | "opencodeSessionId">>;
-  runtimeSnapshots: Record<string, AgentRuntimeSnapshot>;
   openingAgentTerminalId: string;
   onOpenAgentTerminal: ((agentId: string) => void) | undefined;
   viewportRef: (element: HTMLDivElement | null) => void;
@@ -318,9 +320,9 @@ function RunningExecutionBubble({
   const attachButtonState = resolveChatMessageAttachButtonState({
     sender: item.agentId,
     taskAgents: taskAgentEntries,
-    runtimeSnapshots,
     openingAgentTerminalId,
   });
+  const badgePresentation = getRuntimeExecutionBadgePresentation();
 
   return (
     <article
@@ -350,13 +352,13 @@ function RunningExecutionBubble({
             {new Date(item.startedAt).toLocaleString()}
           </span>
           <span
-            aria-label="运行中"
-            title="运行中"
-            className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[13px] font-semibold shadow-[0_1px_0_rgba(255,255,255,0.45)] border border-[#d8b14a]/70 bg-[linear-gradient(180deg,#fff7d8_0%,#ffedb8_100%)] text-[#6b5208] topology-status-badge-running"
+            aria-label={badgePresentation.ariaLabel}
+            title={badgePresentation.title}
+            className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-[13px] font-semibold shadow-[0_1px_0_rgba(255,255,255,0.45)] ${badgePresentation.className}`}
           >
             <svg
               viewBox="0 0 16 16"
-              className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none origin-center [transform-box:fill-box]"
+              className={`h-3.5 w-3.5 origin-center [transform-box:fill-box] ${badgePresentation.iconClassName}`}
               fill="none"
               stroke="currentColor"
               strokeWidth="1.8"
@@ -452,7 +454,6 @@ export function ChatWindow({
   availableAgents,
   taskLogFilePath = null,
   taskUrl = null,
-  runtimeSnapshots = {},
   isMaximized = false,
   onToggleMaximize,
   openingAgentTerminalId = "",
@@ -500,9 +501,8 @@ export function ChatWindow({
     () => buildChatFeedItems({
       messages: task?.messages ?? [],
       topology: task.topology ?? workspace.topology,
-      runtimeSnapshots,
     }),
-    [runtimeSnapshots, task?.messages, task?.topology, workspace?.topology],
+    [task?.messages, task?.topology, workspace?.topology],
   );
   const taskAgentEntries = useMemo(
     () => task.agents.map((agent) => ({
@@ -556,7 +556,7 @@ export function ChatWindow({
     const activeRunningExecutionIds = new Set(
       feedItems
         .filter((item): item is RunningChatFeedExecutionItem =>
-          item.type === "execution" && item.state === "running")
+          item.type === "execution" && item.status !== "settled")
         .map((item) => item.id),
     );
 
@@ -580,7 +580,7 @@ export function ChatWindow({
   useEffect(() => {
     const frameIds: number[] = [];
     for (const feedItem of feedItems) {
-      if (feedItem.type !== "execution" || feedItem.state !== "running") {
+      if (feedItem.type !== "execution" || feedItem.status === "settled") {
         continue;
       }
 
@@ -800,16 +800,14 @@ export function ChatWindow({
                 key={item.id}
                 message={item.message}
                 taskAgentEntries={taskAgentEntries}
-                runtimeSnapshots={runtimeSnapshots}
                 openingAgentTerminalId={openingAgentTerminalId}
                 onOpenAgentTerminal={onOpenAgentTerminal}
               />
-            ) : item.state === "completed" ? (
+            ) : item.status === "settled" ? (
               <MessageBubble
                 key={item.id}
                 message={item.message}
                 taskAgentEntries={taskAgentEntries}
-                runtimeSnapshots={runtimeSnapshots}
                 openingAgentTerminalId={openingAgentTerminalId}
                 onOpenAgentTerminal={onOpenAgentTerminal}
               />
@@ -818,7 +816,6 @@ export function ChatWindow({
                 key={item.id}
                 item={item}
                 taskAgentEntries={taskAgentEntries}
-                runtimeSnapshots={runtimeSnapshots}
                 openingAgentTerminalId={openingAgentTerminalId}
                 onOpenAgentTerminal={onOpenAgentTerminal}
                 viewportRef={(element) => {

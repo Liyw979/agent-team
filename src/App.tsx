@@ -1,19 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type {
-  AgentRuntimeSnapshot,
-  RuntimeUpdatedEventPayload,
-  UiSnapshotPayload,
-} from "@shared/types";
+import type { UiSnapshotPayload } from "@shared/types";
 import { withOptionalString } from "@shared/object-utils";
 import { ChatWindow } from "./components/ChatWindow";
 import { TopologyGraph } from "./components/TopologyGraph";
 import {
   fetchUiSnapshot,
-  getTaskRuntime,
   openAgentTerminal,
   readLaunchParams,
   submitTask,
-  subscribeAgentTeamEvents,
 } from "./lib/web-api";
 import { getAgentColorToken } from "./lib/agent-colors";
 import { calculateAgentCardPanelLayout } from "./lib/agent-card-layout";
@@ -37,27 +31,11 @@ import {
   buildAgentPromptDialogState,
   type AgentPromptDialogState,
 } from "./lib/agent-prompt-dialog";
-import { shouldRefreshForRuntimeEvent } from "./lib/runtime-event-refresh";
-import { inspectRuntimeGap, shouldRefreshUiSnapshotFromRuntimeGap } from "./lib/runtime-ui-refresh";
-import { shouldAcceptRuntimeRefresh } from "./lib/runtime-refresh-gate";
-import { decideUiSnapshotRefreshAcceptance } from "./lib/ui-snapshot-refresh-gate";
+import {
+  decideUiSnapshotRefreshAcceptance,
+} from "./lib/ui-snapshot-refresh-gate";
 import { getUiSnapshotPollingIntervalMs } from "./lib/ui-snapshot-polling";
 import { resolveAppPanelVisibility, type AppPanelMode } from "./lib/app-panel-visibility";
-
-const MAX_UI_SNAPSHOT_CATCHUP_ATTEMPTS = 3;
-const EMPTY_RUNTIME_SNAPSHOTS: Record<string, AgentRuntimeSnapshot> = {};
-
-function logRuntimeRefreshDetail(payload: {
-  taskId: string;
-  phase: "attempt" | "stop" | "ignored-stale-runtime-response";
-  attempt: number;
-  gapReason: string;
-  agentId: string;
-  stopReason: string;
-  requestId: number;
-}) {
-  console.debug("[agent-team] runtime ui catch-up", payload);
-}
 
 function App() {
   const launchParams = useMemo(() => readLaunchParams(), []);
@@ -65,7 +43,6 @@ function App() {
   const workspaceLayoutMetrics = getAppWorkspaceLayoutMetrics();
   const [uiSnapshot, setUiSnapshot] = useState<UiSnapshotPayload | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-  const [runtimeSnapshots, setRuntimeSnapshots] = useState<Record<string, AgentRuntimeSnapshot>>({});
   const [openingAgentTerminalId, setOpeningAgentTerminalId] = useState("");
   const [agentTerminalActionError, setAgentTerminalActionError] = useState<string | null>(null);
   const [promptLineCount, setPromptLineCount] = useState(1);
@@ -76,10 +53,6 @@ function App() {
   const latestUiSnapshotRef = useRef<UiSnapshotPayload | null>(null);
   const nextUiSnapshotRequestIdRef = useRef(0);
   const latestAcceptedUiSnapshotRequestIdRef = useRef(0);
-  const latestCatchUpRuntimeSnapshotsRef = useRef<Record<string, AgentRuntimeSnapshot>>({});
-  const uiSnapshotCatchUpPromiseRef = useRef<Promise<void> | null>(null);
-  const nextRuntimeRequestIdRef = useRef(0);
-  const latestAcceptedRuntimeRequestIdRef = useRef(0);
 
   const workspace = uiSnapshot?.workspace ?? null;
   const task = uiSnapshot?.task ?? null;
@@ -133,106 +106,6 @@ function App() {
     applyUiSnapshotRefreshResult(next, requestId);
   }
 
-  async function ensureUiSnapshotCatchUp(runtimeSnapshotsToMatch: Record<string, AgentRuntimeSnapshot>) {
-    latestCatchUpRuntimeSnapshotsRef.current = runtimeSnapshotsToMatch;
-    if (uiSnapshotCatchUpPromiseRef.current) {
-      await uiSnapshotCatchUpPromiseRef.current;
-      return;
-    }
-
-    const catchUpPromise = (async () => {
-      for (let attempt = 1; attempt <= MAX_UI_SNAPSHOT_CATCHUP_ATTEMPTS; attempt += 1) {
-        const currentTaskSnapshot = latestUiSnapshotRef.current?.task;
-        if (!currentTaskSnapshot) {
-          logRuntimeRefreshDetail({
-            taskId: launchTaskId,
-            phase: "stop",
-            attempt,
-            gapReason: "no-task",
-            agentId: "",
-            stopReason: "task-snapshot-unavailable-before-refresh",
-            requestId: 0,
-          });
-          return;
-        }
-        const gapInspectionBeforeRefresh = inspectRuntimeGap({
-          task: currentTaskSnapshot,
-          runtimeSnapshots: latestCatchUpRuntimeSnapshotsRef.current,
-        });
-        if (gapInspectionBeforeRefresh.reason === "aligned") {
-          logRuntimeRefreshDetail({
-            taskId: launchTaskId,
-            phase: "stop",
-            attempt,
-            gapReason: gapInspectionBeforeRefresh.reason,
-            agentId: gapInspectionBeforeRefresh.agentId,
-            stopReason: "ui-snapshot-aligned-before-refresh",
-            requestId: 0,
-          });
-          return;
-        }
-        logRuntimeRefreshDetail({
-          taskId: launchTaskId,
-          phase: "attempt",
-          attempt,
-          gapReason: gapInspectionBeforeRefresh.reason,
-          agentId: gapInspectionBeforeRefresh.agentId,
-          stopReason: "",
-          requestId: 0,
-        });
-        await refreshUiSnapshot();
-        const refreshedTaskSnapshot = latestUiSnapshotRef.current?.task;
-        if (!refreshedTaskSnapshot) {
-          logRuntimeRefreshDetail({
-            taskId: launchTaskId,
-            phase: "stop",
-            attempt,
-            gapReason: "no-task",
-            agentId: "",
-            stopReason: "task-snapshot-unavailable-after-refresh",
-            requestId: 0,
-          });
-          return;
-        }
-        const gapInspectionAfterRefresh = inspectRuntimeGap({
-          task: refreshedTaskSnapshot,
-          runtimeSnapshots: latestCatchUpRuntimeSnapshotsRef.current,
-        });
-        if (gapInspectionAfterRefresh.reason === "aligned") {
-          logRuntimeRefreshDetail({
-            taskId: launchTaskId,
-            phase: "stop",
-            attempt,
-            gapReason: gapInspectionAfterRefresh.reason,
-            agentId: gapInspectionAfterRefresh.agentId,
-            stopReason: "ui-snapshot-aligned-after-refresh",
-            requestId: 0,
-          });
-          return;
-        }
-        if (attempt === MAX_UI_SNAPSHOT_CATCHUP_ATTEMPTS) {
-          logRuntimeRefreshDetail({
-            taskId: launchTaskId,
-            phase: "stop",
-            attempt,
-            gapReason: gapInspectionAfterRefresh.reason,
-            agentId: gapInspectionAfterRefresh.agentId,
-            stopReason: "reached-max-catch-up-attempts",
-            requestId: 0,
-          });
-        }
-      }
-    })();
-    uiSnapshotCatchUpPromiseRef.current = catchUpPromise;
-    try {
-      await catchUpPromise;
-    } finally {
-      if (uiSnapshotCatchUpPromiseRef.current === catchUpPromise) {
-        uiSnapshotCatchUpPromiseRef.current = null;
-      }
-    }
-  }
-
   useEffect(() => {
     void refreshUiSnapshot();
   }, []);
@@ -254,108 +127,6 @@ function App() {
   useEffect(() => {
     latestUiSnapshotRef.current = uiSnapshot;
   }, [uiSnapshot]);
-
-  useEffect(() => {
-    if (!workspace || !task) {
-      setRuntimeSnapshots(EMPTY_RUNTIME_SNAPSHOTS);
-      latestCatchUpRuntimeSnapshotsRef.current = EMPTY_RUNTIME_SNAPSHOTS;
-      latestAcceptedRuntimeRequestIdRef.current = 0;
-      nextRuntimeRequestIdRef.current = 0;
-      return;
-    }
-
-    const activeTaskId = task.task.id;
-    let cancelled = false;
-    let timer: ReturnType<typeof setInterval> | null = null;
-
-    async function loadRuntime() {
-      const requestId = nextRuntimeRequestIdRef.current + 1;
-      nextRuntimeRequestIdRef.current = requestId;
-      try {
-        const snapshots = await getTaskRuntime({
-          taskId: activeTaskId,
-        });
-        if (cancelled) {
-          return;
-        }
-        if (!shouldAcceptRuntimeRefresh({
-          latestAcceptedRequestId: latestAcceptedRuntimeRequestIdRef.current,
-          requestId,
-        })) {
-          logRuntimeRefreshDetail({
-            taskId: activeTaskId,
-            phase: "ignored-stale-runtime-response",
-            attempt: 0,
-            gapReason: "stale-runtime-response",
-            agentId: "",
-            stopReason: "ignored-older-runtime-response",
-            requestId,
-          });
-          return;
-        }
-        const nextRuntimeSnapshots = Object.fromEntries(
-          snapshots.map((snapshot) => [snapshot.agentId, snapshot]),
-        );
-        latestAcceptedRuntimeRequestIdRef.current = requestId;
-        setRuntimeSnapshots(nextRuntimeSnapshots);
-        const currentTaskSnapshot = latestUiSnapshotRef.current?.task;
-        if (currentTaskSnapshot && shouldRefreshUiSnapshotFromRuntimeGap({
-          task: currentTaskSnapshot,
-          runtimeSnapshots: nextRuntimeSnapshots,
-        })) {
-          await ensureUiSnapshotCatchUp(nextRuntimeSnapshots);
-        }
-      } catch {
-        if (!cancelled && shouldAcceptRuntimeRefresh({
-          latestAcceptedRequestId: latestAcceptedRuntimeRequestIdRef.current,
-          requestId,
-        })) {
-          latestAcceptedRuntimeRequestIdRef.current = requestId;
-          setRuntimeSnapshots(EMPTY_RUNTIME_SNAPSHOTS);
-        }
-      }
-    }
-
-    void loadRuntime();
-    timer = setInterval(() => {
-      void loadRuntime();
-    }, 1000);
-
-    return () => {
-      cancelled = true;
-      if (timer) {
-        clearInterval(timer);
-      }
-    };
-  }, [workspace?.cwd, task?.task.id]);
-
-  useEffect(() => {
-    if (!task?.task.id) {
-      return;
-    }
-
-    const unsubscribe = subscribeAgentTeamEvents({
-      taskId: task.task.id,
-    }, (event) => {
-      const currentUiSnapshot = latestUiSnapshotRef.current;
-      if (!currentUiSnapshot?.task || !currentUiSnapshot.workspace) {
-        return;
-      }
-
-      if (event.type === "runtime-updated") {
-        const payload = event.payload as RuntimeUpdatedEventPayload;
-        if (!shouldRefreshForRuntimeEvent({
-          currentTaskId: currentUiSnapshot.task.task.id,
-          payload,
-        })) {
-          return;
-        }
-      }
-
-      void refreshUiSnapshot();
-    });
-    return unsubscribe;
-  }, [task?.task.id]);
 
   const availableAgents = useMemo(
     () => buildAvailableAgentIdsForFrontend(
@@ -487,7 +258,6 @@ function App() {
               onOpenAgentTerminal={(agentId) => {
                 void handleOpenAgentTerminal(agentId);
               }}
-              runtimeSnapshots={runtimeSnapshots}
             />
           </div>
         ) : panelVisibility.showChatPanel && !panelVisibility.showTopologyPanel && !panelVisibility.showTeamPanel ? (
@@ -498,7 +268,6 @@ function App() {
               availableAgents={availableAgents}
               taskLogFilePath={uiSnapshot?.taskLogFilePath ?? null}
               taskUrl={uiSnapshot?.taskUrl ?? null}
-              runtimeSnapshots={runtimeSnapshots}
               isMaximized={panelMode === "chat-only"}
               onToggleMaximize={() => {
                 setPanelMode((current) => (current === "chat-only" ? "default" : "chat-only"));
@@ -534,7 +303,6 @@ function App() {
               onOpenAgentTerminal={(agentId) => {
                 void handleOpenAgentTerminal(agentId);
               }}
-              runtimeSnapshots={runtimeSnapshots}
             />
 
             <div
@@ -551,7 +319,6 @@ function App() {
                   availableAgents={availableAgents}
                   taskLogFilePath={uiSnapshot?.taskLogFilePath ?? null}
                   taskUrl={uiSnapshot?.taskUrl ?? null}
-                  runtimeSnapshots={runtimeSnapshots}
                   isMaximized={panelMode === "chat-only"}
                   onToggleMaximize={() => {
                     setPanelMode((current) => (current === "chat-only" ? "default" : "chat-only"));
