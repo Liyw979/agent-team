@@ -434,12 +434,13 @@ test("resolveExecutionResult 在 completed 响应触发重试时会先立刻重�
   ]);
   const submittedRetryAt = submittedAt as [number, number, number];
   assert.deepEqual([submittedRetryAt[1] - submittedRetryAt[0], submittedRetryAt[2] - submittedRetryAt[1]], [0, 60_000]);
-  assert.match(stdout, /OpenCode 未返回需要的 trigger: <continue> \/ <complete>异常，已重新发送消息/u);
+  assert.match(stdout, /Agent TaskReview: OpenCode 未返回需要的 trigger: <continue> \/ <complete>异常，已重新发送消息/u);
   const records = readTaskEventRecords(userDataPath, taskId, "opencode.submit_message_retried");
   assert.equal(records.length, 2);
   const [firstRetryRecord] = records;
   assert.ok(firstRetryRecord);
   assert.equal(firstRetryRecord["reason"], "OpenCode 未返回需要的 trigger: <continue> / <complete>");
+  assert.equal(firstRetryRecord["message"], "Agent TaskReview: OpenCode 未返回需要的 trigger: <continue> / <complete>异常，已重新发送消息");
 });
 
 test("createSession throws when the response is missing a session id", async () => {

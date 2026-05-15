@@ -467,7 +467,7 @@ export class OpenCodeClient {
   }
 
   private logRetriedMessageResend(sessionId: string, agent: string, reason: string) {
-    const message = `${reason}异常，已重新发送消息`;
+    const message = `Agent ${agent}: ${reason}异常，已重新发送消息`;
     appendAppLog("warn", "opencode.submit_message_retried", {
       sessionId,
       agent,
