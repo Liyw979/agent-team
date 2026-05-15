@@ -380,7 +380,7 @@ export function TopologyGraph({
       columnWidth: NODE_WIDTH,
       minNodeWidth: NODE_WIDTH,
       minNodeHeight: NODE_HEIGHT,
-      columnGap: 9,
+      columnGap: 4.5,
       sidePadding: 0,
       topPadding: 0,
       bottomPadding: 0,

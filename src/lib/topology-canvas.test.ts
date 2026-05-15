@@ -172,3 +172,35 @@ test("buildTopologyCanvasLayout 在只剩一个节点时也必须横向纵向同
     },
   ]);
 });
+
+test("buildTopologyCanvasLayout 在五个节点横向铺排时将相邻卡片间距缩小到原来的一半", () => {
+  const layout = buildTopologyCanvasLayout({
+    nodes: ["线索发现", "线索完备性评估", "漏洞挑战-9", "漏洞论证-8", "讨论总结-8"],
+    edges: [],
+    availableWidth: 1310,
+    availableHeight: 214,
+    columnWidth: 260,
+    minNodeWidth: 260,
+    minNodeHeight: 214,
+    columnGap: 4.5,
+    sidePadding: 0,
+    topPadding: 0,
+    bottomPadding: 0,
+    nodeHeight: 214,
+  });
+
+  assert.equal(layout.width, 1310);
+  assert.equal(layout.height, 214);
+  assert.deepEqual(layout.nodes.map((node) => node.id), [
+    "线索发现",
+    "线索完备性评估",
+    "漏洞挑战-9",
+    "漏洞论证-8",
+    "讨论总结-8",
+  ]);
+  assert.ok(layout.nodes.every((node) => node.width === 258.4));
+  assert.equal(layout.nodes[0]?.x, 0);
+  assert.equal(layout.nodes.at(-1)?.x, 1051.6);
+  const computedGap = (layout.nodes[1]?.x ?? 0) - (layout.nodes[0]?.x ?? 0) - (layout.nodes[0]?.width ?? 0);
+  assert.ok(Math.abs(computedGap - 4.5) < 1e-9);
+});
