@@ -42,9 +42,9 @@ test("compileTeamDsl 支持 v8 递归式图 DSL，并保留 group 子图定义",
     },
   ]);
   assert.equal(compiled.topology.groupRules?.[0]?.id, "group-rule:疑点辩论");
-  assert.equal(compiled.topology.groupRules?.[0]?.entryRole, "漏洞挑战");
+  assert.equal(compiled.topology.groupRules?.[0]?.entryRole, "误报论证");
   assert.deepEqual(compiled.topology.groupRules?.[0]?.members, [
-    { role: "漏洞挑战", templateName: "漏洞挑战" },
+    { role: "误报论证", templateName: "误报论证" },
     { role: "漏洞论证", templateName: "漏洞论证" },
     { role: "讨论总结", templateName: "讨论总结" },
   ]);
@@ -54,7 +54,7 @@ test("compileTeamDsl 支持 v8 递归式图 DSL，并保留 group 子图定义",
   assert.equal(summaryNode.templateName, "讨论总结");
   assert.deepEqual(summaryNode.initialMessageRouting, {
     mode: "list",
-    agentIds: ["线索发现", "漏洞挑战", "漏洞论证"],
+    agentIds: ["线索发现", "误报论证", "漏洞论证"],
   });
   assert.equal(summaryNode.writable, true);
 });

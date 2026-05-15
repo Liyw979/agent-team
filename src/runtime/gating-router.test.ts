@@ -260,29 +260,29 @@ test("triggered 会按 trigger 字面值派发到匹配边", () => {
 
 test("同一 trigger 多入边任一来源完成后会立即派发", () => {
   const topology: TopologyRecord = withNodeRecords({
-    nodes: ["漏洞论证-1", "漏洞挑战-1", "讨论总结-1"],
+    nodes: ["漏洞论证-1", "误报论证-1", "讨论总结-1"],
     nodeRecords: [
       { id: "漏洞论证-1", kind: "agent", templateName: "漏洞论证", initialMessageRouting: { mode: "inherit" } },
-      { id: "漏洞挑战-1", kind: "agent", templateName: "漏洞挑战", initialMessageRouting: { mode: "inherit" } },
+      { id: "误报论证-1", kind: "agent", templateName: "误报论证", initialMessageRouting: { mode: "inherit" } },
       { id: "讨论总结-1", kind: "agent", templateName: "讨论总结", initialMessageRouting: { mode: "inherit" } },
     ],
     edges: [
       { source: "漏洞论证-1", target: "讨论总结-1", trigger: "<complete>", messageMode: "last", maxTriggerRounds: 4 },
-      { source: "漏洞挑战-1", target: "讨论总结-1", trigger: "<complete>", messageMode: "last", maxTriggerRounds: 4 },
+      { source: "误报论证-1", target: "讨论总结-1", trigger: "<complete>", messageMode: "last", maxTriggerRounds: 4 },
     ],
     groupRules: [
       {
         id: "group-rule:疑点辩论",
         groupNodeName: "疑点辩论",
-        entryRole: "漏洞挑战",
+        entryRole: "误报论证",
         members: [
-          { role: "漏洞挑战", templateName: "漏洞挑战" },
+          { role: "误报论证", templateName: "误报论证" },
           { role: "漏洞论证", templateName: "漏洞论证" },
           { role: "讨论总结", templateName: "讨论总结" },
         ],
         edges: [
           { sourceRole: "漏洞论证", targetRole: "讨论总结", trigger: "<complete>", messageMode: "last", maxTriggerRounds: 4 },
-          { sourceRole: "漏洞挑战", targetRole: "讨论总结", trigger: "<complete>", messageMode: "last", maxTriggerRounds: 4 },
+          { sourceRole: "误报论证", targetRole: "讨论总结", trigger: "<complete>", messageMode: "last", maxTriggerRounds: 4 },
         ],
         report: false,
       },

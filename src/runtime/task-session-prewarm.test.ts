@@ -27,7 +27,7 @@ test("resolveTaskAgentIdsToPrewarm 不会为仅作为 group 模板存在的静�
     },
     {
       taskId: "task-1",
-      id: "漏洞挑战",
+      id: "误报论证",
       opencodeSessionId: "",
       opencodeAttachBaseUrl: "",
       status: "idle",

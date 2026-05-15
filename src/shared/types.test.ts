@@ -312,7 +312,7 @@ test("getGroupRules 保留显式声明的 messageMode，不再依赖默认补值
         entryRole: "pro",
         members: [
           { role: "pro", templateName: "漏洞论证" },
-          { role: "con", templateName: "漏洞挑战" },
+          { role: "con", templateName: "误报论证" },
         ],
         edges: [
           {

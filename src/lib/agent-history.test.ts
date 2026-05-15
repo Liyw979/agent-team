@@ -670,7 +670,7 @@ test("buildAgentHistoryItems 会按 runtime agent 对应模板的 trigger 集合
   const messages: MessageRecord[] = [
     createAgentProgressMessage({
       id: "challenge-runtime-message",
-      sender: "漏洞挑战-1",
+      sender: "误报论证-1",
       content: "<continue> 需要继续补关键代码证据",
       timestamp: toUtcIsoTimestamp("2026-04-20T14:34:40.000Z"),
       activityKind: "message",
@@ -679,7 +679,7 @@ test("buildAgentHistoryItems 会按 runtime agent 对应模板的 trigger 集合
     }),
   ];
   const spawnTopology: TopologyRecord = {
-    nodes: ["线索发现", "漏洞挑战", "漏洞论证", "讨论总结", "疑点辩论"],
+    nodes: ["线索发现", "误报论证", "漏洞论证", "讨论总结", "疑点辩论"],
     edges: [
       {
         source: "线索发现",
@@ -689,7 +689,7 @@ test("buildAgentHistoryItems 会按 runtime agent 对应模板的 trigger 集合
       },
     ],
     flow: createTopologyFlowRecord({
-      nodes: ["线索发现", "漏洞挑战", "漏洞论证", "讨论总结", "疑点辩论"],
+      nodes: ["线索发现", "误报论证", "漏洞论证", "讨论总结", "疑点辩论"],
       edges: [
         {
           source: "线索发现",
@@ -709,7 +709,7 @@ test("buildAgentHistoryItems 会按 runtime agent 对应模板的 trigger 集合
         groupRuleId: "group-rule:疑点辩论",
         initialMessageRouting: { mode: "inherit" },
       },
-      { id: "漏洞挑战", kind: "agent", templateName: "漏洞挑战", initialMessageRouting: { mode: "inherit" } },
+      { id: "误报论证", kind: "agent", templateName: "误报论证", initialMessageRouting: { mode: "inherit" } },
       { id: "漏洞论证", kind: "agent", templateName: "漏洞论证", initialMessageRouting: { mode: "inherit" } },
       { id: "讨论总结", kind: "agent", templateName: "讨论总结", initialMessageRouting: { mode: "inherit" } },
     ],
@@ -718,15 +718,15 @@ test("buildAgentHistoryItems 会按 runtime agent 对应模板的 trigger 集合
         id: "group-rule:疑点辩论",
         groupNodeName: "疑点辩论",
         sourceTemplateName: "线索发现",
-        entryRole: "漏洞挑战",
+        entryRole: "误报论证",
         members: [
-          { role: "漏洞挑战", templateName: "漏洞挑战" },
+          { role: "误报论证", templateName: "误报论证" },
           { role: "漏洞论证", templateName: "漏洞论证" },
           { role: "讨论总结", templateName: "讨论总结" },
         ],
         edges: [
           {
-            sourceRole: "漏洞挑战",
+            sourceRole: "误报论证",
             targetRole: "漏洞论证",
             trigger: "<continue>",
             messageMode: "last",
@@ -734,13 +734,13 @@ test("buildAgentHistoryItems 会按 runtime agent 对应模板的 trigger 集合
           },
           {
             sourceRole: "漏洞论证",
-            targetRole: "漏洞挑战",
+            targetRole: "误报论证",
             trigger: "<continue>",
             messageMode: "last",
             maxTriggerRounds: 4,
           },
           {
-            sourceRole: "漏洞挑战",
+            sourceRole: "误报论证",
             targetRole: "讨论总结",
             trigger: "<complete>",
             messageMode: "last", maxTriggerRounds: 4,
@@ -764,7 +764,7 @@ test("buildAgentHistoryItems 会按 runtime agent 对应模板的 trigger 集合
   };
 
   const [historyItem] = buildAgentHistoryItems({
-    agentId: "漏洞挑战-1",
+    agentId: "误报论证-1",
     messages,
     topology: spawnTopology,
   });

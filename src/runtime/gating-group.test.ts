@@ -9,19 +9,19 @@ import { compileTeamDsl, type TeamDslDefinition } from "./team-dsl";
 
 function createGroupTopology(): TopologyRecord {
   return {
-    nodes: ["线索发现", "漏洞疑点辩论", "漏洞论证模板", "漏洞挑战模板", "Summary模板"],
+    nodes: ["线索发现", "漏洞疑点辩论", "漏洞论证模板", "误报论证模板", "Summary模板"],
     nodeRecords: [
       { id: "线索发现", kind: "agent", templateName: "线索发现", initialMessageRouting: { mode: "inherit" } },
       { id: "漏洞疑点辩论", kind: "group", templateName: "漏洞疑点辩论", groupRuleId: "finding-debate", initialMessageRouting: { mode: "inherit" } },
       { id: "漏洞论证模板", kind: "agent", templateName: "漏洞论证模板", initialMessageRouting: { mode: "inherit" } },
-      { id: "漏洞挑战模板", kind: "agent", templateName: "漏洞挑战模板", initialMessageRouting: { mode: "inherit" } },
+      { id: "误报论证模板", kind: "agent", templateName: "误报论证模板", initialMessageRouting: { mode: "inherit" } },
       { id: "Summary模板", kind: "agent", templateName: "Summary模板", initialMessageRouting: { mode: "inherit" } },
     ],
     edges: [
       { source: "线索发现", target: "漏洞疑点辩论", trigger: "<default>", messageMode: "last", maxTriggerRounds: 4 },
     ],
     flow: createTopologyFlowRecord({
-      nodes: ["线索发现", "漏洞疑点辩论", "漏洞论证模板", "漏洞挑战模板", "Summary模板"],
+      nodes: ["线索发现", "漏洞疑点辩论", "漏洞论证模板", "误报论证模板", "Summary模板"],
       edges: [
         { source: "线索发现", target: "漏洞疑点辩论", trigger: "<default>", messageMode: "last", maxTriggerRounds: 4 },
       ],
@@ -34,7 +34,7 @@ function createGroupTopology(): TopologyRecord {
         entryRole: "pro",
         members: [
           { role: "pro", templateName: "漏洞论证模板" },
-          { role: "con", templateName: "漏洞挑战模板" },
+          { role: "con", templateName: "误报论证模板" },
           { role: "summary", templateName: "Summary模板" },
         ],
         edges: [

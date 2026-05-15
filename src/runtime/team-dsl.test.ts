@@ -333,7 +333,7 @@ test("compileTeamDsl 支持从内置漏洞拓扑编译出 group 辩论拓扑", (
 
   assert.deepEqual(
     compiled.agents.map((agent) => agent.id),
-    ["线索发现", "漏洞挑战", "漏洞论证", "讨论总结", "线索完备性评估"],
+    ["线索发现", "误报论证", "漏洞论证", "讨论总结", "线索完备性评估"],
   );
   assert.deepEqual(compiled.topology.edges, [
     {
@@ -370,21 +370,21 @@ test("compileTeamDsl 支持从内置漏洞拓扑编译出 group 辩论拓扑", (
     },
   ]);
   assert.deepEqual(compiled.topology.groupRules?.[0]?.members, [
-    { role: "漏洞挑战", templateName: "漏洞挑战" },
+    { role: "误报论证", templateName: "误报论证" },
     { role: "漏洞论证", templateName: "漏洞论证" },
     { role: "讨论总结", templateName: "讨论总结" },
   ]);
   const firstRule = expectReportRule(compiled.topology.groupRules?.[0]);
   assert.equal(firstRule.sourceTemplateName, "线索发现");
-  assert.equal(firstRule.entryRole, "漏洞挑战");
+  assert.equal(firstRule.entryRole, "误报论证");
   assert.equal(firstRule.report.templateName, "线索发现");
   assert.equal(firstRule.report.trigger, "<default>");
   assert.equal(firstRule.report.messageMode, "none");
   assert.deepEqual(firstRule.edges, [
-    { sourceRole: "漏洞论证", targetRole: "漏洞挑战", trigger: "<continue>", messageMode: "last", maxTriggerRounds: 4 },
-    { sourceRole: "漏洞挑战", targetRole: "漏洞论证", trigger: "<continue>", messageMode: "last", maxTriggerRounds: 4 },
+    { sourceRole: "漏洞论证", targetRole: "误报论证", trigger: "<continue>", messageMode: "last", maxTriggerRounds: 4 },
+    { sourceRole: "误报论证", targetRole: "漏洞论证", trigger: "<continue>", messageMode: "last", maxTriggerRounds: 4 },
     { sourceRole: "漏洞论证", targetRole: "讨论总结", trigger: "<agree>", messageMode: "last", maxTriggerRounds: 4 },
-    { sourceRole: "漏洞挑战", targetRole: "讨论总结", trigger: "<agree>", messageMode: "last", maxTriggerRounds: 4 },
+    { sourceRole: "误报论证", targetRole: "讨论总结", trigger: "<agree>", messageMode: "last", maxTriggerRounds: 4 },
   ]);
 });
 

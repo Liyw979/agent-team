@@ -110,17 +110,17 @@ test("decision agent 会移除开头裸 trigger 后多余的结束标签", () =>
 
 test("decision agent 支持根据允许的 trigger 解析自定义标签", () => {
   const parsedDecision = parseDecision(
-    "证据已经补齐。\n\n<abcd>请漏洞挑战继续回应。</abcd>",
+    "证据已经补齐。\n\n<abcd>请误报论证继续回应。</abcd>",
     true,
     [{ trigger: "<abcd>" }],
   );
 
   assert.deepEqual(parsedDecision, {
-    cleanContent: "证据已经补齐。\n\n请漏洞挑战继续回应。",
+    cleanContent: "证据已经补齐。\n\n请误报论证继续回应。",
     kind: "valid",
     trigger: "<abcd>",
-    opinion: "请漏洞挑战继续回应。",
-    rawDecisionBlock: "证据已经补齐。\n\n<abcd>请漏洞挑战继续回应。</abcd>",
+    opinion: "请误报论证继续回应。",
+    rawDecisionBlock: "证据已经补齐。\n\n<abcd>请误报论证继续回应。</abcd>",
   });
 });
 

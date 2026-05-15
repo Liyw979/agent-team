@@ -121,14 +121,14 @@ test("extractTrailingDecisionSignalBlock 在缺少标签时返回 missing", () =
 
 test("extractTrailingDecisionSignalBlock 支持按允许的 trigger 集合解析自定义标签", () => {
   const parsed = assertFound(extractTrailingDecisionSignalBlock(
-    "漏洞挑战需要继续回应。\n\n<abcd>请继续补充反驳。</abcd>",
+    "误报论证需要继续回应。\n\n<abcd>请继续补充反驳。</abcd>",
     ["<abcd>"],
   ));
 
-  assert.equal(parsed.body, "漏洞挑战需要继续回应。");
+  assert.equal(parsed.body, "误报论证需要继续回应。");
   assert.equal(parsed.response, "请继续补充反驳。");
   assert.equal(parsed.trigger, "<abcd>");
-  assert.equal(parsed.rawBlock, "漏洞挑战需要继续回应。\n\n<abcd>请继续补充反驳。</abcd>");
+  assert.equal(parsed.rawBlock, "误报论证需要继续回应。\n\n<abcd>请继续补充反驳。</abcd>");
 });
 
 test("extractTrailingDecisionSignalBlock 支持解析正文后跟成对自定义标签块", () => {

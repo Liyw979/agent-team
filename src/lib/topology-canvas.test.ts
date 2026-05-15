@@ -113,7 +113,7 @@ test("buildTopologyCanvasLayout 在高度比默认卡片更小时也必须压回
 
 test("buildTopologyCanvasLayout 在只剩两个节点时也必须继续横向铺满整个拓扑区域", () => {
   const layout = buildTopologyCanvasLayout({
-    nodes: ["线索发现", "漏洞挑战"],
+    nodes: ["线索发现", "误报论证"],
     edges: [],
     availableWidth: 2048,
     availableHeight: 360,
@@ -139,7 +139,7 @@ test("buildTopologyCanvasLayout 在只剩两个节点时也必须继续横向铺
     })),
     [
       { id: "线索发现", x: 0, y: 0, width: 1015, height: 360 },
-      { id: "漏洞挑战", x: 1033, y: 0, width: 1015, height: 360 },
+      { id: "误报论证", x: 1033, y: 0, width: 1015, height: 360 },
     ],
   );
 });
@@ -175,7 +175,7 @@ test("buildTopologyCanvasLayout 在只剩一个节点时也必须横向纵向同
 
 test("buildTopologyCanvasLayout 在五个节点横向铺排时将相邻卡片间距缩小到原来的一半", () => {
   const layout = buildTopologyCanvasLayout({
-    nodes: ["线索发现", "线索完备性评估", "漏洞挑战-9", "漏洞论证-8", "讨论总结-8"],
+    nodes: ["线索发现", "线索完备性评估", "误报论证-9", "漏洞论证-8", "讨论总结-8"],
     edges: [],
     availableWidth: 1310,
     availableHeight: 214,
@@ -194,7 +194,7 @@ test("buildTopologyCanvasLayout 在五个节点横向铺排时将相邻卡片间
   assert.deepEqual(layout.nodes.map((node) => node.id), [
     "线索发现",
     "线索完备性评估",
-    "漏洞挑战-9",
+    "误报论证-9",
     "漏洞论证-8",
     "讨论总结-8",
   ]);

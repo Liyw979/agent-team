@@ -59,8 +59,8 @@ links: []
   id: 疑点辩论
   nodes:
     - type: agent
-      id: 漏洞挑战
-      system_prompt: 你负责漏洞挑战。
+      id: 误报论证
+      system_prompt: 你负责误报论证。
       writable: false
     - type: agent
       id: 漏洞论证
@@ -127,8 +127,8 @@ links:
 `vulnerability.yaml` 当前使用的就是新 DSL：
 
 - `疑点辩论` 是 `group` 节点。
-- `线索发现 -> 漏洞挑战` 是 group 的入口边；编译后根图会得到 `线索发现 -> 疑点辩论`，运行时实例入口会继承这条边的 `trigger/messageMode/maxTriggerRounds`。
-- `漏洞论证 -> 漏洞挑战`、`漏洞挑战 -> 漏洞论证`、`漏洞论证 -> 讨论总结`、`漏洞挑战 -> 讨论总结` 都写在根级 `links`，但会被编译进 `groupRule.edges`。
+- `线索发现 -> 误报论证` 是 group 的入口边；编译后根图会得到 `线索发现 -> 疑点辩论`，运行时实例入口会继承这条边的 `trigger/messageMode/maxTriggerRounds`。
+- `漏洞论证 -> 误报论证`、`误报论证 -> 漏洞论证`、`漏洞论证 -> 讨论总结`、`误报论证 -> 讨论总结` 都写在根级 `links`，但会被编译进 `groupRule.edges`。
 - 指向同一 target 的多条同 trigger 入边表示多个可触发来源，任意一条边被触发就会立即派发该 target。
 - `讨论总结 -> 线索发现` 写在根级 `links`，会同时体现在根图 `疑点辩论 -> 线索发现` 与该 group 的 report 配置里。
 

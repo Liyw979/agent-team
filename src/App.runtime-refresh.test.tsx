@@ -99,12 +99,12 @@ function createUiSnapshot(input: {
       name: "app-runtime-refresh",
       agents: [
         {
-          id: "漏洞挑战-1",
+          id: "误报论证-1",
           prompt: "挑战输入",
           isWritable: false,
         },
       ],
-      topology: createSingleAgentTopology("漏洞挑战-1"),
+      topology: createSingleAgentTopology("误报论证-1"),
       messages: [],
       tasks: [],
     },
@@ -121,7 +121,7 @@ function createUiSnapshot(input: {
       },
       agents: [
         {
-          id: "漏洞挑战-1",
+          id: "误报论证-1",
           taskId: TASK_ID,
           opencodeSessionId: input.agentSessionId,
           opencodeAttachBaseUrl: input.agentSessionId ? "http://localhost:4310" : "",
@@ -130,7 +130,7 @@ function createUiSnapshot(input: {
         },
       ],
       messages: input.messages,
-      topology: createSingleAgentTopology("漏洞挑战-1"),
+      topology: createSingleAgentTopology("误报论证-1"),
     },
     launchCwd: WORKSPACE_CWD,
     taskLogFilePath: null,
@@ -143,7 +143,7 @@ function createAgentFinalMessage() {
     {
       id: "challenge-final-1",
       taskId: TASK_ID,
-      sender: "漏洞挑战-1",
+      sender: "误报论证-1",
       content: "挑战结论：这里的消息应当在轮询拿到全量 snapshot 后立即出现。",
       timestamp: toUtcIsoTimestamp("2026-04-29T10:00:02.000Z"),
       kind: "agent-final" as const,
@@ -413,7 +413,7 @@ test("App 会把自动轮询带回的 attach 状态更新到界面", async () =>
     await appTest.render();
 
     await waitForAssertion(() => {
-      const attachButton = document.querySelector('button[aria-label="打开 漏洞挑战-1 的 attach 终端"]');
+      const attachButton = document.querySelector('button[aria-label="打开 误报论证-1 的 attach 终端"]');
       assert.ok(attachButton instanceof HTMLButtonElement);
       assert.equal(attachButton.disabled, true);
     });
@@ -421,7 +421,7 @@ test("App 会把自动轮询带回的 attach 状态更新到界面", async () =>
     await appTest.tickPolling();
 
     await waitForAssertion(() => {
-      const attachButton = document.querySelector('button[aria-label="打开 漏洞挑战-1 的 attach 终端"]');
+      const attachButton = document.querySelector('button[aria-label="打开 误报论证-1 的 attach 终端"]');
       assert.ok(attachButton instanceof HTMLButtonElement);
       assert.equal(attachButton.disabled, false);
     });

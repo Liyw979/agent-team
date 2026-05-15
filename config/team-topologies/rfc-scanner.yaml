@@ -27,7 +27,7 @@ nodes:
     id: 疑点辩论
     nodes:
       - type: agent
-        id: 漏洞挑战
+        id: 误报论证
         system_prompt: |-
           结合文档、代码、单元测试等，证明不会导致安全漏洞，你的所有论证，都要带有非漏洞的证据，不得要求提供是漏洞的证据。
           或者也可以证明代码实现和RFC的要求是一致的，没有问题
@@ -46,7 +46,7 @@ nodes:
         initialMessage: [线索发现]
       - type: agent
         id: 讨论总结
-        initialMessage: [线索发现, 漏洞挑战, 漏洞论证]
+        initialMessage: [线索发现, 误报论证, 漏洞论证]
         system_prompt: |-
           阅读讨论中涉及的实际代码，在当前代码仓的 `result/<rfc章节号>_<finding标题>_<是/否>.md` 目录下写入讨论总结文件, 再输出一个概括。
           1. 结论
@@ -63,7 +63,7 @@ nodes:
           - 总结漏洞论证侧提出的核心主张
           - 写清 RFC 不一致或实现偏差成立需要满足哪些前提，以及这些前提目前哪些已被代码证实、哪些还没有
           5. 反方观点与不成立理由
-          - 总结漏洞挑战侧提出的核心反驳
+          - 总结误报论证侧提出的核心反驳
           - 写清哪些保护逻辑、限制条件、调用约束、协议解释或上下文会削弱、阻断或推翻该偏差判断
           6. 争议点裁决
           - 逐条列出双方仍有分歧的点
@@ -84,11 +84,11 @@ nodes:
       2. <complete> (RFC确实一个一个章节扫描完了)...
     writable: false
 links:
-  - { from: 线索发现, to: 漏洞挑战, trigger: "<continue>", message_type: last, maxTriggerRounds: 999 }
-  - { from: 漏洞论证, to: 漏洞挑战, trigger: "<continue>", message_type: last, maxTriggerRounds: 4 }
-  - { from: 漏洞挑战, to: 漏洞论证, trigger: "<continue>", message_type: last, maxTriggerRounds: 4 }
+  - { from: 线索发现, to: 误报论证, trigger: "<continue>", message_type: last, maxTriggerRounds: 999 }
+  - { from: 漏洞论证, to: 误报论证, trigger: "<continue>", message_type: last, maxTriggerRounds: 4 }
+  - { from: 误报论证, to: 漏洞论证, trigger: "<continue>", message_type: last, maxTriggerRounds: 4 }
   - { from: 漏洞论证, to: 讨论总结, trigger: "<complete>", message_type: last, maxTriggerRounds: 4 }
-  - { from: 漏洞挑战, to: 讨论总结, trigger: "<complete>", message_type: last, maxTriggerRounds: 4 }
+  - { from: 误报论证, to: 讨论总结, trigger: "<complete>", message_type: last, maxTriggerRounds: 4 }
   - { from: 讨论总结, to: 线索发现, trigger: "<default>", message_type: none, maxTriggerRounds: 4 }
   - { from: 线索发现, to: 线索完备性评估, trigger: "<complete>", message_type: last, maxTriggerRounds: 4 }
   - { from: 线索完备性评估, to: 线索发现, trigger: "<continue>", message_type: last, maxTriggerRounds: 4 }

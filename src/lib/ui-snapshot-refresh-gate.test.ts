@@ -465,7 +465,7 @@ test("较小请求号若首次带回新的 runtime agent，也必须被视为语
     messageCount: 1,
   });
   lowerRequestPayload.task?.agents.push({
-    id: "漏洞挑战-2",
+    id: "误报论证-2",
     taskId: "task-1",
     opencodeSessionId: "session-challenge-2",
     opencodeAttachBaseUrl: "http://localhost:4310",
@@ -482,7 +482,7 @@ test("较小请求号若首次带回新的 runtime agent，也必须被视为语
 
   assert.equal(acceptedLowerRequest.accepted, true);
   assert.equal(
-    readAcceptedPayload(acceptedLowerRequest.latestAcceptedState).task?.agents.some((agent) => agent.id === "漏洞挑战-2"),
+    readAcceptedPayload(acceptedLowerRequest.latestAcceptedState).task?.agents.some((agent) => agent.id === "误报论证-2"),
     true,
   );
 });
@@ -643,7 +643,7 @@ test("较小请求号若首次带回新的 runtime agent，查询缓存也必须
     messageCount: 1,
   });
   nextPayload.task?.agents.push({
-    id: "漏洞挑战-2",
+    id: "误报论证-2",
     taskId: "task-1",
     opencodeSessionId: "session-challenge-2",
     opencodeAttachBaseUrl: "http://localhost:4310",
@@ -653,5 +653,5 @@ test("较小请求号若首次带回新的 runtime agent，查询缓存也必须
 
   const acceptedPayload = resolveUiSnapshotQueryData(previousPayload, nextPayload);
   assert.equal(acceptedPayload, nextPayload);
-  assert.equal(acceptedPayload.task?.agents.some((agent) => agent.id === "漏洞挑战-2"), true);
+  assert.equal(acceptedPayload.task?.agents.some((agent) => agent.id === "误报论证-2"), true);
 });
