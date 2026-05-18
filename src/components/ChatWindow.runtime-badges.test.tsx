@@ -451,15 +451,6 @@ test("ChatWindow 消息面板只渲染最近 30 条展示项", async () => {
     for (const messageNumber of Array.from({ length: 30 }, (_, index) => index + 6)) {
       assert.match(text, new RegExp(`可见限制测试消息 \\[${messageNumber}\\]`));
     }
-    const badgeElement = container.querySelector("header span");
-    if (!badgeElement) {
-      assert.fail("缺少消息数量徽标");
-    }
-    const badgeTextContent = badgeElement.textContent;
-    if (badgeTextContent === null) {
-      assert.fail("缺少消息数量徽标文本");
-    }
-    assert.equal(badgeTextContent.trim(), "30");
   } finally {
     await act(async () => {
       root.unmount();

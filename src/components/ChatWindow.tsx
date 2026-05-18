@@ -756,9 +756,6 @@ export function ChatWindow({
       <header className={PANEL_HEADER_CLASS}>
         <div className={PANEL_HEADER_LEADING_CLASS}>
           <p className={PANEL_HEADER_TITLE_CLASS}>消息</p>
-          <span className="rounded-full bg-[#c96f3b] px-2.5 py-0.5 text-xs font-semibold text-white">
-            {visibleFeedItems.length}
-          </span>
         </div>
         {task ? (
           <div className="flex items-center gap-2">
