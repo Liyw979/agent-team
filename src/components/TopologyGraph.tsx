@@ -437,7 +437,7 @@ export function TopologyGraph({
           <div className={PANEL_HEADER_LEADING_CLASS}>
             <p className={PANEL_HEADER_TITLE_CLASS}>拓扑</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 shrink-0 items-center gap-2">
             <button
               type="button"
               onClick={onOpenSystemPromptPanel}
@@ -471,7 +471,7 @@ export function TopologyGraph({
         <div className={PANEL_HEADER_LEADING_CLASS}>
           <p className={PANEL_HEADER_TITLE_CLASS}>拓扑</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 shrink-0 items-center gap-2">
           <button
             type="button"
             onClick={onOpenSystemPromptPanel}
@@ -491,7 +491,7 @@ export function TopologyGraph({
         </div>
       </header>
 
-      <div className={`relative flex-1 min-h-0 ${topologyPanelBodyClassName}`}>
+      <div className={`relative min-h-0 min-w-0 flex-1 ${topologyPanelBodyClassName}`}>
         <div
           ref={canvasViewportRef}
           className="h-full min-h-0 w-full overflow-auto"

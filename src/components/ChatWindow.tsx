@@ -758,7 +758,7 @@ export function ChatWindow({
           <p className={PANEL_HEADER_TITLE_CLASS}>消息</p>
         </div>
         {task ? (
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 shrink-0 items-center gap-2">
             <button
               type="button"
               onClick={onToggleMaximize}
@@ -792,7 +792,7 @@ export function ChatWindow({
             viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
           shouldStickToBottomRef.current = distanceToBottom <= 48;
         }}
-        className={`flex-1 min-h-0 space-y-1.5 overflow-y-auto ${PANEL_SECTION_BODY_CLASS}`}
+        className={`min-h-0 min-w-0 flex-1 space-y-1.5 overflow-y-auto ${PANEL_SECTION_BODY_CLASS}`}
       >
         {visibleFeedItems.length > 0 ? (
           visibleFeedItems.map((item) => (
@@ -838,7 +838,7 @@ export function ChatWindow({
       </div>
 
       <form
-        className="border-t border-border/60 px-3 py-1.5"
+        className="min-w-0 border-t border-border/60 px-3 py-1.5"
         onSubmit={async (event) => {
           event.preventDefault();
           await handleSubmit();

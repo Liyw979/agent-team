@@ -38,7 +38,7 @@ export function SystemPromptDrawer({
 }: SystemPromptDrawerProps) {
   return (
     <div
-      className="fixed inset-0 z-40 bg-black/24"
+      className="fixed inset-0 z-40 overflow-hidden bg-black/24"
       onClick={onClose}
       aria-hidden="true"
     >

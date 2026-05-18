@@ -233,9 +233,9 @@ function App() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden text-foreground">
-      <main className={`min-h-0 flex-1 overflow-hidden ${appShellClassName}`}>
+      <main className={`min-h-0 min-w-0 flex-1 overflow-hidden ${appShellClassName}`}>
         {!panelVisibility.showChatPanel && panelVisibility.showTopologyPanel ? (
-          <div className="h-full min-h-0 overflow-hidden">
+          <div className="h-full min-h-0 min-w-0 overflow-hidden">
             <TopologyGraph
               task={task}
               isMaximized={panelMode === "topology-only"}
@@ -251,7 +251,7 @@ function App() {
             />
           </div>
         ) : panelVisibility.showChatPanel && !panelVisibility.showTopologyPanel ? (
-          <div className="h-full min-h-0 overflow-hidden">
+          <div className="h-full min-h-0 min-w-0 overflow-hidden">
             <ChatWindow
               workspace={workspace}
               task={task}
@@ -274,7 +274,7 @@ function App() {
           </div>
         ) : (
           <div
-            className="grid h-full overflow-hidden grid-rows-[minmax(320px,42%)_minmax(0,1fr)]"
+            className="grid h-full min-w-0 overflow-hidden grid-rows-[minmax(320px,42%)_minmax(0,1fr)]"
             style={{ gap: `${PANEL_GAP_PX}px` }}
           >
             <TopologyGraph
@@ -291,7 +291,7 @@ function App() {
               }}
             />
 
-            <div className="min-h-0">
+            <div className="min-h-0 min-w-0">
               <ChatWindow
                 workspace={workspace}
                 task={task}
