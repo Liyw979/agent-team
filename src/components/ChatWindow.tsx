@@ -16,6 +16,10 @@ import {
   type ChatFeedExecutionItem,
 } from "@/lib/chat-execution-feed";
 import {
+  AGENT_HISTORY_DETAIL_TEXT_CLASS,
+  AGENT_HISTORY_META_TEXT_CLASS,
+} from "@/lib/agent-history-display";
+import {
   getMentionContext,
   getMentionOptionItems,
   type MentionContext,
@@ -411,8 +415,8 @@ function RunningExecutionBubble({
               >
                 <div className="min-w-0 flex-1 select-text">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-semibold">{historyItem.label}</span>
-                    <span className="text-[11px] opacity-70">
+                    <span className={`${AGENT_HISTORY_META_TEXT_CLASS} font-semibold`}>{historyItem.label}</span>
+                    <span className={`${AGENT_HISTORY_META_TEXT_CLASS} opacity-70`}>
                       {new Date(historyItem.timestamp).toLocaleTimeString("zh-CN", {
                         hour: "2-digit",
                         minute: "2-digit",
@@ -423,7 +427,7 @@ function RunningExecutionBubble({
                   </div>
                   <AgentHistoryMarkdown
                     content={historyItem.detailSnippet}
-                    className="mt-1 text-[11px] leading-[1.35] opacity-90 select-text"
+                    className={AGENT_HISTORY_DETAIL_TEXT_CLASS}
                     style={{ marginTop: "0.125rem" }}
                   />
                 </div>

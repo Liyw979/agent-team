@@ -1,0 +1,5 @@
+const AGENT_HISTORY_TEXT_SIZE_CLASS = "text-[12px]";
+
+export const AGENT_HISTORY_META_TEXT_CLASS = `${AGENT_HISTORY_TEXT_SIZE_CLASS}`;
+
+export const AGENT_HISTORY_DETAIL_TEXT_CLASS = `mt-1 ${AGENT_HISTORY_TEXT_SIZE_CLASS} leading-[1.35] opacity-90 select-text`;
