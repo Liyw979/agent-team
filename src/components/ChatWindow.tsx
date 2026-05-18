@@ -57,6 +57,7 @@ const MENTION_MENU_VERTICAL_PADDING = 16;
 const MENTION_MENU_GAP = 12;
 const MENTION_MENU_VIEWPORT_MARGIN = 12;
 const CHAT_EXECUTION_BUBBLE_MAX_HEIGHT_PX = 300;
+const CHAT_VISIBLE_FEED_ITEM_LIMIT = 30;
 type RunningChatFeedExecutionItem = Exclude<ChatFeedExecutionItem, { status: "settled" }>;
 
 function getRuntimeExecutionBadgePresentation() {
@@ -494,6 +495,10 @@ export function ChatWindow({
     }),
     [task?.messages, task?.topology, workspace?.topology],
   );
+  const visibleFeedItems = useMemo(
+    () => feedItems.slice(-CHAT_VISIBLE_FEED_ITEM_LIMIT),
+    [feedItems],
+  );
   const taskAgentEntries = useMemo(
     () => task.agents.map((agent) => ({
       id: agent.id,
@@ -540,11 +545,11 @@ export function ChatWindow({
     return () => {
       cancelAnimationFrame(frame);
     };
-  }, [feedItems, task?.task.id]);
+  }, [visibleFeedItems, task?.task.id]);
 
   useEffect(() => {
     const activeRunningExecutionIds = new Set(
-      feedItems
+      visibleFeedItems
         .filter((item): item is RunningChatFeedExecutionItem =>
           item.type === "execution" && item.status !== "settled")
         .map((item) => item.id),
@@ -565,11 +570,11 @@ export function ChatWindow({
         delete executionLastItemIdRef.current[executionId];
       }
     }
-  }, [feedItems]);
+  }, [visibleFeedItems]);
 
   useEffect(() => {
     const frameIds: number[] = [];
-    for (const feedItem of feedItems) {
+    for (const feedItem of visibleFeedItems) {
       if (feedItem.type !== "execution" || feedItem.status === "settled") {
         continue;
       }
@@ -602,7 +607,7 @@ export function ChatWindow({
         cancelAnimationFrame(frameId);
       }
     };
-  }, [feedItems]);
+  }, [visibleFeedItems]);
 
   useEffect(() => {
     if (!mentionContext) {
@@ -752,7 +757,7 @@ export function ChatWindow({
         <div className={PANEL_HEADER_LEADING_CLASS}>
           <p className={PANEL_HEADER_TITLE_CLASS}>消息</p>
           <span className="rounded-full bg-[#c96f3b] px-2.5 py-0.5 text-xs font-semibold text-white">
-            {feedItems.length}
+            {visibleFeedItems.length}
           </span>
         </div>
         {task ? (
@@ -792,8 +797,8 @@ export function ChatWindow({
         }}
         className={`flex-1 min-h-0 space-y-1.5 overflow-y-auto ${PANEL_SECTION_BODY_CLASS}`}
       >
-        {feedItems.length > 0 ? (
-          feedItems.map((item) => (
+        {visibleFeedItems.length > 0 ? (
+          visibleFeedItems.map((item) => (
             item.type === "message" ? (
               <MessageBubble
                 key={item.id}

@@ -366,7 +366,11 @@ test("ChatWindow 只根据消息流展示运行中面板与最终消息", async 
       );
     });
 
-    const text = container.textContent ?? "";
+    const textContent = container.textContent;
+    if (textContent === null) {
+      assert.fail("缺少消息面板文本内容");
+    }
+    const text = textContent;
     assert.equal(container.querySelectorAll('[aria-label="运行中"]').length, 1);
     assert.match(text, /Build 正在执行中/);
     assert.match(text, /QA 校验失败/);
@@ -388,6 +392,74 @@ test("ChatWindow 只根据消息流展示运行中面板与最终消息", async 
     assert.match(copiedTranscript, /发现第 1 个可疑点：这里需要进入对抗讨论。/);
     assert.match(copiedTranscript, /QA 校验失败/);
     assert.doesNotMatch(copiedTranscript, /Build 正在执行中/);
+  } finally {
+    await act(async () => {
+      root.unmount();
+    });
+    domContext.cleanup();
+  }
+});
+
+test("ChatWindow 消息面板只渲染最近 30 条展示项", async () => {
+  const domContext = setupDom();
+  const container = domContext.dom.window.document.createElement("div");
+  domContext.dom.window.document.body.append(container);
+  const root = createRoot(container);
+  const { workspace, task } = createWorkspaceAndTask();
+  const messages = Array.from({ length: 35 }, (_, index) => {
+    const messageNumber = index + 1;
+    return {
+      id: `visible-limit-${messageNumber}`,
+      taskId: task.task.id,
+      sender: "user" as const,
+      content: `可见限制测试消息 [${messageNumber}]`,
+      timestamp: toUtcIsoTimestamp(`2026-04-29T10:${String(messageNumber).padStart(2, "0")}:00.000Z`),
+      kind: "user" as const,
+      scope: "task" as const,
+      taskTitle: task.task.title,
+      targetAgentIds: [],
+      targetRunCounts: [],
+    };
+  });
+  const nextTask: TaskSnapshot = {
+    ...task,
+    messages,
+  };
+
+  try {
+    await act(async () => {
+      root.render(
+        <ChatWindow
+          workspace={workspace}
+          task={nextTask}
+          availableAgents={["Build", "QA", "线索发现"]}
+          taskLogFilePath=""
+          taskUrl=""
+          onSubmit={async () => undefined}
+        />,
+      );
+    });
+
+    const textContent = container.textContent;
+    if (textContent === null) {
+      assert.fail("缺少消息面板文本内容");
+    }
+    const text = textContent;
+    for (const messageNumber of [1, 2, 3, 4, 5]) {
+      assert.doesNotMatch(text, new RegExp(`可见限制测试消息 \\[${messageNumber}\\]`));
+    }
+    for (const messageNumber of Array.from({ length: 30 }, (_, index) => index + 6)) {
+      assert.match(text, new RegExp(`可见限制测试消息 \\[${messageNumber}\\]`));
+    }
+    const badgeElement = container.querySelector("header span");
+    if (!badgeElement) {
+      assert.fail("缺少消息数量徽标");
+    }
+    const badgeTextContent = badgeElement.textContent;
+    if (badgeTextContent === null) {
+      assert.fail("缺少消息数量徽标文本");
+    }
+    assert.equal(badgeTextContent.trim(), "30");
   } finally {
     await act(async () => {
       root.unmount();
