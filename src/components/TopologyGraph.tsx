@@ -38,6 +38,7 @@ import type {
 interface TopologyGraphProps {
   task: TaskSnapshot;
   isMaximized: boolean;
+  onOpenSystemPromptPanel: () => void;
   onToggleMaximize: () => void;
   onOpenAgentTerminal: (agentId: string) => void;
 }
@@ -284,6 +285,7 @@ function renderAttachButtonIcon() {
 export function TopologyGraph({
   task,
   isMaximized,
+  onOpenSystemPromptPanel,
   onToggleMaximize,
   onOpenAgentTerminal,
 }: TopologyGraphProps) {
@@ -438,6 +440,14 @@ export function TopologyGraph({
           <div className="flex items-center gap-2">
             <button
               type="button"
+              onClick={onOpenSystemPromptPanel}
+              className={`${PANEL_HEADER_ACTION_BUTTON_CLASS} no-drag`}
+              aria-label="打开 System Prompt 面板"
+            >
+              System Prompt
+            </button>
+            <button
+              type="button"
               onClick={onToggleMaximize}
               className={`${PANEL_HEADER_ACTION_BUTTON_CLASS} no-drag`}
               aria-label={fullscreenButtonCopy.ariaLabel}
@@ -462,6 +472,14 @@ export function TopologyGraph({
           <p className={PANEL_HEADER_TITLE_CLASS}>拓扑</p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onOpenSystemPromptPanel}
+            className={`${PANEL_HEADER_ACTION_BUTTON_CLASS} no-drag`}
+            aria-label="打开 System Prompt 面板"
+          >
+            System Prompt
+          </button>
           <button
             type="button"
             onClick={onToggleMaximize}

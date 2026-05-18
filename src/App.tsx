@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UiSnapshotPayload } from "@shared/types";
 import { withOptionalString } from "@shared/object-utils";
 import { ChatWindow } from "./components/ChatWindow";
+import { SystemPromptDrawer } from "./components/SystemPromptDrawer";
 import { TopologyGraph } from "./components/TopologyGraph";
 import {
   fetchUiSnapshot,
@@ -13,14 +14,9 @@ import { getAgentColorToken } from "./lib/agent-colors";
 import { calculateAgentCardPanelLayout } from "./lib/agent-card-layout";
 import { getAppShellClassName } from "./lib/app-shell-layout";
 import { resolveAppUiSnapshot, createInitialAppUiSnapshot, type AppUiSnapshot } from "./lib/app-ui-snapshot";
-import { getAppWorkspaceLayoutMetrics } from "./lib/app-workspace-layout";
 import { buildAgentPromptSnippetText } from "./lib/agent-prompt-snippet";
 import {
-  PANEL_HEADER_CLASS,
-  PANEL_HEADER_LEADING_CLASS,
-  PANEL_HEADER_TITLE_CLASS,
   PANEL_SECTION_BODY_CLASS,
-  PANEL_SURFACE_CLASS,
 } from "./lib/panel-header";
 import {
   buildAvailableAgentIdsForFrontend,
@@ -59,11 +55,11 @@ type AgentPanelViewportState =
 const UNMOUNTED_AGENT_PANEL_VIEWPORT: AgentPanelViewportState = {
   kind: "unmounted",
 };
+const PANEL_GAP_PX = 5;
 
 function App() {
   const queryClient = useQueryClient();
   const appShellClassName = getAppShellClassName();
-  const workspaceLayoutMetrics = getAppWorkspaceLayoutMetrics();
   const [agentTerminalActionError, setAgentTerminalActionError] = useState("");
   const [promptLineCount, setPromptLineCount] = useState(1);
   const [agentCardGapPx, setAgentCardGapPx] = useState(6);
@@ -71,6 +67,7 @@ function App() {
   const [selectedAgentPromptDialog, setSelectedAgentPromptDialog] = useState<AgentPromptDialogViewState>(
     CLOSED_AGENT_PROMPT_DIALOG,
   );
+  const [isSystemPromptDrawerOpen, setIsSystemPromptDrawerOpen] = useState(false);
   const [agentPanelViewport, setAgentPanelViewport] = useState<AgentPanelViewportState>(
     UNMOUNTED_AGENT_PANEL_VIEWPORT,
   );
@@ -130,12 +127,10 @@ function App() {
     }
 
     const { workspace, task } = uiSnapshot.taskView;
-    const taskAgents = new Map(task.agents.map((agent) => [agent.id, agent]));
     return orderAgentsForFrontend(
       workspace.agents,
       task.topology.nodes,
     ).map((agent) => {
-      const taskAgent = taskAgents.get(agent.id);
       const promptSnippet = buildAgentPromptSnippetText({
         agentId: agent.id,
         prompt: agent.prompt,
@@ -144,7 +139,6 @@ function App() {
         id: agent.id,
         prompt: agent.prompt,
         promptSnippet,
-        status: taskAgent?.status ?? "idle",
       };
     });
   }, [uiSnapshot]);
@@ -199,6 +193,7 @@ function App() {
         agentId,
       });
     } catch (error) {
+      setIsSystemPromptDrawerOpen(true);
       setAgentTerminalActionError(
         error instanceof Error ? error.message : `打开 ${agentId} 对应终端失败，请稍后重试。`,
       );
@@ -239,11 +234,14 @@ function App() {
   return (
     <div className="flex h-screen flex-col overflow-hidden text-foreground">
       <main className={`min-h-0 flex-1 overflow-hidden ${appShellClassName}`}>
-        {!panelVisibility.showChatPanel && panelVisibility.showTopologyPanel && !panelVisibility.showTeamPanel ? (
+        {!panelVisibility.showChatPanel && panelVisibility.showTopologyPanel ? (
           <div className="h-full min-h-0 overflow-hidden">
             <TopologyGraph
               task={task}
               isMaximized={panelMode === "topology-only"}
+              onOpenSystemPromptPanel={() => {
+                setIsSystemPromptDrawerOpen(true);
+              }}
               onToggleMaximize={() => {
                 setPanelMode((current) => (current === "topology-only" ? "default" : "topology-only"));
               }}
@@ -252,7 +250,7 @@ function App() {
               }}
             />
           </div>
-        ) : panelVisibility.showChatPanel && !panelVisibility.showTopologyPanel && !panelVisibility.showTeamPanel ? (
+        ) : panelVisibility.showChatPanel && !panelVisibility.showTopologyPanel ? (
           <div className="h-full min-h-0 overflow-hidden">
             <ChatWindow
               workspace={workspace}
@@ -277,11 +275,14 @@ function App() {
         ) : (
           <div
             className="grid h-full overflow-hidden grid-rows-[minmax(320px,42%)_minmax(0,1fr)]"
-            style={{ gap: `${workspaceLayoutMetrics.panelGapPx}px` }}
+            style={{ gap: `${PANEL_GAP_PX}px` }}
           >
             <TopologyGraph
               task={task}
               isMaximized={panelMode === "topology-only"}
+              onOpenSystemPromptPanel={() => {
+                setIsSystemPromptDrawerOpen(true);
+              }}
               onToggleMaximize={() => {
                 setPanelMode((current) => (current === "topology-only" ? "default" : "topology-only"));
               }}
@@ -290,120 +291,44 @@ function App() {
               }}
             />
 
-            <div
-              className="grid min-h-0 overflow-hidden"
-              style={{
-                gap: `${workspaceLayoutMetrics.panelGapPx}px`,
-                gridTemplateColumns: `minmax(0, 1fr) minmax(${workspaceLayoutMetrics.teamPanelMinWidthPx}px, ${workspaceLayoutMetrics.teamPanelMaxWidthPx}px)`,
-              }}
-            >
-              <div className="min-h-0">
-                <ChatWindow
-                  workspace={workspace}
-                  task={task}
-                  availableAgents={availableAgents}
-                  taskLogFilePath={uiSnapshot.taskLogFilePath}
-                  taskUrl={uiSnapshot.taskUrl}
-                  isMaximized={panelMode === "chat-only"}
-                  onToggleMaximize={() => {
-                    setPanelMode((current) => (current === "chat-only" ? "default" : "chat-only"));
-                  }}
-                  onOpenAgentTerminal={(agentId) => {
-                    void handleOpenAgentTerminal(agentId);
-                  }}
-                  onSubmit={async ({ content, mentionAgentId }) => {
-                    await submitTaskMutation.mutateAsync(withOptionalString({
-                      content,
-                    }, "mentionAgentId", mentionAgentId));
-                  }}
-                />
-              </div>
-
-              <aside className={PANEL_SURFACE_CLASS}>
-                <header className={PANEL_HEADER_CLASS}>
-                  <div className={PANEL_HEADER_LEADING_CLASS}>
-                    <p className={PANEL_HEADER_TITLE_CLASS}>团队</p>
-                  </div>
-                </header>
-
-                <div
-                  ref={bindAgentPanelViewport}
-                  className={`min-h-0 flex-1 overflow-y-auto ${PANEL_SECTION_BODY_CLASS}`}
-                >
-                  {agentTerminalActionError && (
-                    <div className="mb-1.5 rounded-[8px] border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-700">
-                      {agentTerminalActionError}
-                    </div>
-                  )}
-
-                  <div className="flex flex-col" style={{ gap: `${agentCardGapPx}px` }}>
-                    {agentCards.map((agent) => {
-                      const color = getAgentColorToken(agent.id);
-                      const promptSnippetLine = agent.promptSnippet.replace(/\s+/gu, "");
-                      return (
-                        <div
-                          key={agent.id}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => {
-                            handleOpenAgentPromptDialog(agent);
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              handleOpenAgentPromptDialog(agent);
-                            }
-                          }}
-                          className="rounded-[8px] border px-3 py-2 text-left shadow-sm transition"
-                          style={{
-                            background: color.soft,
-                            borderColor: color.border,
-                            color: color.text,
-                          }}
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="min-w-0">
-                              <span
-                                className="inline-flex max-w-full shrink-0 rounded-[8px] px-2 py-px text-center text-[14px] font-semibold leading-[1.2] tracking-[0.02em]"
-                                style={{
-                                  background: color.solid,
-                                  color: color.badgeText,
-                                }}
-                              >
-                                {agent.id}
-                              </span>
-                            </div>
-                          </div>
-                          {agent.promptSnippet !== "-" ? (
-                            <div className="mt-1 min-w-0">
-                              <p
-                                title={agent.promptSnippet}
-                                className="min-w-0 overflow-hidden break-all text-[13px] leading-[18px]"
-                                style={{
-                                  color: color.mutedText,
-                                  display: "-webkit-box",
-                                  WebkitBoxOrient: "vertical",
-                                  WebkitLineClamp: promptLineCount,
-                                }}
-                              >
-                                {promptSnippetLine}
-                              </p>
-                            </div>
-                          ) : (
-                            <div className="mt-1 min-w-0 text-[13px] leading-5" style={{ color: color.mutedText }}>
-                              -
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </aside>
+            <div className="min-h-0">
+              <ChatWindow
+                workspace={workspace}
+                task={task}
+                availableAgents={availableAgents}
+                taskLogFilePath={uiSnapshot.taskLogFilePath}
+                taskUrl={uiSnapshot.taskUrl}
+                isMaximized={panelMode === "chat-only"}
+                onToggleMaximize={() => {
+                  setPanelMode((current) => (current === "chat-only" ? "default" : "chat-only"));
+                }}
+                onOpenAgentTerminal={(agentId) => {
+                  void handleOpenAgentTerminal(agentId);
+                }}
+                onSubmit={async ({ content, mentionAgentId }) => {
+                  await submitTaskMutation.mutateAsync(withOptionalString({
+                    content,
+                  }, "mentionAgentId", mentionAgentId));
+                }}
+              />
             </div>
           </div>
         )}
       </main>
+
+      {isSystemPromptDrawerOpen ? (
+        <SystemPromptDrawer
+          agentCards={agentCards}
+          agentCardGapPx={agentCardGapPx}
+          agentTerminalActionError={agentTerminalActionError}
+          bindViewport={bindAgentPanelViewport}
+          onClose={() => {
+            setIsSystemPromptDrawerOpen(false);
+          }}
+          onOpenAgentPromptDialog={handleOpenAgentPromptDialog}
+          promptLineCount={promptLineCount}
+        />
+      ) : null}
 
       {selectedAgentPromptDialog.kind === "open" && (
         <div

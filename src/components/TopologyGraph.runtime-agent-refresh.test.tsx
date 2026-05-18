@@ -73,6 +73,20 @@ function offsetTimestamp(seconds: number) {
   return toUtcIsoTimestamp(new Date(Date.now() + seconds * 1000).toISOString());
 }
 
+async function waitForAssertion(assertion: () => void, attempts = 20) {
+  let lastError: unknown = null;
+  for (let index = 0; index < attempts; index += 1) {
+    try {
+      assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+  throw lastError;
+}
+
 function createTaskAgent(input: {
   id: string;
   status: TaskSnapshot["agents"][number]["status"];
@@ -173,6 +187,7 @@ test("TopologyGraph 会把静态模板节点刷新成最新 runtime agent，并�
 
   const rendered = await renderTopologyGraphInDom({
     task: firstRoundTask,
+    onOpenSystemPromptPanel: () => {},
     onToggleMaximize: () => {},
     onOpenAgentTerminal: () => {},
   });
@@ -189,6 +204,7 @@ test("TopologyGraph 会把静态模板节点刷新成最新 runtime agent，并�
 
     await rendered.render({
       task: secondRoundTask,
+      onOpenSystemPromptPanel: () => {},
       onToggleMaximize: () => {},
       onOpenAgentTerminal: () => {},
     });
@@ -233,6 +249,7 @@ test("task snapshot 尚未带上 session 时，TopologyGraph 不会启用 attach
 
   const rendered = await renderTopologyGraphInDom({
     task,
+    onOpenSystemPromptPanel: () => {},
     onToggleMaximize: () => {},
     onOpenAgentTerminal: () => {},
   });
@@ -246,6 +263,58 @@ test("task snapshot 尚未带上 session 时，TopologyGraph 不会启用 attach
     assert.ok(attachButton instanceof HTMLButtonElement, "应展示已运行 agent 的 attach 按钮");
     assert.equal(attachButton.disabled, true);
     assert.equal(attachButton.title, "误报论证-2 当前还没有可 attach 的 OpenCode session。");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("TopologyGraph 在空态与正常态都展示 System Prompt 按钮并可触发回调", async () => {
+  let openCount = 0;
+  const task = createTask({
+    taskId: TASK_ID,
+    taskStatus: "running",
+    agents: [
+      createTaskAgent({
+        id: "线索发现",
+        status: "completed",
+        sessionId: "session-clue",
+        attachBaseUrl: "http://localhost:4310",
+      }),
+    ],
+    messages: [],
+  });
+
+  const rendered = await renderTopologyGraphInDom({
+    task,
+    onToggleMaximize: () => {},
+    onOpenSystemPromptPanel: () => {
+      openCount += 1;
+    },
+    onOpenAgentTerminal: () => {},
+  });
+
+  try {
+    const button = document.querySelector('button[aria-label="打开 System Prompt 面板"]');
+    assert.ok(button instanceof HTMLButtonElement, "正常拓扑下应展示 System Prompt 按钮");
+    button.click();
+    assert.equal(openCount, 1);
+
+    await rendered.render({
+      task: {
+        ...task,
+        agents: [],
+      },
+      onToggleMaximize: () => {},
+      onOpenSystemPromptPanel: () => {
+        openCount += 1;
+      },
+      onOpenAgentTerminal: () => {},
+    });
+
+    const emptyButton = document.querySelector('button[aria-label="打开 System Prompt 面板"]');
+    assert.ok(emptyButton instanceof HTMLButtonElement, "空态拓扑下也应展示 System Prompt 按钮");
+    emptyButton.click();
+    assert.equal(openCount, 2);
   } finally {
     await rendered.cleanup();
   }
@@ -294,6 +363,7 @@ test("TopologyGraph 会继续展示刚完成的运行实例", async () => {
   const rendered = await renderTopologyGraphInDom({
     task,
     onToggleMaximize: () => {},
+    onOpenSystemPromptPanel: () => {},
     onOpenAgentTerminal: () => {},
   });
 
@@ -361,6 +431,7 @@ test("TopologyGraph 展示最终多条历史，不展示过程消息，任务结
   const rendered = await renderTopologyGraphInDom({
     task,
     onToggleMaximize: () => {},
+    onOpenSystemPromptPanel: () => {},
     onOpenAgentTerminal: () => {},
   });
 
@@ -415,6 +486,7 @@ test("TopologyGraph 运行中且尚无最终历史时展示固定提示", async 
   const rendered = await renderTopologyGraphInDom({
     task,
     onToggleMaximize: () => {},
+    onOpenSystemPromptPanel: () => {},
     onOpenAgentTerminal: () => {},
   });
 
@@ -452,6 +524,7 @@ test("TopologyGraph 会把已完成但尚未同步最终消息的运行中任务
   const rendered = await renderTopologyGraphInDom({
     task,
     onToggleMaximize: () => {},
+    onOpenSystemPromptPanel: () => {},
     onOpenAgentTerminal: () => {},
   });
 
@@ -502,6 +575,7 @@ test("TopologyGraph 不再展示节点全屏与详情交互", async () => {
   const rendered = await renderTopologyGraphInDom({
     task,
     onToggleMaximize: () => {},
+    onOpenSystemPromptPanel: () => {},
     onOpenAgentTerminal: () => {},
   });
 
@@ -583,6 +657,7 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
   const rendered = await renderTopologyGraphInDom({
     task,
     onToggleMaximize: () => {},
+    onOpenSystemPromptPanel: () => {},
     onOpenAgentTerminal: () => {},
   });
 
@@ -629,6 +704,7 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
         ],
       }),
       onToggleMaximize: () => {},
+      onOpenSystemPromptPanel: () => {},
       onOpenAgentTerminal: () => {},
     });
     await act(async () => {
@@ -651,6 +727,7 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
         })),
       }),
       onToggleMaximize: () => {},
+      onOpenSystemPromptPanel: () => {},
       onOpenAgentTerminal: () => {},
     });
 
@@ -664,6 +741,12 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
     });
 
     assert.equal(resetViewport.scrollTop, 480);
+    await waitForAssertion(() => {
+      const resetFirstCard = rendered.window.document.querySelector('[data-topology-node-card="线索发现"]');
+      const resetSecondCard = rendered.window.document.querySelector('[data-topology-node-card="误报论证"]');
+      assert.ok(resetFirstCard instanceof HTMLElement);
+      assert.ok(resetSecondCard instanceof HTMLElement);
+    });
     const resetFirstCard = rendered.window.document.querySelector('[data-topology-node-card="线索发现"]');
     const resetSecondCard = rendered.window.document.querySelector('[data-topology-node-card="误报论证"]');
     assert.ok(resetFirstCard instanceof HTMLElement);
@@ -712,6 +795,7 @@ test("TopologyGraph 的单条最终历史消息按文字自然撑高，滚动发
       ],
     }),
     onToggleMaximize: () => {},
+    onOpenSystemPromptPanel: () => {},
     onOpenAgentTerminal: () => {},
   });
 
@@ -767,6 +851,7 @@ test("TopologyGraph 遇到失败节点但缺少最终消息时展示失败占位
       messages: [],
     }),
     onToggleMaximize: () => {},
+    onOpenSystemPromptPanel: () => {},
     onOpenAgentTerminal: () => {},
   });
 
@@ -795,6 +880,7 @@ test("TopologyGraph 遇到任务已结束但节点仍缺少最终消息时展示
       messages: [],
     }),
     onToggleMaximize: () => {},
+    onOpenSystemPromptPanel: () => {},
     onOpenAgentTerminal: () => {},
   });
 
@@ -836,6 +922,7 @@ test("TopologyGraph 遇到相同最终时间戳的多条最终消息时保留全
       ],
     }),
     onToggleMaximize: () => {},
+    onOpenSystemPromptPanel: () => {},
     onOpenAgentTerminal: () => {},
   });
 

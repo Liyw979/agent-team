@@ -508,3 +508,107 @@ test("submitTaskMutation 成功后会失效 ui-snapshot 查询并立即重拉", 
     await appTest.cleanup();
   }
 });
+
+test("App 默认隐藏右侧团队栏，并通过拓扑头部按钮打开 System Prompt 抽屉与详情", async () => {
+  const fetchImpl = (async () =>
+    new Response(JSON.stringify(createUiSnapshot({
+      agentSessionId: "session-challenge-1",
+      messages: createAgentFinalMessage(),
+    })), { status: 200 })) as unknown as typeof fetch;
+
+  const appTest = setupAppTest(fetchImpl);
+
+  try {
+    await appTest.render();
+
+    await waitForAssertion(() => {
+      assert.equal(document.querySelector('aside[aria-label="System Prompt 面板"]'), null);
+      assert.equal(document.body.textContent?.includes("团队") ?? false, false);
+      const openButton = document.querySelector('button[aria-label="打开 System Prompt 面板"]');
+      assert.ok(openButton instanceof HTMLButtonElement);
+    });
+
+    const openButton = document.querySelector('button[aria-label="打开 System Prompt 面板"]');
+    assert.ok(openButton instanceof HTMLButtonElement);
+    await act(async () => {
+      openButton.click();
+    });
+
+    await waitForAssertion(() => {
+      const drawer = document.querySelector('aside[aria-label="System Prompt 面板"]');
+      assert.ok(drawer instanceof HTMLElement);
+      assert.match(drawer.textContent ?? "", /误报论证-1/u);
+    });
+
+    const agentCard = Array.from(document.querySelectorAll('[role="button"]')).find((element) =>
+      element.textContent?.includes("误报论证-1"),
+    );
+    assert.ok(agentCard instanceof HTMLDivElement);
+    await act(async () => {
+      agentCard.click();
+    });
+
+    await waitForAssertion(() => {
+      const promptDialog = document.querySelector('[role="dialog"][aria-label="误报论证-1 Prompt 详情"]');
+      assert.ok(promptDialog instanceof HTMLElement);
+      assert.match(promptDialog.textContent ?? "", /挑战输入/u);
+    });
+
+    const closeDrawerButton = document.querySelector('button[aria-label="关闭 System Prompt 面板"]');
+    assert.ok(closeDrawerButton instanceof HTMLButtonElement);
+    await act(async () => {
+      closeDrawerButton.click();
+    });
+
+    await waitForAssertion(() => {
+      assert.equal(document.querySelector('aside[aria-label="System Prompt 面板"]'), null);
+      assert.match(document.body.textContent ?? "", /挑战结论：这里的消息应当在轮询拿到全量 snapshot 后立即出现。/u);
+    });
+  } finally {
+    await appTest.cleanup();
+  }
+});
+
+test("App 打开 attach 失败时会自动展示 System Prompt 抽屉与错误提示", async () => {
+  const fetchImpl = (async (input: RequestInfo | URL) => {
+    const requestUrl = getRequestUrl(input);
+    if (requestUrl.pathname === "/api/ui-snapshot") {
+      return new Response(JSON.stringify(createUiSnapshot({
+        agentSessionId: "session-challenge-1",
+        messages: createAgentFinalMessage(),
+      })), { status: 200 });
+    }
+    if (requestUrl.pathname === "/api/tasks/open-agent-terminal") {
+      return new Response(JSON.stringify({
+        error: "attach 终端打开失败",
+      }), { status: 500 });
+    }
+    throw new Error(`unexpected request: ${requestUrl.pathname}`);
+  }) as unknown as typeof fetch;
+
+  const appTest = setupAppTest(fetchImpl);
+
+  try {
+    await appTest.render();
+
+    await waitForAssertion(() => {
+      const attachButton = document.querySelector('button[aria-label="打开 误报论证-1 的 attach 终端"]');
+      assert.ok(attachButton instanceof HTMLButtonElement);
+    });
+
+    const attachButton = document.querySelector('button[aria-label="打开 误报论证-1 的 attach 终端"]');
+    assert.ok(attachButton instanceof HTMLButtonElement);
+    await act(async () => {
+      attachButton.click();
+      await Promise.resolve();
+    });
+
+    await waitForAssertion(() => {
+      const drawer = document.querySelector('aside[aria-label="System Prompt 面板"]');
+      assert.ok(drawer instanceof HTMLElement);
+      assert.match(drawer.textContent ?? "", /attach 终端打开失败/u);
+    });
+  } finally {
+    await appTest.cleanup();
+  }
+});
