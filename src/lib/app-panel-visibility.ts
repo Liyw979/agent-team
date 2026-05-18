@@ -3,7 +3,6 @@ export type AppPanelMode = "default" | "chat-only" | "topology-only";
 interface AppPanelVisibility {
   showTopologyPanel: boolean;
   showChatPanel: boolean;
-  showTeamPanel: boolean;
 }
 
 export function resolveAppPanelVisibility(mode: AppPanelMode): AppPanelVisibility {
@@ -11,7 +10,6 @@ export function resolveAppPanelVisibility(mode: AppPanelMode): AppPanelVisibilit
     return {
       showTopologyPanel: false,
       showChatPanel: true,
-      showTeamPanel: false,
     };
   }
 
@@ -19,13 +17,11 @@ export function resolveAppPanelVisibility(mode: AppPanelMode): AppPanelVisibilit
     return {
       showTopologyPanel: true,
       showChatPanel: false,
-      showTeamPanel: false,
     };
   }
 
   return {
     showTopologyPanel: true,
     showChatPanel: true,
-    showTeamPanel: true,
   };
 }
