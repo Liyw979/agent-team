@@ -647,8 +647,15 @@ test("漏洞团队任务初始化时不会为仅作为 group 模板存在的静�
     .map((line) => JSON.parse(line) as {
       event: string;
       reason: string;
+      agentId: string;
+      sessionId: string;
+      taskTitle: string;
       agentSessions: Array<{ agentId: string; sessionId: string }>;
     });
+  const sessionCreated = records.find((record) =>
+    record.event === "agent.opencode_session_created"
+    && record.agentId === "线索发现"
+  );
   const createdSnapshots = records.filter((record) => record.reason === "session-created");
   const initializedSnapshots = records.filter((record) => record.reason === "initialized");
   const snapshot = records.filter((record) => record.event === "task.opencode_sessions_snapshot").at(-1);
@@ -657,6 +664,8 @@ test("漏洞团队任务初始化时不会为仅作为 group 模板存在的静�
     sessionId: agent.opencodeSessionId,
   }));
 
+  assert.equal(sessionCreated?.sessionId, "session:vuln-demo:线索发现");
+  assert.equal(sessionCreated?.taskTitle, "vuln-demo");
   assert.equal(createdSnapshots.length > 0, true);
   assert.equal(initializedSnapshots.length, 1);
   assert.equal(

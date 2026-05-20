@@ -1168,6 +1168,24 @@ export class Orchestrator {
     });
   }
 
+  private appendAgentSessionCreatedLog(
+    task: TaskRecord,
+    agentId: string,
+    sessionId: string,
+  ) {
+    runWithTaskLogScope(task.id, () => {
+      appendAppLog(
+        "info",
+        "agent.opencode_session_created",
+        {
+          agentId,
+          sessionId,
+          taskTitle: task.title,
+        },
+      );
+    });
+  }
+
   private overlayTaskAgents(
     task: TaskRecord,
     agents: TaskAgentRecord[],
@@ -1197,6 +1215,7 @@ export class Orchestrator {
       );
     });
     overlay.agentSessions.set(agent.id, sessionId);
+    this.appendAgentSessionCreatedLog(task, agent.id, sessionId);
     this.appendTaskAgentSessionsLog(task.id, "session-created", overlay.agentSessions);
     return sessionId;
   }
