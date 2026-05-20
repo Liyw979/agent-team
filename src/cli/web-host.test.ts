@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import net from "node:net";
+import os from "node:os";
+import path from "node:path";
 import { test } from "bun:test";
-import type { SubmitTaskPayload } from "@shared/types";
+import type { SubmitTaskPayload, TaskSnapshot, WorkspaceSnapshot } from "@shared/types";
 
 import {
   reserveLoopbackPort,
@@ -34,6 +37,63 @@ async function reservePort() {
       });
     });
   });
+}
+
+function createStaticWebRoot() {
+  const webRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-team-web-host-"));
+  fs.writeFileSync(path.join(webRoot, "index.html"), "<!doctype html><html><body>ui-index</body></html>");
+  fs.mkdirSync(path.join(webRoot, "assets"));
+  fs.writeFileSync(path.join(webRoot, "assets", "app.js"), "console.log('web-host-test');");
+  return webRoot;
+}
+
+function buildWorkspaceSnapshot(input: {
+  cwd: string;
+  name: string;
+  tasks: WorkspaceSnapshot["tasks"];
+}): WorkspaceSnapshot {
+  return {
+    cwd: input.cwd,
+    name: input.name,
+    agents: [],
+    topology: {
+      nodes: [],
+      edges: [],
+      flow: {
+        start: { id: "__start__", targets: [] },
+        end: { id: "__end__", sources: [], incoming: [] },
+      },
+      nodeRecords: [],
+    },
+    messages: [],
+    tasks: input.tasks,
+  };
+}
+
+function buildTaskSnapshot(input: { id: string; cwd: string }): TaskSnapshot {
+  return {
+    task: {
+      id: input.id,
+      title: "demo",
+      status: "running",
+      cwd: input.cwd,
+      agentCount: 0,
+      createdAt: "2026-04-28T00:00:00.000Z",
+      completedAt: "",
+      initializedAt: "",
+    },
+    agents: [],
+    messages: [],
+    topology: {
+      nodes: [],
+      edges: [],
+      flow: {
+        start: { id: "__start__", targets: [] },
+        end: { id: "__end__", sources: [], incoming: [] },
+      },
+      nodeRecords: [],
+    },
+  };
 }
 
 test("startWebHost 会按 JSON 解析 /api/tasks/submit 请求体", async () => {
@@ -73,7 +133,7 @@ test("startWebHost 会按 JSON 解析 /api/tasks/submit 请求体", async () => 
       },
     } as never,
     port,
-    webRoot: null,
+    staticAssets: { kind: "api-only" },
     userDataPath: "/tmp",
     bindHosts: [UI_LOOPBACK_IPV4_HOST],
   });
@@ -101,47 +161,20 @@ test("startWebHost 会按 JSON 解析 /api/tasks/submit 请求体", async () => 
 
 test("startWebHost 会同时监听 IPv4 和 IPv6 loopback，避免 localhost 命中其他进程", async () => {
   const port = await reservePort();
+  const taskSnapshot = buildTaskSnapshot({
+    id: "task-123",
+    cwd: "/tmp/demo",
+  });
   const host = await startWebHost({
     orchestrator: {
       subscribe: () => () => undefined,
       submitTask: async () => {
         throw new Error("unexpected submitTask");
       },
-      getWorkspaceSnapshot: async () => ({
+      getWorkspaceSnapshot: async () => buildWorkspaceSnapshot({
         cwd: "/tmp/demo",
-        agents: [],
-        topology: {
-          nodes: [],
-          edges: [],
-          flow: {
-            start: { id: "__start__", targets: [] },
-            end: { id: "__end__", sources: [], incoming: [] },
-          },
-        },
-        messages: [],
-        tasks: [{
-          task: {
-            id: "task-123",
-            title: "demo",
-            status: "running",
-            cwd: "/tmp/demo",
-            agentCount: 0,
-            createdAt: "2026-04-28T00:00:00.000Z",
-            completedAt: "",
-            initializedAt: "",
-          },
-          agents: [],
-          messages: [],
-          topology: {
-            nodes: [],
-            edges: [],
-            flow: {
-              start: { id: "__start__", targets: [] },
-              end: { id: "__end__", sources: [], incoming: [] },
-            },
-            nodeRecords: [],
-          },
-        }],
+        name: "demo",
+        tasks: [taskSnapshot],
       }),
       getTaskRuntime: async () => {
         throw new Error("unexpected getTaskRuntime");
@@ -151,7 +184,7 @@ test("startWebHost 会同时监听 IPv4 和 IPv6 loopback，避免 localhost 命
       },
     } as never,
     port,
-    webRoot: null,
+    staticAssets: { kind: "api-only" },
     userDataPath: "/tmp",
     bindHosts: await resolveAvailableLoopbackBindHosts(),
   });
@@ -178,51 +211,159 @@ test("startWebHost 会同时监听 IPv4 和 IPv6 loopback，避免 localhost 命
   }
 });
 
-test("startWebHost 的 /api/tasks/runtime 始终绑定当前进程 task，不接受查询参数覆盖", async () => {
+test("startWebHost 在 single-page-app 模式下返回静态入口与资源文件", async () => {
   const port = await reservePort();
-  let runtimeCallCount = 0;
+  const webRoot = createStaticWebRoot();
   const host = await startWebHost({
     orchestrator: {
       subscribe: () => () => undefined,
       submitTask: async () => {
         throw new Error("unexpected submitTask");
       },
-      getWorkspaceSnapshot: async () => ({
+      getWorkspaceSnapshot: async () => {
+        throw new Error("unexpected getWorkspaceSnapshot");
+      },
+      getTaskRuntime: async () => {
+        throw new Error("unexpected getTaskRuntime");
+      },
+      openAgentTerminal: async () => {
+        throw new Error("unexpected openAgentTerminal");
+      },
+    } as never,
+    port,
+    staticAssets: { kind: "single-page-app", webRoot },
+    userDataPath: "/tmp",
+    bindHosts: [UI_LOOPBACK_IPV4_HOST],
+  });
+
+  try {
+    const entryResponse = await fetch(`http://localhost:${port}/`);
+    assert.equal(entryResponse.status, 200);
+    assert.equal(await entryResponse.text(), "<!doctype html><html><body>ui-index</body></html>");
+
+    const assetResponse = await fetch(`http://localhost:${port}/assets/app.js`);
+    assert.equal(assetResponse.status, 200);
+    assert.equal(await assetResponse.text(), "console.log('web-host-test');");
+  } finally {
+    await host.close();
+    fs.rmSync(webRoot, { recursive: true, force: true });
+  }
+});
+
+test("startWebHost 的 /api/ui-snapshot 会区分 idle 与 active task", async () => {
+  const idlePort = await reservePort();
+  let idleTaskSnapshotCalls = 0;
+  const idleWorkspace = buildWorkspaceSnapshot({
+    cwd: "/tmp/idle",
+    name: "idle",
+    tasks: [],
+  });
+  const idleHost = await startWebHost({
+    orchestrator: {
+      subscribe: () => () => undefined,
+      submitTask: async () => {
+        throw new Error("unexpected submitTask");
+      },
+      getTaskSnapshot: async () => {
+        idleTaskSnapshotCalls += 1;
+        throw new Error("unexpected getTaskSnapshot");
+      },
+      getWorkspaceSnapshot: async () => idleWorkspace,
+      getTaskRuntime: async () => {
+        throw new Error("unexpected getTaskRuntime");
+      },
+      openAgentTerminal: async () => {
+        throw new Error("unexpected openAgentTerminal");
+      },
+    } as never,
+    port: idlePort,
+    staticAssets: { kind: "api-only" },
+    userDataPath: "/tmp/user-data",
+    bindHosts: [UI_LOOPBACK_IPV4_HOST],
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${idlePort}/api/ui-snapshot`);
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.workspace.cwd, "/tmp/idle");
+    assert.equal(payload.workspace.tasks.length, 0);
+    assert.equal(payload.task, null);
+    assert.equal(payload.taskLogFilePath, null);
+    assert.equal(payload.launchCwd, "/tmp/idle");
+    assert.equal(payload.taskUrl, `http://localhost:${idlePort}/`);
+    assert.equal(idleTaskSnapshotCalls, 0);
+  } finally {
+    await idleHost.close();
+  }
+
+  const activePort = await reservePort();
+  let activeTaskSnapshotCalls = 0;
+  const activeTaskSnapshot = buildTaskSnapshot({
+    id: "task-active",
+    cwd: "/tmp/active",
+  });
+  const activeHost = await startWebHost({
+    orchestrator: {
+      subscribe: () => () => undefined,
+      submitTask: async () => {
+        throw new Error("unexpected submitTask");
+      },
+      getTaskSnapshot: async () => {
+        activeTaskSnapshotCalls += 1;
+        return activeTaskSnapshot;
+      },
+      getWorkspaceSnapshot: async () => buildWorkspaceSnapshot({
+        cwd: "/tmp/active",
+        name: "active",
+        tasks: [activeTaskSnapshot],
+      }),
+      getTaskRuntime: async () => {
+        throw new Error("unexpected getTaskRuntime");
+      },
+      openAgentTerminal: async () => {
+        throw new Error("unexpected openAgentTerminal");
+      },
+    } as never,
+    port: activePort,
+    staticAssets: { kind: "api-only" },
+    userDataPath: "/tmp/user-data",
+    bindHosts: [UI_LOOPBACK_IPV4_HOST],
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${activePort}/api/ui-snapshot`);
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.workspace.cwd, "/tmp/active");
+    assert.equal(payload.workspace.tasks.length, 1);
+    assert.deepEqual(payload.task, activeTaskSnapshot);
+    assert.equal(payload.taskLogFilePath, "/tmp/user-data/logs/tasks/task-active.log");
+    assert.equal(payload.launchCwd, "/tmp/active");
+    assert.equal(payload.taskUrl, `http://localhost:${activePort}/`);
+    assert.equal(activeTaskSnapshotCalls, 1);
+  } finally {
+    await activeHost.close();
+  }
+});
+
+test("startWebHost 的 /api/tasks/runtime 始终绑定当前进程 task，不接受查询参数覆盖", async () => {
+  const port = await reservePort();
+  let runtimeCallCount = 0;
+  const taskSnapshot = buildTaskSnapshot({
+    id: "task-123",
+    cwd: "/tmp/demo",
+  });
+  const host = await startWebHost({
+    orchestrator: {
+      subscribe: () => () => undefined,
+      submitTask: async () => {
+        throw new Error("unexpected submitTask");
+      },
+      getWorkspaceSnapshot: async () => buildWorkspaceSnapshot({
         cwd: "/tmp/demo",
-        agents: [],
-        topology: {
-          nodes: [],
-          edges: [],
-          flow: {
-            start: { id: "__start__", targets: [] },
-            end: { id: "__end__", sources: [], incoming: [] },
-          },
-          nodeRecords: [],
-        },
-        messages: [],
-        tasks: [{
-          task: {
-            id: "task-123",
-            title: "demo",
-            status: "running",
-            cwd: "/tmp/demo",
-            agentCount: 0,
-            createdAt: "2026-04-28T00:00:00.000Z",
-            completedAt: "",
-            initializedAt: "",
-          },
-          agents: [],
-          messages: [],
-          topology: {
-            nodes: [],
-            edges: [],
-            flow: {
-              start: { id: "__start__", targets: [] },
-              end: { id: "__end__", sources: [], incoming: [] },
-            },
-            nodeRecords: [],
-          },
-        }],
+        name: "demo",
+        tasks: [taskSnapshot],
       }),
       getTaskRuntime: async () => {
         runtimeCallCount += 1;
@@ -233,7 +374,7 @@ test("startWebHost 的 /api/tasks/runtime 始终绑定当前进程 task，不接
       },
     } as never,
     port,
-    webRoot: null,
+    staticAssets: { kind: "api-only" },
     userDataPath: "/tmp",
     bindHosts: [UI_LOOPBACK_IPV4_HOST],
   });
@@ -267,7 +408,7 @@ test("startWebHost 的 /api/tasks/open-agent-terminal 只透传 agentId", async 
       },
     } as never,
     port,
-    webRoot: null,
+    staticAssets: { kind: "api-only" },
     userDataPath: "/tmp",
     bindHosts: [UI_LOOPBACK_IPV4_HOST],
   });
@@ -310,7 +451,7 @@ test("startWebHost 在 submit 请求缺少有效 content 时返回 400", async (
       },
     } as never,
     port,
-    webRoot: null,
+    staticAssets: { kind: "api-only" },
     userDataPath: "/tmp",
     bindHosts: [UI_LOOPBACK_IPV4_HOST],
   });
@@ -352,7 +493,7 @@ test("startWebHost 在 submit 请求提供非法 mentionAgentId 时返回 400", 
       },
     } as never,
     port,
-    webRoot: null,
+    staticAssets: { kind: "api-only" },
     userDataPath: "/tmp",
     bindHosts: [UI_LOOPBACK_IPV4_HOST],
   });
@@ -395,7 +536,7 @@ test("startWebHost 在 open-agent-terminal 请求缺少有效 agentId 时返回 
       },
     } as never,
     port,
-    webRoot: null,
+    staticAssets: { kind: "api-only" },
     userDataPath: "/tmp",
     bindHosts: [UI_LOOPBACK_IPV4_HOST],
   });
@@ -461,7 +602,7 @@ test("startWebHost 任一 bind host 监听失败时会关闭已监听 server 并
           },
         } as never,
         port,
-        webRoot: null,
+        staticAssets: { kind: "api-only" },
         userDataPath: "/tmp",
         bindHosts: availableBindHosts,
       }),
@@ -472,47 +613,20 @@ test("startWebHost 任一 bind host 监听失败时会关闭已监听 server 并
   }
 
   assert.equal(unsubscribeCallCount, 1);
+  const taskSnapshot = buildTaskSnapshot({
+    id: "task-123",
+    cwd: "/tmp/demo",
+  });
   const reusedHost = await startWebHost({
     orchestrator: {
       subscribe: () => () => undefined,
       submitTask: async () => {
         throw new Error("unexpected submitTask");
       },
-      getWorkspaceSnapshot: async () => ({
+      getWorkspaceSnapshot: async () => buildWorkspaceSnapshot({
         cwd: "/tmp/demo",
-        agents: [],
-        topology: {
-          nodes: [],
-          edges: [],
-          flow: {
-            start: { id: "__start__", targets: [] },
-            end: { id: "__end__", sources: [], incoming: [] },
-          },
-        },
-        messages: [],
-        tasks: [{
-          task: {
-            id: "task-123",
-            title: "demo",
-            status: "running",
-            cwd: "/tmp/demo",
-            agentCount: 0,
-            createdAt: "2026-04-28T00:00:00.000Z",
-            completedAt: "",
-            initializedAt: "",
-          },
-          agents: [],
-          messages: [],
-          topology: {
-            nodes: [],
-            edges: [],
-            flow: {
-              start: { id: "__start__", targets: [] },
-              end: { id: "__end__", sources: [], incoming: [] },
-            },
-            nodeRecords: [],
-          },
-        }],
+        name: "demo",
+        tasks: [taskSnapshot],
       }),
       getTaskRuntime: async () => {
         throw new Error("unexpected getTaskRuntime");
@@ -522,7 +636,7 @@ test("startWebHost 任一 bind host 监听失败时会关闭已监听 server 并
       },
     } as never,
     port,
-    webRoot: null,
+    staticAssets: { kind: "api-only" },
     userDataPath: "/tmp",
     bindHosts: availableBindHosts,
   });

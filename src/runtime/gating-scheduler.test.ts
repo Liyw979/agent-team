@@ -116,7 +116,6 @@ test("triggered 派发不会被同一目标未满足的 default 入边阻塞", (
   assert.deepEqual(plan, {
     sourceAgentId: "评估",
     sourceContent: "必须继续挖掘",
-    displayTargets: ["发现"],
     triggerTargets: ["发现"],
     readyTargets: ["发现"],
     queuedTargets: [],
