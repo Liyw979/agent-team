@@ -97,6 +97,34 @@ test("triggered 派发会按 trigger 过滤目标", () => {
   });
 });
 
+test("triggered 派发不会被同一目标未满足的 default 入边阻塞", () => {
+  const scheduler = new GatingScheduler(withNodeRecords({
+    nodes: ["发现", "总结", "评估"],
+    edges: [
+      { source: "总结", target: "发现", trigger: "<default>", messageMode: "none", maxTriggerRounds: 4 },
+      { source: "发现", target: "评估", trigger: "<complete>", messageMode: "last", maxTriggerRounds: 4 },
+      { source: "评估", target: "发现", trigger: "<continue>", messageMode: "last", maxTriggerRounds: 999 },
+    ],
+  }), createGatingSchedulerRuntimeState());
+
+  const plan = scheduler.planTriggeredDispatch("评估", "必须继续挖掘", [
+    { id: "发现", status: "completed" },
+    { id: "总结", status: "idle" },
+    { id: "评估", status: "completed" },
+  ], {
+    trigger: "<continue>",
+  });
+
+  assert.deepEqual(plan, {
+    sourceAgentId: "评估",
+    sourceContent: "必须继续挖掘",
+    displayTargets: ["发现"],
+    triggerTargets: ["发现"],
+    readyTargets: ["发现"],
+    queuedTargets: [],
+  });
+});
+
 test("同一 trigger 多入边 triggered 任一来源满足后即可派发", () => {
   const scheduler = new GatingScheduler(withNodeRecords({
     nodes: ["漏洞论证-1", "误报论证-1", "讨论总结-1"],

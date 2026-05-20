@@ -261,9 +261,11 @@ export class GatingScheduler {
       return false;
     }
 
-    const incomingHandoffEdges = this.getIncomingEdges(targetName, DEFAULT_TOPOLOGY_TRIGGER);
-    if (incomingHandoffEdges.some((edge) => !this.isIncomingEdgeSatisfied(edge, completedEdges))) {
-      return false;
+    if (triggerKind === DEFAULT_TOPOLOGY_TRIGGER) {
+      const incomingHandoffEdges = this.getIncomingEdges(targetName, DEFAULT_TOPOLOGY_TRIGGER);
+      if (incomingHandoffEdges.some((edge) => !this.isIncomingEdgeSatisfied(edge, completedEdges))) {
+        return false;
+      }
     }
 
     const allIncomingTriggeredEdges = this.topology.edges.filter((edge) =>
