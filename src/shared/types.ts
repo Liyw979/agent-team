@@ -540,7 +540,6 @@ export function getMessageSenderDisplayName(
 }
 
 export interface AgentRuntimeActivity {
-  id: string;
   kind: "tool" | "message" | "thinking" | "step";
   label: string;
   detail: string;

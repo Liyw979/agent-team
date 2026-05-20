@@ -157,7 +157,7 @@ export class TaskRuntime {
     let currentState = state.graphState.graphState;
     let currentDecision = resolveInitialRuntimeDecision(state, currentState);
 
-    const inflight = new Map<string, TaskRuntimeBatchRunner>();
+    const inflight = new Set<TaskRuntimeBatchRunner>();
     while (true) {
       while (currentDecision.kind === "decided" && currentDecision.decision.type === "execute_batch") {
         const runners = await this.options.host.createBatchRunners({
@@ -166,7 +166,7 @@ export class TaskRuntime {
           batch: currentDecision.decision.batch,
         });
         for (const runner of runners) {
-          inflight.set(runner.id, runner);
+          inflight.add(runner);
         }
         currentDecision = { kind: "empty" };
       }
@@ -213,12 +213,12 @@ export class TaskRuntime {
       }
 
       const settled = await Promise.race(
-        [...inflight.values()].map(async (runner) => ({
-          id: runner.id,
+        [...inflight].map(async (runner) => ({
+          runner,
           result: await runner.promise,
         })),
       );
-      inflight.delete(settled.id);
+      inflight.delete(settled.runner);
       const reduced = applyAgentResultToGraphState(currentState, settled.result);
       currentState = reduced.state;
       currentDecision = { kind: "decided", decision: reduced.decision };

@@ -46,7 +46,8 @@ export interface OpenCodeExecutionResult {
 }
 
 export interface OpenCodeRuntimeActivity {
-  id: string;
+  sourceMessageId: string;
+  sourcePartIndex: number;
   kind: "tool" | "message" | "thinking" | "step";
   label: string;
   detail: string;
@@ -1455,11 +1456,12 @@ export class OpenCodeClient {
         continue;
       }
 
-      const extracted = this.extractRuntimeActivities(parts, normalized, messageIndex);
+      const extracted = this.extractRuntimeActivities(parts, normalized);
 
       if (extracted.length === 0 && normalized.content.trim()) {
         extracted.push({
-          id: `${normalized.id}:message`,
+          sourceMessageId: normalized.id,
+          sourcePartIndex: 0,
           kind: "message",
           label: this.shortenText(normalized.content, 48),
           detail: normalized.content.trim(),
@@ -1518,7 +1520,6 @@ export class OpenCodeClient {
   private extractRuntimeActivities(
     parts: Array<Record<string, unknown>>,
     message: OpenCodeNormalizedMessage,
-    messageIndex: number,
   ): OpenCodeRuntimeActivity[] {
     const activities: OpenCodeRuntimeActivity[] = [];
 
@@ -1532,7 +1533,8 @@ export class OpenCodeClient {
       if (toolNames[0]) {
         const toolCallDetail = this.extractToolCallDetail(part);
         activities.push({
-          id: `${message.id}:${messageIndex}:${partIndex}:tool`,
+          sourceMessageId: message.id,
+          sourcePartIndex: partIndex,
           kind: "tool",
           label: toolNames[0],
           detail: toolCallDetail.detail,
@@ -1548,7 +1550,8 @@ export class OpenCodeClient {
       const reasoningDetails = this.collectReasoningDetails(part);
       if (reasoningDetails[0]) {
         activities.push({
-          id: `${message.id}:${messageIndex}:${partIndex}:thinking`,
+          sourceMessageId: message.id,
+          sourcePartIndex: partIndex,
           kind: "thinking",
           label: this.shortenText(reasoningDetails[0], 48),
           detail: reasoningDetails[0],
@@ -1566,7 +1569,8 @@ export class OpenCodeClient {
         if (stepName) {
           const detailCandidates = this.collectPartDetailCandidates(part);
           activities.push({
-            id: `${message.id}:${messageIndex}:${partIndex}:step`,
+            sourceMessageId: message.id,
+            sourcePartIndex: partIndex,
             kind: "step",
             label: stepName,
             detail: detailCandidates[0] || stepName,
@@ -1583,7 +1587,8 @@ export class OpenCodeClient {
       const detailCandidates = this.collectPartDetailCandidates(part);
       if (detailCandidates[0]) {
         activities.push({
-          id: `${message.id}:${messageIndex}:${partIndex}:message`,
+          sourceMessageId: message.id,
+          sourcePartIndex: partIndex,
           kind: "message",
           label: this.shortenText(detailCandidates[0], 48),
           detail: detailCandidates[0],

@@ -65,6 +65,19 @@ const CHAT_EXECUTION_BUBBLE_MAX_HEIGHT_PX = 300;
 const CHAT_VISIBLE_FEED_ITEM_LIMIT = 30;
 type RunningChatFeedExecutionItem = Exclude<ChatFeedExecutionItem, { status: "settled" }>;
 
+function buildChatFeedItemRenderKey(
+  item: ReturnType<typeof buildChatFeedItems>[number],
+) {
+  return item.type === "message"
+    ? `message:${item.message.id}`
+    : `execution:${item.agentId}:${item.anchorMessageId}:${item.runCount}`;
+}
+
+function resolveHistoryTailVersion(items: readonly AgentHistoryItem[]) {
+  const last = items.at(-1);
+  return last ? `${items.length}:${last.sortTimestamp}` : "0:";
+}
+
 function getRuntimeExecutionBadgePresentation() {
   return {
     ariaLabel: "运行中",
@@ -409,9 +422,9 @@ function RunningExecutionBubble({
           }}
         >
           {item.historyItems.length > 0 ? (
-            item.historyItems.map((historyItem) => (
+            item.historyItems.map((historyItem, index) => (
               <article
-                key={historyItem.id}
+                key={`${historyItem.sortTimestamp}:${historyItem.tone}:${historyItem.label}:${index}`}
                 className={`rounded-[10px] border px-2 py-1.5 ${getExecutionHistoryItemClassName(historyItem)}`}
               >
                 <div className="min-w-0 flex-1 select-text">
@@ -470,7 +483,7 @@ export function ChatWindow({
   const messageViewportRef = useRef<HTMLDivElement | null>(null);
   const executionViewportRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const executionShouldStickToBottomRef = useRef<Record<string, boolean>>({});
-  const executionLastItemIdRef = useRef<Record<string, string | null>>({});
+  const executionLastTailVersionRef = useRef<Record<string, string | null>>({});
   const shouldStickToBottomRef = useRef(true);
   const copyResetTimerRef = useRef<number | null>(null);
   const mentionQuery = mentionContext?.query ?? null;
@@ -553,26 +566,26 @@ export function ChatWindow({
   }, [visibleFeedItems, task?.task.id]);
 
   useEffect(() => {
-    const activeRunningExecutionIds = new Set(
+    const activeRunningExecutionKeys = new Set(
       visibleFeedItems
         .filter((item): item is RunningChatFeedExecutionItem =>
           item.type === "execution" && item.status !== "settled")
-        .map((item) => item.id),
+        .map((item) => buildChatFeedItemRenderKey(item)),
     );
 
-    for (const executionId of Object.keys(executionViewportRefs.current)) {
-      if (!activeRunningExecutionIds.has(executionId)) {
-        delete executionViewportRefs.current[executionId];
+    for (const executionKey of Object.keys(executionViewportRefs.current)) {
+      if (!activeRunningExecutionKeys.has(executionKey)) {
+        delete executionViewportRefs.current[executionKey];
       }
     }
-    for (const executionId of Object.keys(executionShouldStickToBottomRef.current)) {
-      if (!activeRunningExecutionIds.has(executionId)) {
-        delete executionShouldStickToBottomRef.current[executionId];
+    for (const executionKey of Object.keys(executionShouldStickToBottomRef.current)) {
+      if (!activeRunningExecutionKeys.has(executionKey)) {
+        delete executionShouldStickToBottomRef.current[executionKey];
       }
     }
-    for (const executionId of Object.keys(executionLastItemIdRef.current)) {
-      if (!activeRunningExecutionIds.has(executionId)) {
-        delete executionLastItemIdRef.current[executionId];
+    for (const executionKey of Object.keys(executionLastTailVersionRef.current)) {
+      if (!activeRunningExecutionKeys.has(executionKey)) {
+        delete executionLastTailVersionRef.current[executionKey];
       }
     }
   }, [visibleFeedItems]);
@@ -584,18 +597,19 @@ export function ChatWindow({
         continue;
       }
 
-      const nextLastItemId = feedItem.historyItems.at(-1)?.id ?? null;
-      const previousLastItemId = executionLastItemIdRef.current[feedItem.id] ?? null;
-      const shouldStickToBottom = executionShouldStickToBottomRef.current[feedItem.id] ?? true;
+      const executionKey = buildChatFeedItemRenderKey(feedItem);
+      const nextHistoryTailVersion = resolveHistoryTailVersion(feedItem.historyItems);
+      const previousHistoryTailVersion = executionLastTailVersionRef.current[executionKey] ?? null;
+      const shouldStickToBottom = executionShouldStickToBottomRef.current[executionKey] ?? true;
 
       if (shouldAutoScrollTopologyHistory({
-        previousLastItemId,
-        nextLastItemId,
+        previousTailVersion: previousHistoryTailVersion,
+        nextTailVersion: nextHistoryTailVersion,
         shouldStickToBottom,
       })) {
         frameIds.push(
           requestAnimationFrame(() => {
-            const viewport = executionViewportRefs.current[feedItem.id];
+            const viewport = executionViewportRefs.current[executionKey];
             if (!viewport) {
               return;
             }
@@ -604,7 +618,7 @@ export function ChatWindow({
         );
       }
 
-      executionLastItemIdRef.current[feedItem.id] = nextLastItemId;
+      executionLastTailVersionRef.current[executionKey] = nextHistoryTailVersion;
     }
 
     return () => {
@@ -800,32 +814,33 @@ export function ChatWindow({
         className={`min-h-0 min-w-0 flex-1 space-y-1.5 overflow-y-auto ${PANEL_SECTION_BODY_CLASS}`}
       >
         {visibleFeedItems.length > 0 ? (
-          visibleFeedItems.map((item) => (
-            item.type === "message" ? (
+          visibleFeedItems.map((item) => {
+            const renderKey = buildChatFeedItemRenderKey(item);
+            return item.type === "message" ? (
               <MessageBubble
-                key={item.id}
+                key={renderKey}
                 message={item.message}
                 taskAgentEntries={taskAgentEntries}
                 onOpenAgentTerminal={onOpenAgentTerminal}
               />
             ) : item.status === "settled" ? (
               <MessageBubble
-                key={item.id}
+                key={renderKey}
                 message={item.message}
                 taskAgentEntries={taskAgentEntries}
                 onOpenAgentTerminal={onOpenAgentTerminal}
               />
             ) : (
               <RunningExecutionBubble
-                key={item.id}
+                key={renderKey}
                 item={item}
                 taskAgentEntries={taskAgentEntries}
                 onOpenAgentTerminal={onOpenAgentTerminal}
                 viewportRef={(element) => {
-                  executionViewportRefs.current[item.id] = element;
+                  executionViewportRefs.current[renderKey] = element;
                 }}
                 onViewportScroll={(event) => {
-                  executionShouldStickToBottomRef.current[item.id] =
+                  executionShouldStickToBottomRef.current[renderKey] =
                     shouldStickTopologyHistoryToBottom({
                       scrollHeight: event.currentTarget.scrollHeight,
                       clientHeight: event.currentTarget.clientHeight,
@@ -833,8 +848,8 @@ export function ChatWindow({
                     });
                 }}
               />
-            )
-          ))
+            );
+          })
         ) : (
           <div className="rounded-[8px] border border-dashed border-border/70 bg-card/60 px-4 py-4 text-sm text-muted-foreground">
             还没有消息

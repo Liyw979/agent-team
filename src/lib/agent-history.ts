@@ -16,7 +16,6 @@ import { stripDecisionResponseMarkup } from "@shared/decision-response";
 import { normalizeDecisionDisplayContent } from "../runtime/decision-parser";
 
 export interface AgentHistoryItem {
-  id: string;
   label: string;
   detailSnippet: string;
   detail: string;
@@ -156,7 +155,6 @@ function mergeAdjacentRuntimeToolHistoryItems(items: AgentHistoryItem[]) {
 
     mergedItems.push({
       ...firstToolItem,
-      id: `${firstToolItem.id}::tool-group::${lastToolItem.id}`,
       label: `工具（${pendingToolItems.length}）`,
       detailSnippet: buildHistoryDetailSnippet(detail),
       detail,
@@ -243,7 +241,6 @@ function mapAgentFinalHistoryItem(input: {
     : normalizeHistoryDetail(input.message.content, allowedTriggers);
 
   return {
-    id: input.message.id,
     label: presentation.label,
     detailSnippet: buildHistoryDetailSnippet(detail),
     detail,
@@ -306,7 +303,6 @@ function buildProgressHistoryItems(input: {
             ? normalizeToolHistory(message.label, message.detail)
             : normalizeHistoryDetail(message.detail || message.label, input.allowedTriggers);
         const runtimeItem = {
-          id: `${input.agentId}-runtime-${message.id}-${index}`,
           label: presentation.label,
           detailSnippet: buildHistoryDetailSnippet(detail),
           detail,

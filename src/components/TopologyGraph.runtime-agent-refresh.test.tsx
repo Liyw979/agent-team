@@ -885,9 +885,14 @@ test("TopologyGraph 的单条最终历史消息按文字自然撑高，滚动发
     });
 
     const viewport = rendered.window.document.querySelector('[data-topology-history-viewport="线索发现"]');
-    const firstItem = rendered.window.document.querySelector('[data-topology-history-item="runtime-final-long"]');
-    const secondItem = rendered.window.document.querySelector('[data-topology-history-item="runtime-final-next"]');
     assert.ok(viewport instanceof HTMLElement);
+    const historyItems = [...viewport.querySelectorAll("[data-topology-history-item]")];
+    const firstItem = historyItems.find((item) =>
+      item.textContent?.includes("很长的最终结果消息"),
+    );
+    const secondItem = historyItems.find((item) =>
+      item.textContent?.includes("第二条最终结果消息"),
+    );
     assert.ok(firstItem instanceof HTMLElement);
     assert.ok(secondItem instanceof HTMLElement);
     const viewportParent = viewport.parentElement;

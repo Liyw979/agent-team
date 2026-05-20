@@ -8,7 +8,6 @@ export interface TaskRuntimeInputEvent {
 }
 
 export interface TaskRuntimeBatchRunner {
-  id: string;
   agentId: string;
   promise: Promise<GraphAgentResult>;
 }
