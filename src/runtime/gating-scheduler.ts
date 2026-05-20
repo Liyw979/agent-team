@@ -21,9 +21,11 @@ export interface GatingAgentState {
 export interface GatingDispatchPlan {
   sourceAgentId: string;
   sourceContent: string;
-  displayTargets: string[];
+  /** Targets selected by topology routing before readiness is split into ready and queued. */
   triggerTargets: string[];
+  /** Targets whose topology dependencies are satisfied and whose agent is not running. */
   readyTargets: string[];
+  /** Targets whose topology dependencies are satisfied but whose agent is already running. */
   queuedTargets: string[];
 }
 
@@ -123,7 +125,6 @@ export class GatingScheduler {
     return {
       sourceAgentId,
       sourceContent,
-      displayTargets: targetNames,
       triggerTargets: [...targetNames],
       readyTargets: dispatchTargets.readyTargets,
       queuedTargets: dispatchTargets.queuedTargets,
@@ -183,7 +184,6 @@ export class GatingScheduler {
       ? {
           sourceAgentId,
           sourceContent,
-          displayTargets: [...readyTargets],
           triggerTargets: [...readyTargets],
           readyTargets: [...readyTargets],
           queuedTargets: [],

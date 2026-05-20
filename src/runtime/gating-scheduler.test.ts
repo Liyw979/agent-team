@@ -61,7 +61,6 @@ test("handoff 首轮会放行 default 下游", () => {
   assert.deepEqual(plan, {
     sourceAgentId: "Build",
     sourceContent: "Build 已完成",
-    displayTargets: ["UnitTest", "TaskReview"],
     triggerTargets: ["UnitTest", "TaskReview"],
     readyTargets: ["UnitTest", "TaskReview"],
     queuedTargets: [],
@@ -90,7 +89,6 @@ test("triggered 派发会按 trigger 过滤目标", () => {
   assert.deepEqual(plan, {
     sourceAgentId: "Judge",
     sourceContent: "请继续修订",
-    displayTargets: ["Build", "Doc"],
     triggerTargets: ["Build", "Doc"],
     readyTargets: ["Build", "Doc"],
     queuedTargets: [],
@@ -166,7 +164,6 @@ test("同一 trigger 多入边 triggered 任一来源满足后即可派发", () 
   assert.deepEqual(plan, {
     sourceAgentId: "漏洞论证-1",
     sourceContent: "进入总结",
-    displayTargets: ["讨论总结-1"],
     triggerTargets: ["讨论总结-1"],
     readyTargets: ["讨论总结-1"],
     queuedTargets: [],
@@ -214,7 +211,6 @@ test("同一 trigger 多入边 triggered 的另一来源同样可以直接派发
   assert.deepEqual(plan, {
     sourceAgentId: "误报论证-1",
     sourceContent: "进入总结",
-    displayTargets: ["讨论总结-1"],
     triggerTargets: ["讨论总结-1"],
     readyTargets: ["讨论总结-1"],
     queuedTargets: [],
