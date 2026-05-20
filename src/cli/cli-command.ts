@@ -4,16 +4,16 @@ export type ParsedCliCommand =
   | { kind: "help" }
   | {
       kind: "task.headless";
-      cwd?: string;
-      file?: string;
-      message?: string;
+      cwd: string;
+      file: string;
+      message: string;
       showMessage: boolean;
     }
   | {
       kind: "task.ui";
-      cwd?: string;
-      file?: string;
-      message?: string;
+      cwd: string;
+      file: string;
+      message: string;
       showMessage: boolean;
     };
 
@@ -25,55 +25,44 @@ function configureProgram(program: Command) {
     .allowExcessArguments(false)
     .exitOverride()
     .configureOutput({
-      writeOut: () => undefined,
-      writeErr: () => undefined,
+      writeOut: () => {},
+      writeErr: () => {},
     });
 }
 
-function buildCliProgram(onCommand?: (command: ParsedCliCommand) => void) {
-  const emit = onCommand ?? (() => undefined);
+interface TaskCommandOptions {
+  cwd: string;
+  file: string;
+  message: string;
+  showMessage: boolean;
+}
+
+function buildCliProgram(): readonly [Command, Command, Command] {
   const program = configureProgram(new Command());
 
   const task = program.command("task").description("Task 会话相关命令");
-  task
+  const taskHeadless = task
     .command("headless")
     .description("运行新 task，任务完成后退出 CLI")
-    .option("--cwd <path>", "指定工作目录")
-    .option("--file <topology-file>", "团队拓扑 YAML 文件路径")
-    .option("--message <message>", "首条消息")
-    .option("--show-message", "展示完整消息记录")
-    .action((options) => {
-      emit({
-        kind: "task.headless",
-        cwd: options.cwd,
-        file: options.file,
-        message: options.message,
-        showMessage: options.showMessage === true,
-      });
-    });
+    .option("--cwd <path>", "指定工作目录", "")
+    .option("--file <topology-file>", "团队拓扑 YAML 文件路径", "")
+    .option("--message <message>", "首条消息", "")
+    .option("--show-message", "展示完整消息记录", false);
 
-  task
+  const taskUi = task
     .command("ui")
     .description("新建 task，并在浏览器中打开网页界面")
-    .option("--cwd <path>", "指定工作目录")
-    .option("--file <topology-file>", "团队拓扑 YAML 文件路径")
-    .option("--message <message>", "新建 task 时的首条消息")
-    .option("--show-message", "展示完整消息记录")
-    .action((options) => {
-      emit({
-        kind: "task.ui",
-        cwd: options.cwd,
-        file: options.file,
-        message: options.message,
-        showMessage: options.showMessage === true,
-      });
-    });
+    .option("--cwd <path>", "指定工作目录", "")
+    .option("--file <topology-file>", "团队拓扑 YAML 文件路径", "")
+    .option("--message <message>", "新建 task 时的首条消息", "")
+    .option("--show-message", "展示完整消息记录", false);
 
-  return program;
+  return [program, taskHeadless, taskUi];
 }
 
 export function buildCliHelpText(): string {
-  const commanderHelp = buildCliProgram().helpInformation().trimEnd();
+  const [program] = buildCliProgram();
+  const commanderHelp = program.helpInformation().trimEnd();
   const appendix = [
     "",
     "补充命令示例：",
@@ -94,10 +83,7 @@ export function parseCliCommand(argv: string[]): ParsedCliCommand {
     return { kind: "help" };
   }
 
-  let parsed: ParsedCliCommand | null = null;
-  const program = buildCliProgram((command) => {
-    parsed = command;
-  });
+  const [program, taskHeadless, taskUi] = buildCliProgram();
 
   try {
     program.parse(argv, { from: "user" });
@@ -108,5 +94,26 @@ export function parseCliCommand(argv: string[]): ParsedCliCommand {
     throw error;
   }
 
-  return parsed ?? { kind: "help" };
+  if (argv[0] === "task" && argv[1] === "headless") {
+    const options = taskHeadless.opts<TaskCommandOptions>();
+    return {
+      kind: "task.headless",
+      cwd: options.cwd,
+      file: options.file,
+      message: options.message,
+      showMessage: options.showMessage,
+    };
+  }
+  if (argv[0] === "task" && argv[1] === "ui") {
+    const options = taskUi.opts<TaskCommandOptions>();
+    return {
+      kind: "task.ui",
+      cwd: options.cwd,
+      file: options.file,
+      message: options.message,
+      showMessage: options.showMessage,
+    };
+  }
+
+  throw new Error("CLI 内部错误：命令解析未产生有效结果。");
 }
