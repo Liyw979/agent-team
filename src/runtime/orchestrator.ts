@@ -25,7 +25,6 @@ import {
   normalizeGroupRule,
   normalizeTopologyEdgeTrigger,
   resolveTriggerRoutingKindForSource,
-  type InitializeTaskPayload,
   getWorkspaceNameFromPath,
   type MessageRecord,
   type OpenAgentTerminalPayload,
@@ -487,13 +486,13 @@ export class Orchestrator {
     );
   }
 
-  async initializeTask(payload: InitializeTaskPayload): Promise<TaskSnapshot> {
+  async initializeTask(): Promise<TaskSnapshot> {
     const agents = this.listWorkspaceAgents();
     validateProjectAgents();
     this.syncTopology(agents);
 
     return this.createTask(agents, {
-      title: (payload.title ?? "").trim() || "未命名任务",
+      title: "未命名任务",
       source: "initialize",
     });
   }
@@ -1210,7 +1209,7 @@ export class Orchestrator {
     const sessionId = await runWithTaskLogScope(task.id, async () => {
       await this.ensureTaskServer(task.id, injectedConfig);
       return this.opencodeClient.createSession(
-        `${task.title}:${agent.id}`,
+        agent.id,
       );
     });
     overlay.agentSessions.set(agent.id, sessionId);
