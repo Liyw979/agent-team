@@ -591,10 +591,6 @@ export interface SubmitTaskPayload {
   mentionAgentId?: string;
 }
 
-export interface InitializeTaskPayload {
-  title?: string;
-}
-
 export interface OpenAgentTerminalPayload {
   agentId: string;
 }
