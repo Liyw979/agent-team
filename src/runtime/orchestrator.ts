@@ -205,7 +205,6 @@ interface TaskRuntimeOverlay {
   taskId: string;
   attachBaseUrl: string;
   agentSessions: Map<string, string>;
-  persistedActivityIdsByAgent: Map<string, Set<string>>;
   activityFreshnessByMessageId: Map<string, RuntimeActivityFreshness>;
 }
 
@@ -1131,7 +1130,6 @@ export class Orchestrator {
       taskId,
       attachBaseUrl: "",
       agentSessions: new Map(),
-      persistedActivityIdsByAgent: new Map(),
       activityFreshnessByMessageId: new Map(),
     };
     this.taskRuntimeOverlays.set(taskId, created);
@@ -1757,7 +1755,7 @@ export class Orchestrator {
       }
     }
 
-    return batch.jobs.map((job, index) => {
+    return batch.jobs.map((job) => {
       this.ensureRuntimeTaskAgent(task, job.agentId);
       const executableAgentId = this.resolveExecutableAgentId(
         state,
@@ -1824,7 +1822,6 @@ export class Orchestrator {
       }
       if (prompt.mode === "control") {
         return {
-          id: `${batch.source.kind === "agent" ? batch.source.agentId : "user"}:${job.agentId}:${index}:${Date.now()}`,
           agentId: job.agentId,
           promise: this.executeRuntimeAgentOnce(
             task,
@@ -1837,7 +1834,6 @@ export class Orchestrator {
         };
       }
       return {
-        id: `${batch.source.kind === "agent" ? batch.source.agentId : "user"}:${job.agentId}:${index}:${Date.now()}`,
         agentId: job.agentId,
           promise: this.executeRuntimeAgentOnce(
             task,
@@ -2369,23 +2365,6 @@ export class Orchestrator {
     );
   }
 
-  private getPersistedActivityIdsForAgent(
-    taskId: string,
-    agentId: string,
-  ): Set<string> {
-    const overlay = this.taskRuntimeOverlays.get(taskId);
-    if (!overlay) {
-      throw new Error(`Task ${taskId} 缺少运行态 overlay，无法持久化过程消息`);
-    }
-    const existing = overlay.persistedActivityIdsByAgent.get(agentId);
-    if (existing) {
-      return existing;
-    }
-    const created = new Set<string>();
-    overlay.persistedActivityIdsByAgent.set(agentId, created);
-    return created;
-  }
-
   private createAgentProgressMessage(input: {
     taskId: string;
     agentId: string;
@@ -2395,7 +2374,7 @@ export class Orchestrator {
   }): AgentProgressMessageRecord {
     const detail = input.activity.detail.trim() || input.activity.label.trim();
     return {
-      id: `${input.taskId}:${input.agentId}:${input.runCount}:${input.activity.id}`,
+      id: `${input.taskId}:${input.agentId}:${input.runCount}:${input.activity.sourceMessageId}:${input.activity.sourcePartIndex}`,
       taskId: input.taskId,
       content: detail,
       sender: input.agentId,
@@ -2408,6 +2387,23 @@ export class Orchestrator {
       sessionId: input.sessionId,
       runCount: input.runCount,
     };
+  }
+
+  private listPersistedAgentProgressMessages(input: {
+    taskId: string;
+    agentId: string;
+    sessionId: string;
+    runCount: number;
+  }): AgentProgressMessageRecord[] {
+    return this.store
+      .listMessages(input.taskId)
+      .filter(
+        (message): message is AgentProgressMessageRecord =>
+          message.kind === "agent-progress"
+          && message.sender === input.agentId
+          && message.sessionId === input.sessionId
+          && message.runCount === input.runCount,
+      );
   }
 
   private shouldRefreshAgentProgressDetail(
@@ -2446,19 +2442,24 @@ export class Orchestrator {
           sessionId,
         ));
 
-      const persistedActivityIds = this.getPersistedActivityIdsForAgent(
-        input.taskId,
-        agentId,
-      );
       const runCount = this.getTaskAgentRunCount(
         input.taskId,
         agentId,
       );
-      const nextActivities = runtime.activities.filter(
-        (activity) => {
-          if (!persistedActivityIds.has(activity.id)) {
-            return true;
-          }
+      const existingProgressMessages = this.listPersistedAgentProgressMessages({
+        taskId: input.taskId,
+        agentId,
+        sessionId,
+        runCount,
+      });
+      const existingProgressMessageById = new Map(
+        existingProgressMessages.map((message) => [
+          message.id,
+          message,
+        ]),
+      );
+      const nextActivities = runtime.activities
+        .filter((activity) => {
           const nextFreshness = buildRuntimeActivityFreshness(activity);
           const candidateMessage = this.createAgentProgressMessage({
             taskId: input.taskId,
@@ -2467,23 +2468,18 @@ export class Orchestrator {
             runCount,
             activity,
           });
-          const existingMessage = this.store
-            .listMessages(input.taskId)
-            .find(
-              (message): message is AgentProgressMessageRecord =>
-                message.id === candidateMessage.id
-                && message.kind === "agent-progress",
-            );
+          const existingMessage = existingProgressMessageById.get(
+            candidateMessage.id,
+          );
           if (!existingMessage) {
-            return false;
+            return true;
           }
           return this.shouldRefreshAgentProgressDetail(
             input.taskId,
             existingMessage,
             nextFreshness,
           );
-        },
-      );
+        });
 
       for (const activity of nextActivities) {
         const message = this.createAgentProgressMessage({
@@ -2497,7 +2493,6 @@ export class Orchestrator {
           message.id,
           buildRuntimeActivityFreshness(activity),
         );
-        persistedActivityIds.add(activity.id);
         emittedMessages.push(message);
       }
     }

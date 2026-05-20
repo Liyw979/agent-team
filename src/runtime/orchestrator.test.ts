@@ -110,7 +110,6 @@ function withAgentNodeRecords(
 const activeOrchestrators = new Set<Orchestrator>();
 
 type TestBatchRunner = {
-  id: string;
   agentId: string;
   promise: Promise<GraphAgentResult>;
 };
@@ -4131,7 +4130,8 @@ test("agent 运行中时会先把过程消息追加到 task messages", async () 
     activeToolNames: ["read"],
     activities: [
       {
-        id: "runtime-activity-1",
+        sourceMessageId: "runtime-message-1",
+        sourcePartIndex: 0,
         kind: "tool",
         label: "read",
         detail: "参数: filePath=/tmp/demo.txt",
@@ -4238,7 +4238,8 @@ test("runStandaloneAgent 会用后续同步拿到的真实参数覆盖占位 age
       activeToolNames: ["read"],
       activities: [
         {
-          id: "runtime-activity-1",
+          sourceMessageId: "runtime-message-1",
+          sourcePartIndex: 0,
           kind: "tool",
           label: "read",
           detail:
@@ -4363,7 +4364,8 @@ test("runStandaloneAgent 在同为 complete 时会按结构化来源优先级覆
       activeToolNames: ["read"],
       activities: [
         {
-          id: "runtime-activity-1",
+          sourceMessageId: "runtime-message-1",
+          sourcePartIndex: 0,
           kind: "tool",
           label: "read",
           detail: runtimeCallCount === 1

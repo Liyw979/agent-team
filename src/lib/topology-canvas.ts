@@ -1,5 +1,4 @@
 interface TopologyCanvasNodeLayout {
-  id: string;
   x: number;
   y: number;
   width: number;
@@ -117,7 +116,6 @@ export function buildTopologyCanvasLayout(input: {
   const height = availableHeight ?? topPadding + rowCount * nodeHeight + Math.max(0, rowCount - 1) * rowGap + bottomPadding;
 
   const rowItemCounts = getRowItemCounts(rowCount);
-  let nodeIndex = 0;
   const nodes: TopologyCanvasNodeLayout[] = [];
   for (let row = 0; row < rowCount; row += 1) {
     const rowItemCount = rowItemCounts[row] ?? 0;
@@ -130,19 +128,13 @@ export function buildTopologyCanvasLayout(input: {
     const y = topPadding + row * (nodeHeight + (rowCount > 1 ? input.rowGap ?? 14 : 0));
 
     for (let column = 0; column < rowItemCount; column += 1) {
-      const id = input.nodes[nodeIndex];
-      if (!id) {
-        continue;
-      }
       const x = rowOffsetX + column * (nodeWidth + rowGap);
       nodes.push({
-        id,
         x,
         y,
         width: nodeWidth,
         height: nodeHeight,
       });
-      nodeIndex += 1;
     }
   }
 

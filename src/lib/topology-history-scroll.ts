@@ -1,6 +1,6 @@
 type TopologyHistoryAutoScrollInput = {
-  previousLastItemId: string | null;
-  nextLastItemId: string | null;
+  previousTailVersion: string | null;
+  nextTailVersion: string | null;
   shouldStickToBottom: boolean;
 };
 
@@ -13,7 +13,7 @@ type TopologyHistoryViewportMetrics = {
 interface TopologyHistoryAutoScrollTrackerState {
   viewport: HTMLDivElement | null;
   shouldStickToBottom: boolean;
-  lastItemId: string | null;
+  lastTailVersion: string | null;
 }
 
 export function shouldAutoScrollTopologyHistory(
@@ -23,7 +23,7 @@ export function shouldAutoScrollTopologyHistory(
     return false;
   }
 
-  return input.previousLastItemId !== input.nextLastItemId;
+  return input.previousTailVersion !== input.nextTailVersion;
 }
 
 export function shouldStickTopologyHistoryToBottom(
@@ -45,7 +45,7 @@ export function createTopologyHistoryAutoScrollTracker() {
   const state: TopologyHistoryAutoScrollTrackerState = {
     viewport: null,
     shouldStickToBottom: true,
-    lastItemId: null,
+    lastTailVersion: null,
   };
 
   return {
@@ -57,23 +57,23 @@ export function createTopologyHistoryAutoScrollTracker() {
     },
     reinitialize() {
       state.shouldStickToBottom = true;
-      state.lastItemId = null;
+      state.lastTailVersion = null;
     },
     reset() {
       state.viewport = null;
       state.shouldStickToBottom = true;
-      state.lastItemId = null;
+      state.lastTailVersion = null;
     },
-    sync(nextLastItemId: string | null): number | null {
+    sync(nextTailVersion: string | null): number | null {
       if (!state.viewport) {
-        state.lastItemId = nextLastItemId;
+        state.lastTailVersion = nextTailVersion;
         return null;
       }
 
       if (
         shouldAutoScrollTopologyHistory({
-          previousLastItemId: state.lastItemId,
-          nextLastItemId,
+          previousTailVersion: state.lastTailVersion,
+          nextTailVersion,
           shouldStickToBottom: state.shouldStickToBottom,
         })
       ) {
@@ -83,11 +83,11 @@ export function createTopologyHistoryAutoScrollTracker() {
           }
           scrollTopologyHistoryToBottom(state.viewport);
         });
-        state.lastItemId = nextLastItemId;
+        state.lastTailVersion = nextTailVersion;
         return frameId;
       }
 
-      state.lastItemId = nextLastItemId;
+      state.lastTailVersion = nextTailVersion;
       return null;
     },
   };

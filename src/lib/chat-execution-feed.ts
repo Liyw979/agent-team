@@ -12,7 +12,6 @@ import {
 import { mergeTaskChatMessages, type ChatMessageItem } from "./chat-messages";
 
 interface ChatExecutionWindowBase {
-  id: string;
   agentId: string;
   runCount: number;
   anchorMessageId: string;
@@ -37,25 +36,24 @@ type ChatExecutionWindow =
 
 type ChatFeedMessageItem = {
   type: "message";
-  id: string;
   message: ChatMessageItem;
 };
 
 export type ChatFeedExecutionItem =
   | {
       type: "execution";
-      id: string;
       status: "running";
       agentId: string;
+      runCount: number;
       anchorMessageId: string;
       startedAt: UtcIsoTimestamp;
       historyItems: AgentHistoryItem[];
     }
   | {
       type: "execution";
-      id: string;
       status: "settled";
       agentId: string;
+      runCount: number;
       anchorMessageId: string;
       startedAt: UtcIsoTimestamp;
       completedAt: UtcIsoTimestamp;
@@ -150,7 +148,6 @@ export function buildChatExecutionWindows(
         );
       }
       return {
-        id: `${message.id}:${agentId}:${targetIndex}`,
         status: "running" as const,
         agentId,
         runCount,
@@ -240,7 +237,6 @@ export function buildChatFeedItems(input: {
     if (!absorbedMergedMessageIds.has(mergedMessage.id)) {
       feedItems.push({
         type: "message",
-        id: mergedMessage.id,
         message: mergedMessage,
       });
     }
@@ -256,9 +252,9 @@ export function buildChatFeedItems(input: {
 
         feedItems.push({
           type: "execution",
-          id: window.id,
           status: "settled",
           agentId: window.agentId,
+          runCount: window.runCount,
           anchorMessageId: window.anchorMessageId,
           startedAt: window.startedAt,
           completedAt: window.completedAt,
@@ -269,9 +265,9 @@ export function buildChatFeedItems(input: {
 
       feedItems.push({
         type: "execution",
-        id: window.id,
         status: "running",
         agentId: window.agentId,
+        runCount: window.runCount,
         anchorMessageId: window.anchorMessageId,
         startedAt: window.startedAt,
         historyItems: buildAgentExecutionHistoryItems({

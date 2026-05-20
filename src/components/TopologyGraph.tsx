@@ -92,7 +92,10 @@ function TopologyAgentHistoryList(input: {
   historyItems: AgentHistoryItem[];
 }) {
   const historyScrollTrackerRef = useRef(createTopologyHistoryAutoScrollTracker());
-  const lastHistoryItemId = input.historyItems.map((item) => item.id).at(-1) ?? null;
+  const lastHistoryItem = input.historyItems.at(-1);
+  const historyTailVersion = lastHistoryItem
+    ? `${input.historyItems.length}:${lastHistoryItem.sortTimestamp}`
+    : "0:";
   const bindHistoryViewport = useCallback((viewport: HTMLDivElement | null) => {
     historyScrollTrackerRef.current.bindViewport(viewport);
   }, []);
@@ -102,13 +105,13 @@ function TopologyAgentHistoryList(input: {
   }, []);
 
   useLayoutEffect(() => {
-    const frameId = historyScrollTrackerRef.current.sync(lastHistoryItemId);
+    const frameId = historyScrollTrackerRef.current.sync(historyTailVersion);
     return () => {
       if (frameId !== null) {
         cancelAnimationFrame(frameId);
       }
     };
-  }, [lastHistoryItemId]);
+  }, [historyTailVersion]);
 
   return (
     <div
@@ -124,11 +127,11 @@ function TopologyAgentHistoryList(input: {
       data-topology-history-viewport={input.agentId}
     >
       <div className="space-y-1">
-        {input.historyItems.map((item) => (
+        {input.historyItems.map((item, index) => (
           <article
-            key={item.id}
+            key={`${item.sortTimestamp}:${item.tone}:${item.label}:${index}`}
             className={`${getTopologyHistoryItemButtonClassName()} min-w-0 flex-none border-slate-200 bg-slate-50 text-slate-800`}
-            data-topology-history-item={item.id}
+            data-topology-history-item={`${item.sortTimestamp}:${index}`}
           >
             <div className="min-w-0 flex-1 select-text">
               <div className="flex items-center justify-between gap-2">
@@ -474,6 +477,12 @@ export function TopologyGraph({
     );
   }
 
+  if (canvasLayout.nodes.length !== orderedNodeIds.length) {
+    throw new Error(
+      `拓扑布局节点数量异常：layout=${canvasLayout.nodes.length} display=${orderedNodeIds.length}`,
+    );
+  }
+
   return (
     <section className={PANEL_SURFACE_CLASS}>
       <header className={PANEL_HEADER_CLASS}>
@@ -512,7 +521,11 @@ export function TopologyGraph({
               height: `${canvasLayout.height}px`,
             }}
           >
-            {canvasLayout.nodes.map((node) => {
+            {orderedNodeIds.map((nodeName, index) => {
+              const node = canvasLayout.nodes[index];
+              if (!node) {
+                throw new Error(`拓扑布局缺少第 ${index + 1} 个节点坐标：${nodeName}`);
+              }
               const {
                 color,
                 content,
@@ -520,11 +533,11 @@ export function TopologyGraph({
                 headerActions,
                 attachDisabled,
                 attachTitle,
-              } = buildNodePresentation(node.id);
+              } = buildNodePresentation(nodeName);
               return (
                 <div
-                  key={`${task.task.id}:${node.id}`}
-                  data-topology-node-card={node.id}
+                  key={`${task.task.id}:${nodeName}`}
+                  data-topology-node-card={nodeName}
                   className="absolute flex flex-col overflow-hidden rounded-[14px] text-left transition"
                   style={{
                     left: `${node.x}px`,
@@ -545,10 +558,10 @@ export function TopologyGraph({
                   >
                     <div className="flex items-center justify-between gap-3">
                       <p
-                        title={node.id}
+                        title={nodeName}
                         className="min-w-0 flex-1 truncate text-base font-semibold text-foreground"
                       >
-                        {node.id}
+                        {nodeName}
                       </p>
                       <div className="shrink-0 flex items-center gap-2">
                         {headerActions.map((action) => {
@@ -557,7 +570,7 @@ export function TopologyGraph({
                               <button
                                 key={action}
                                 type="button"
-                                aria-label={`打开 ${node.id} 的 attach 终端`}
+                                aria-label={`打开 ${nodeName} 的 attach 终端`}
                                 title={attachTitle}
                                 disabled={attachDisabled}
                                 onClick={(event) => {
@@ -565,7 +578,7 @@ export function TopologyGraph({
                                   if (attachDisabled) {
                                     return;
                                   }
-                                  onOpenAgentTerminal(node.id);
+                                  onOpenAgentTerminal(nodeName);
                                 }}
                                 className="inline-flex h-6 items-center justify-center gap-1 rounded-full border border-[#d8cdbd] bg-[#fffaf2] px-2 text-[10px] font-semibold text-foreground/76 shadow-[0_1px_0_rgba(255,255,255,0.45)] transition hover:border-[#cda27d] hover:bg-white disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:border-[#d8cdbd] disabled:hover:bg-[#fffaf2]"
                               >
@@ -593,7 +606,7 @@ export function TopologyGraph({
                   <div className="flex min-h-0 flex-1 flex-col px-1 py-1">
                     {content.kind === "final-history" ? (
                       <TopologyAgentHistoryList
-                        agentId={node.id}
+                        agentId={nodeName}
                         historyItems={content.items}
                       />
                     ) : (

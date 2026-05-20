@@ -22,18 +22,17 @@ test("buildTopologyCanvasLayout 会按面板宽高把节点横向纵向铺满", 
   assert.equal(layout.height, 360);
   assert.deepEqual(
     layout.nodes.map((node) => ({
-      id: node.id,
       x: node.x,
       y: node.y,
       width: node.width,
       height: node.height,
     })),
     [
-      { id: "BA", x: 20, y: 10, width: 348, height: 340 },
-      { id: "Build", x: 388, y: 10, width: 348, height: 340 },
-      { id: "CodeReview", x: 756, y: 10, width: 348, height: 340 },
-      { id: "UnitTest", x: 1124, y: 10, width: 348, height: 340 },
-      { id: "TaskReview", x: 1492, y: 10, width: 348, height: 340 },
+      { x: 20, y: 10, width: 348, height: 340 },
+      { x: 388, y: 10, width: 348, height: 340 },
+      { x: 756, y: 10, width: 348, height: 340 },
+      { x: 1124, y: 10, width: 348, height: 340 },
+      { x: 1492, y: 10, width: 348, height: 340 },
     ],
   );
   assert.equal(layout.edges.length, 0);
@@ -131,15 +130,14 @@ test("buildTopologyCanvasLayout 在只剩两个节点时也必须继续横向铺
   assert.equal(layout.height, 360);
   assert.deepEqual(
     layout.nodes.map((node) => ({
-      id: node.id,
       x: node.x,
       y: node.y,
       width: node.width,
       height: node.height,
     })),
     [
-      { id: "线索发现", x: 0, y: 0, width: 1015, height: 360 },
-      { id: "误报论证", x: 1033, y: 0, width: 1015, height: 360 },
+      { x: 0, y: 0, width: 1015, height: 360 },
+      { x: 1033, y: 0, width: 1015, height: 360 },
     ],
   );
 });
@@ -164,7 +162,6 @@ test("buildTopologyCanvasLayout 在只剩一个节点时也必须横向纵向同
   assert.equal(layout.height, 360);
   assert.deepEqual(layout.nodes, [
     {
-      id: "线索发现",
       x: 0,
       y: 0,
       width: 2048,
@@ -191,13 +188,7 @@ test("buildTopologyCanvasLayout 在五个节点横向铺排时将相邻卡片间
 
   assert.equal(layout.width, 1310);
   assert.equal(layout.height, 214);
-  assert.deepEqual(layout.nodes.map((node) => node.id), [
-    "线索发现",
-    "线索完备性评估",
-    "误报论证-9",
-    "漏洞论证-8",
-    "讨论总结-8",
-  ]);
+  assert.equal(layout.nodes.length, 5);
   assert.ok(layout.nodes.every((node) => node.width === 258.4));
   assert.equal(layout.nodes[0]?.x, 0);
   assert.equal(layout.nodes.at(-1)?.x, 1051.6);
