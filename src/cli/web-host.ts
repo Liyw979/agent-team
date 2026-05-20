@@ -20,10 +20,14 @@ import { buildUiUrl } from "./ui-host-launch";
 interface StartWebHostOptions {
   orchestrator: Orchestrator;
   port: number;
-  webRoot: string | null;
   userDataPath: string;
   bindHosts: UiLoopbackBindHost[];
+  staticAssets: StaticAssetsConfig;
 }
+
+type StaticAssetsConfig =
+  | { kind: "api-only" }
+  | { kind: "single-page-app"; webRoot: string };
 
 function json(response: http.ServerResponse, statusCode: number, body: unknown) {
   response.writeHead(statusCode, {
@@ -91,14 +95,24 @@ async function buildUiSnapshotPayload(
   options: Pick<StartWebHostOptions, "port" | "userDataPath">,
 ): Promise<UiSnapshotPayload> {
   const workspace = await orchestrator.getWorkspaceSnapshot();
-  const task = workspace.tasks.length === 0
-    ? null
-    : await orchestrator.getTaskSnapshot();
+  if (workspace.tasks.length === 0) {
+    return {
+      workspace,
+      task: null,
+      launchCwd: workspace.cwd,
+      taskLogFilePath: null,
+      taskUrl: buildUiUrl({
+        port: options.port,
+      }),
+    };
+  }
+
+  const task = await orchestrator.getTaskSnapshot();
   return {
     workspace,
     task,
     launchCwd: workspace.cwd,
-    taskLogFilePath: task ? buildTaskLogFilePath(options.userDataPath, task.task.id) : null,
+    taskLogFilePath: buildTaskLogFilePath(options.userDataPath, task.task.id),
     taskUrl: buildUiUrl({
       port: options.port,
     }),
@@ -218,8 +232,8 @@ export async function startWebHost(
         return;
       }
 
-      if (options.webRoot) {
-        const filePath = resolveStaticFilePath(options.webRoot, url.pathname);
+      if (options.staticAssets.kind === "single-page-app") {
+        const filePath = resolveStaticFilePath(options.staticAssets.webRoot, url.pathname);
         response.writeHead(200, buildStaticFileHeaders(filePath));
         fs.createReadStream(filePath).pipe(response);
         return;

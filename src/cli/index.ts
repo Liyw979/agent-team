@@ -280,7 +280,10 @@ async function ensureUiHost(
   const host = await startWebHost({
     orchestrator: context.orchestrator,
     port,
-    webRoot,
+    staticAssets: {
+      kind: "single-page-app",
+      webRoot,
+    },
     userDataPath: context.userDataPath,
     bindHosts: [...bindHosts],
   });
