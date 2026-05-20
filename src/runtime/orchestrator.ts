@@ -93,7 +93,7 @@ import type { CompiledTeamDsl } from "./team-dsl";
 import { shouldScheduleEventStreamReconnect } from "./event-stream-lifecycle";
 import { isExecutionDecisionAgent } from "./decision-agent-context";
 import { resolveTaskAgentIdsToPrewarm } from "./task-session-prewarm";
-import { appendAppLog } from "./app-log";
+import { appendAppLog, bindCurrentTaskLog } from "./app-log";
 import {
   buildInjectedConfigFromAgents,
   extractDslAgentsFromTopology,
@@ -101,7 +101,6 @@ import {
   validateProjectAgents,
 } from "./project-agent-source";
 import { launchTerminalCommand } from "./terminal-launcher";
-import { runWithTaskLogScope } from "./app-log";
 
 const RUNTIME_PROGRESS_SYNC_INTERVAL_MS = 200;
 
@@ -552,10 +551,9 @@ export class Orchestrator {
         }
 
         try {
-          const runtime = await runWithTaskLogScope(task.id, () =>
-            this.opencodeClient.getSessionRuntime(
-              agent.opencodeSessionId,
-            ));
+          const runtime = await this.opencodeClient.getSessionRuntime(
+            agent.opencodeSessionId,
+          );
           return {
             ...baseSnapshot,
             messageCount: runtime.messageCount,
@@ -603,6 +601,7 @@ export class Orchestrator {
       initializedAt: "",
     };
 
+    bindCurrentTaskLog(taskId);
     this.store.insertTask(task);
     for (const agent of agents) {
       this.store.insertTaskAgent({
@@ -1156,16 +1155,14 @@ export class Orchestrator {
     reason: "initialized" | "session-created",
     agentSessions: ReadonlyMap<string, string>,
   ) {
-    runWithTaskLogScope(taskId, () => {
-      appendAppLog(
-        "info",
-        "task.opencode_sessions_snapshot",
-        {
-          reason,
-          agentSessions: this.listTaskAgentSessionEntries(taskId, agentSessions),
-        },
-      );
-    });
+    appendAppLog(
+      "info",
+      "task.opencode_sessions_snapshot",
+      {
+        reason,
+        agentSessions: this.listTaskAgentSessionEntries(taskId, agentSessions),
+      },
+    );
   }
 
   private overlayTaskAgents(
@@ -1190,12 +1187,10 @@ export class Orchestrator {
       return existingSessionId;
     }
     const injectedConfig = buildInjectedConfigFromAgents(this.listWorkspaceAgents());
-    const sessionId = await runWithTaskLogScope(task.id, async () => {
-      await this.ensureTaskServer(task.id, injectedConfig);
-      return this.opencodeClient.createSession(
-        `${task.title}:${agent.id}`,
-      );
-    });
+    await this.ensureTaskServer(task.id, injectedConfig);
+    const sessionId = await this.opencodeClient.createSession(
+      `${task.title}:${agent.id}`,
+    );
     overlay.agentSessions.set(agent.id, sessionId);
     this.appendTaskAgentSessionsLog(task.id, "session-created", overlay.agentSessions);
     return sessionId;
@@ -1921,7 +1916,6 @@ export class Orchestrator {
           })
         : [];
       const responsePromise = this.opencodeRunner.run({
-        taskId: task.id,
         sessionId: agentSessionId,
         content: dispatchedContent,
         agent: executableAgentId,
@@ -2422,10 +2416,9 @@ export class Orchestrator {
       if (!targetAgentIds.has(agentId)) {
         continue;
       }
-      const runtime = await runWithTaskLogScope(overlay.taskId, () =>
-        this.opencodeClient.getSessionRuntime(
-          sessionId,
-        ));
+      const runtime = await this.opencodeClient.getSessionRuntime(
+        sessionId,
+      );
 
       const persistedActivityIds = this.getPersistedActivityIdsForAgent(
         input.taskId,

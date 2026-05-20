@@ -305,7 +305,6 @@ async function handleTaskHeadlessCommand(
   });
   activeRunFailureContextForCrash = {
     kind: "task",
-    taskId: snapshot.task.id,
     logFilePath: buildTaskLogFilePath(context.userDataPath, snapshot.task.id),
   };
   printRunDiagnostics(activeRunFailureContextForCrash.logFilePath);
@@ -348,7 +347,6 @@ async function handleTaskUiCommand(
   });
   activeRunFailureContextForCrash = {
     kind: "task",
-    taskId: snapshot.task.id,
     logFilePath: buildTaskLogFilePath(context.userDataPath, snapshot.task.id),
   };
   printRunDiagnostics(activeRunFailureContextForCrash.logFilePath, uiUrl);
