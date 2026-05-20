@@ -4,25 +4,25 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "bun:test";
 
-import { buildTaskLogFilePath, initAppFileLogger } from "../runtime/app-log";
+import { bindCurrentTaskLog, buildTaskLogFilePath, initAppFileLogger } from "../runtime/app-log";
 import { reportCliRunFailure } from "./cli-run-failure";
 
 function createTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "agent-team-cli-run-failure-"));
 }
 
-test("reportCliRunFailure 在已有 task scope 时写入 cli.run_failed 并打印诊断路径", () => {
+test("reportCliRunFailure 在已有当前 task 日志时写入 cli.run_failed 并打印诊断路径", () => {
   const userDataPath = createTempDir();
   initAppFileLogger(userDataPath);
 
   const taskId = "task-cli-run-failed";
+  bindCurrentTaskLog(taskId);
   const taskLogFilePath = buildTaskLogFilePath(userDataPath, taskId);
   const printedLogPaths: string[] = [];
 
   const printed = reportCliRunFailure({
     context: {
       kind: "task",
-      taskId,
       logFilePath: taskLogFilePath,
     },
     message: "boom",

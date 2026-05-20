@@ -320,11 +320,18 @@ export class OpenCodeClient {
         );
         let latest: OpenCodeNormalizedMessage;
         try {
-          latest = await Promise.race([
-            messageCompletionPromise,
-            this.waitForSessionSettled(sessionId, submittedAt, 8000).then(() =>
-              this.getSessionMessage(sessionId, currentSubmitted.id)),
+          const resolved = await Promise.race([
+            messageCompletionPromise.then((message) => ({
+              kind: "message" as const,
+              message,
+            })),
+            this.waitForSessionSettled(sessionId, submittedAt, 8000).then(() => ({
+              kind: "session-settled" as const,
+            })),
           ]);
+          latest = resolved.kind === "session-settled"
+            ? await this.getSessionMessage(sessionId, currentSubmitted.id)
+            : resolved.message;
         } catch (error) {
           try {
             latest = await this.getLatestAssistantMessage(sessionId);

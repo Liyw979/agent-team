@@ -3,10 +3,8 @@ import {
   type OpenCodeExecutionResult,
   type SubmitMessagePayload,
 } from "./opencode-client";
-import { runWithTaskLogScope } from "./app-log";
 
 interface RunAgentPayload extends SubmitMessagePayload {
-  taskId: string;
   sessionId: string;
   allowedDecisionTriggers: string[];
 }
@@ -30,28 +28,26 @@ export class OpenCodeRunner {
   ) {}
 
   async run(payload: RunAgentPayload): Promise<OpenCodeExecutionResult> {
-    return runWithTaskLogScope(payload.taskId, async () => {
-      while (true) {
-        const startedAt = new Date().toISOString();
+    while (true) {
+      const startedAt = new Date().toISOString();
+      try {
+        return await this.executeAttempt(payload);
+      } catch (error) {
         try {
-          return await this.executeAttempt(payload);
-        } catch (error) {
-          try {
-            const recovered = await this.client.recoverExecutionResultAfterTransportError(
-              payload.sessionId,
-              startedAt,
-              error instanceof Error ? error.message : String(error),
-            );
-            if (recovered.kind === "recovered" && recovered.result.status === "completed") {
-              return recovered.result;
-            }
-          } catch {
-            // recovery failures stay in the same retry loop
+          const recovered = await this.client.recoverExecutionResultAfterTransportError(
+            payload.sessionId,
+            startedAt,
+            error instanceof Error ? error.message : String(error),
+          );
+          if (recovered.kind === "recovered" && recovered.result.status === "completed") {
+            return recovered.result;
           }
+        } catch {
+          // recovery failures stay in the same retry loop
         }
-        await this.clock.sleep(RETRYABLE_EXECUTION_INTERVAL_MS);
       }
-    });
+      await this.clock.sleep(RETRYABLE_EXECUTION_INTERVAL_MS);
+    }
   }
 
   private async executeAttempt(
