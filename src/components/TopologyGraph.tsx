@@ -30,6 +30,7 @@ import {
 import { getTopologyDisplayNodeIds } from "@/components/topology-group-drafts";
 import { buildTopologyCanvasLayout } from "@/lib/topology-canvas";
 import { getTopologyCanvasViewportMeasurementKey } from "@/lib/topology-canvas-viewport-measure";
+import { scrollTopologyHistoryToBottom } from "@/lib/topology-history-scroll";
 import { getTopologyPanelBodyClassName } from "@/lib/topology-panel-layout";
 import type {
   AgentStatus,
@@ -108,7 +109,7 @@ function TopologyAgentHistoryList(input: {
     }
     hasPositionedInitialHistoryRef.current = true;
     historyViewportFrameIdRef.current = requestAnimationFrame(() => {
-      viewport.scrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+      scrollTopologyHistoryToBottom(viewport);
     });
   }, [input.historyItems]);
 

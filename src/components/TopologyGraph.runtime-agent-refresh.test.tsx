@@ -671,14 +671,24 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
     const secondViewport = rendered.window.document.querySelector('[data-topology-history-viewport="误报论证"]');
     assert.ok(firstViewport instanceof HTMLElement);
     assert.ok(secondViewport instanceof HTMLElement);
+    const firstScrollToOptions: ScrollToOptions[] = [];
     Object.defineProperty(firstViewport, "clientHeight", { configurable: true, value: 240 });
     Object.defineProperty(firstViewport, "scrollHeight", { configurable: true, value: 720 });
+    Object.defineProperty(firstViewport, "scrollTo", {
+      configurable: true,
+      value: (options: ScrollToOptions) => {
+        firstScrollToOptions.push(options);
+      },
+    });
 
     await act(async () => {
       await rendered.flushAnimationFrames();
     });
 
-    assert.equal(firstViewport.scrollTop, 480);
+    assert.deepEqual(firstScrollToOptions, [{
+      top: 480,
+      behavior: "smooth",
+    }]);
     firstViewport.scrollTop = 120;
 
     await rendered.render({
@@ -711,7 +721,10 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
       await rendered.flushAnimationFrames();
     });
 
-    assert.equal(firstViewport.scrollTop, 120);
+    assert.deepEqual(firstScrollToOptions, [{
+      top: 480,
+      behavior: "smooth",
+    }]);
 
     await rendered.render({
       task: createTask({
@@ -733,14 +746,24 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
 
     const resetViewport = rendered.window.document.querySelector('[data-topology-history-viewport="线索发现"]');
     assert.ok(resetViewport instanceof HTMLElement);
+    const resetScrollToOptions: ScrollToOptions[] = [];
     Object.defineProperty(resetViewport, "clientHeight", { configurable: true, value: 240 });
     Object.defineProperty(resetViewport, "scrollHeight", { configurable: true, value: 720 });
+    Object.defineProperty(resetViewport, "scrollTo", {
+      configurable: true,
+      value: (options: ScrollToOptions) => {
+        resetScrollToOptions.push(options);
+      },
+    });
 
     await act(async () => {
       await rendered.flushAnimationFrames();
     });
 
-    assert.equal(resetViewport.scrollTop, 480);
+    assert.deepEqual(resetScrollToOptions, [{
+      top: 480,
+      behavior: "smooth",
+    }]);
     await waitForAssertion(() => {
       const resetFirstCard = rendered.window.document.querySelector('[data-topology-node-card="线索发现"]');
       const resetSecondCard = rendered.window.document.querySelector('[data-topology-node-card="误报论证"]');

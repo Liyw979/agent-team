@@ -77,6 +77,10 @@ function setupDom() {
       return 768;
     },
   });
+  Object.defineProperty(window.HTMLDivElement.prototype, "scrollTo", {
+    configurable: true,
+    value() {},
+  });
 
   setGlobal("window", window);
   setGlobal("document", window.document);

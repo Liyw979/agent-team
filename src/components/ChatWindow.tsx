@@ -37,6 +37,7 @@ import {
 } from "@/lib/panel-header";
 import { formatChatTranscript, getChatSenderLabel } from "@/lib/chat-transcript";
 import {
+  scrollTopologyHistoryToBottom,
   shouldAutoScrollTopologyHistory,
   shouldStickTopologyHistoryToBottom,
 } from "@/lib/topology-history-scroll";
@@ -543,7 +544,7 @@ export function ChatWindow({
       if (!nextViewport) {
         return;
       }
-      nextViewport.scrollTop = nextViewport.scrollHeight;
+      scrollTopologyHistoryToBottom(nextViewport);
     });
 
     return () => {
@@ -598,7 +599,7 @@ export function ChatWindow({
             if (!viewport) {
               return;
             }
-            viewport.scrollTop = viewport.scrollHeight;
+            scrollTopologyHistoryToBottom(viewport);
           }),
         );
       }

@@ -49,6 +49,7 @@ function setupDom() {
     pretendToBeVisual: true,
   });
   const previousValues = new Map<GlobalPatchKey, GlobalPatch>();
+  const scrollToOptions: ScrollToOptions[] = [];
 
   function setGlobal(key: GlobalPatchKey, value: unknown) {
     previousValues.set(key, {
@@ -82,9 +83,16 @@ function setupDom() {
   );
   setGlobal("getComputedStyle", dom.window.getComputedStyle.bind(dom.window));
   setGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  Object.defineProperty(dom.window.HTMLDivElement.prototype, "scrollTo", {
+    configurable: true,
+    value(options: ScrollToOptions) {
+      scrollToOptions.push(options);
+    },
+  });
 
   return {
     dom,
+    scrollToOptions,
     cleanup() {
       for (const [key, patch] of previousValues) {
         if (patch.existed) {
@@ -100,6 +108,12 @@ function setupDom() {
       dom.window.close();
     },
   };
+}
+
+async function flushAsyncFrames() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 }
 
 function createWorkspaceAndTask(): {
@@ -374,6 +388,11 @@ test("ChatWindow 只根据消息流展示运行中面板与最终消息", async 
     assert.equal(container.querySelectorAll('[aria-label="运行中"]').length, 1);
     assert.match(text, /Build 正在执行中/);
     assert.match(text, /QA 校验失败/);
+    await flushAsyncFrames();
+    assert.equal(
+      domContext.scrollToOptions.some((options) => options.behavior === "smooth"),
+      true,
+    );
 
     const copyButton = Array.from(container.querySelectorAll("button")).find(
       (button) => button.textContent?.trim() === "复制对话记录",

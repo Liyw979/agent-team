@@ -34,6 +34,13 @@ export function shouldStickTopologyHistoryToBottom(
   return distanceToBottom <= 48;
 }
 
+export function scrollTopologyHistoryToBottom(element: HTMLDivElement) {
+  element.scrollTo({
+    top: Math.max(0, element.scrollHeight - element.clientHeight),
+    behavior: "smooth",
+  });
+}
+
 export function createTopologyHistoryAutoScrollTracker() {
   const state: TopologyHistoryAutoScrollTrackerState = {
     viewport: null,
@@ -74,7 +81,7 @@ export function createTopologyHistoryAutoScrollTracker() {
           if (!state.viewport) {
             return;
           }
-          state.viewport.scrollTop = state.viewport.scrollHeight;
+          scrollTopologyHistoryToBottom(state.viewport);
         });
         state.lastItemId = nextLastItemId;
         return frameId;

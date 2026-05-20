@@ -216,6 +216,10 @@ function setupDom(fetchImpl: typeof fetch, visibilityState: "visible" | "hidden"
   setGlobal("getComputedStyle", dom.window.getComputedStyle.bind(dom.window));
   setGlobal("fetch", fetchImpl);
   setGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  Object.defineProperty(dom.window.HTMLDivElement.prototype, "scrollTo", {
+    configurable: true,
+    value() {},
+  });
 
   return {
     dom,

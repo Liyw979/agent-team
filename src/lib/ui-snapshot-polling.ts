@@ -1,3 +1,3 @@
 export function getUiSnapshotPollingIntervalMs(): number {
-  return 1000;
+  return 500;
 }
