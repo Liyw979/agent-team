@@ -689,7 +689,8 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
       top: 480,
       behavior: "smooth",
     }]);
-    firstViewport.scrollTop = 120;
+    firstViewport.scrollTop = 480;
+    firstViewport.dispatchEvent(new rendered.window.Event("scroll", { bubbles: true }));
 
     await rendered.render({
       task: createTask({
@@ -722,6 +723,62 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
     });
 
     assert.deepEqual(firstScrollToOptions, [{
+      top: 480,
+      behavior: "smooth",
+    }, {
+      top: 480,
+      behavior: "smooth",
+    }]);
+    firstViewport.scrollTop = 120;
+    firstViewport.dispatchEvent(new rendered.window.Event("scroll", { bubbles: true }));
+
+    await rendered.render({
+      task: createTask({
+        taskId: TASK_ID,
+        taskStatus: "running",
+        agents: task.agents,
+        messages: [
+          ...task.messages,
+          {
+            id: "runtime-final-11",
+            taskId: TASK_ID,
+            sender: "线索发现",
+            content: "第 11 条最终结果消息 路径/说明 路径/说明 路径/说明",
+            timestamp: toUtcIsoTimestamp("2026-04-29T10:00:32.000Z"),
+            kind: "agent-final",
+            runCount: 1,
+            status: "completed",
+            routingKind: "default",
+            responseNote: "",
+            rawResponse: "第 11 条最终结果消息 路径/说明 路径/说明 路径/说明",
+          },
+          {
+            id: "runtime-final-12",
+            taskId: TASK_ID,
+            sender: "线索发现",
+            content: "第 12 条最终结果消息 路径/说明 路径/说明 路径/说明",
+            timestamp: toUtcIsoTimestamp("2026-04-29T10:00:33.000Z"),
+            kind: "agent-final",
+            runCount: 1,
+            status: "completed",
+            routingKind: "default",
+            responseNote: "",
+            rawResponse: "第 12 条最终结果消息 路径/说明 路径/说明 路径/说明",
+          },
+        ],
+      }),
+      onToggleMaximize: () => {},
+      onOpenSystemPromptPanel: () => {},
+      onOpenAgentTerminal: () => {},
+    });
+    await act(async () => {
+      await rendered.flushAnimationFrames();
+    });
+
+    assert.deepEqual(firstScrollToOptions, [{
+      top: 480,
+      behavior: "smooth",
+    }, {
       top: 480,
       behavior: "smooth",
     }]);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   resolveAgentAttachButtonState,
   resolveSessionStateFromSessionIdText,
@@ -30,7 +30,7 @@ import {
 import { getTopologyDisplayNodeIds } from "@/components/topology-group-drafts";
 import { buildTopologyCanvasLayout } from "@/lib/topology-canvas";
 import { getTopologyCanvasViewportMeasurementKey } from "@/lib/topology-canvas-viewport-measure";
-import { scrollTopologyHistoryToBottom } from "@/lib/topology-history-scroll";
+import { createTopologyHistoryAutoScrollTracker } from "@/lib/topology-history-scroll";
 import { getTopologyPanelBodyClassName } from "@/lib/topology-panel-layout";
 import type {
   AgentStatus,
@@ -91,31 +91,35 @@ function TopologyAgentHistoryList(input: {
   agentId: string;
   historyItems: AgentHistoryItem[];
 }) {
-  const historyViewportRef = useRef<HTMLDivElement | null>(null);
-  const historyViewportFrameIdRef = useRef(0);
-  const hasPositionedInitialHistoryRef = useRef(false);
-
-  useEffect(() => () => {
-    cancelAnimationFrame(historyViewportFrameIdRef.current);
+  const historyScrollTrackerRef = useRef(createTopologyHistoryAutoScrollTracker());
+  const lastHistoryItemId = input.historyItems.map((item) => item.id).at(-1) ?? null;
+  const bindHistoryViewport = useCallback((viewport: HTMLDivElement | null) => {
+    historyScrollTrackerRef.current.bindViewport(viewport);
   }, []);
 
-  useEffect(() => {
-    if (input.historyItems.length === 0 || hasPositionedInitialHistoryRef.current) {
-      return;
-    }
-    const viewport = historyViewportRef.current;
-    if (!viewport) {
-      return;
-    }
-    hasPositionedInitialHistoryRef.current = true;
-    historyViewportFrameIdRef.current = requestAnimationFrame(() => {
-      scrollTopologyHistoryToBottom(viewport);
-    });
-  }, [input.historyItems]);
+  useEffect(() => () => {
+    historyScrollTrackerRef.current.reset();
+  }, []);
+
+  useLayoutEffect(() => {
+    const frameId = historyScrollTrackerRef.current.sync(lastHistoryItemId);
+    return () => {
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId);
+      }
+    };
+  }, [lastHistoryItemId]);
 
   return (
     <div
-      ref={historyViewportRef}
+      ref={bindHistoryViewport}
+      onScroll={(event) => {
+        historyScrollTrackerRef.current.updateStickState({
+          scrollHeight: event.currentTarget.scrollHeight,
+          clientHeight: event.currentTarget.clientHeight,
+          scrollTop: event.currentTarget.scrollTop,
+        });
+      }}
       className="min-h-0 flex-1 overflow-y-auto"
       data-topology-history-viewport={input.agentId}
     >
