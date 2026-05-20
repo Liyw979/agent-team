@@ -535,7 +535,6 @@ export class Orchestrator {
     return Promise.all(
       overlayAgents.map(async (agent) => {
         const baseSnapshot: AgentRuntimeSnapshot = {
-          taskId: task.id,
           agentId: agent.id,
           sessionId: agent.opencodeSessionId,
           status: agent.status,

@@ -548,7 +548,6 @@ export interface AgentRuntimeActivity {
 }
 
 export interface AgentRuntimeSnapshot {
-  taskId: string;
   agentId: string;
   sessionId: string | null;
   status: AgentStatus;

@@ -226,10 +226,7 @@ test("startWebHost 的 /api/tasks/runtime 始终绑定当前进程 task，不接
       }),
       getTaskRuntime: async () => {
         runtimeCallCount += 1;
-        return {
-          taskId: "task-123",
-          agents: [],
-        };
+        return [];
       },
       openAgentTerminal: async () => {
         throw new Error("unexpected openAgentTerminal");
