@@ -37,7 +37,7 @@ test("parseCliCommand 解析 task headless 的 --show-message", () => {
 
   assert.deepEqual(parsed, {
     kind: "task.headless",
-    cwd: undefined,
+    cwd: "",
     file: "config/team-topologies/development-team.topology.yaml",
     message: "请开始执行",
     showMessage: true,
@@ -97,7 +97,7 @@ test("parseCliCommand 解析 task ui 的 --show-message", () => {
 
   assert.deepEqual(parsed, {
     kind: "task.ui",
-    cwd: undefined,
+    cwd: "",
     file: "config/team-topologies/development-team.topology.yaml",
     message: "请开始执行",
     showMessage: true,
@@ -116,7 +116,7 @@ test("parseCliCommand 接受 .yaml 拓扑文件路径", () => {
 
   assert.deepEqual(parsed, {
     kind: "task.headless",
-    cwd: undefined,
+    cwd: "",
     file: "config/team-topologies/development-team.topology.yaml",
     message: "请开始执行",
     showMessage: false,

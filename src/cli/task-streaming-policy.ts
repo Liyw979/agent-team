@@ -1,7 +1,5 @@
-import type { ParsedCliCommand } from "./cli-command";
-
 interface ResolveCliTaskStreamingPlanInput {
-  command: Extract<ParsedCliCommand, { kind: "task.headless" | "task.ui" }>;
+  showMessage: boolean;
   isResume: boolean;
 }
 
@@ -18,9 +16,9 @@ export function resolveCliTaskStreamingPlan(
   if (!input.isResume) {
     return {
       enabled: true,
-      includeHistory: input.command.showMessage,
+      includeHistory: input.showMessage,
       printAttach: true,
-      printMessages: input.command.showMessage,
+      printMessages: input.showMessage,
     };
   }
 
@@ -28,6 +26,6 @@ export function resolveCliTaskStreamingPlan(
     enabled: true,
     includeHistory: false,
     printAttach: false,
-    printMessages: input.command.showMessage,
+    printMessages: input.showMessage,
   };
 }
