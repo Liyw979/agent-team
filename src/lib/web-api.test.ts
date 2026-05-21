@@ -9,10 +9,24 @@ test("fetchUiSnapshot 会按 JSON 解析响应体", async () => {
   globalThis.fetch = (async (input) => {
     requestedUrl = String(input);
     return new Response(JSON.stringify({
-      workspace: null,
-      task: null,
+      kind: "workspace",
+      workspace: {
+        cwd: "/tmp/demo",
+        name: "demo",
+        agents: [],
+        topology: {
+          nodes: [],
+          edges: [],
+          flow: {
+            start: { id: "__start__", targets: [] },
+            end: { id: "__end__", sources: [], incoming: [] },
+          },
+          nodeRecords: [],
+        },
+        messages: [],
+        tasks: [],
+      },
       launchCwd: "/tmp/demo",
-      taskLogFilePath: "/tmp/demo.log",
       taskUrl: "http://localhost:4310/",
     }), { status: 200 });
   }) as typeof fetch;

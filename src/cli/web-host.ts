@@ -97,10 +97,9 @@ async function buildUiSnapshotPayload(
   const workspace = await orchestrator.getWorkspaceSnapshot();
   if (workspace.tasks.length === 0) {
     return {
+      kind: "workspace",
       workspace,
-      task: null,
       launchCwd: workspace.cwd,
-      taskLogFilePath: null,
       taskUrl: buildUiUrl({
         port: options.port,
       }),
@@ -109,6 +108,7 @@ async function buildUiSnapshotPayload(
 
   const task = await orchestrator.getTaskSnapshot();
   return {
+    kind: "task",
     workspace,
     task,
     launchCwd: workspace.cwd,

@@ -286,10 +286,11 @@ test("startWebHost 的 /api/ui-snapshot 会区分 idle 与 active task", async (
     const response = await fetch(`http://localhost:${idlePort}/api/ui-snapshot`);
     assert.equal(response.status, 200);
     const payload = await response.json();
+    assert.equal(payload.kind, "workspace");
     assert.equal(payload.workspace.cwd, "/tmp/idle");
     assert.equal(payload.workspace.tasks.length, 0);
-    assert.equal(payload.task, null);
-    assert.equal(payload.taskLogFilePath, null);
+    assert.equal("task" in payload, false);
+    assert.equal("taskLogFilePath" in payload, false);
     assert.equal(payload.launchCwd, "/tmp/idle");
     assert.equal(payload.taskUrl, `http://localhost:${idlePort}/`);
     assert.equal(idleTaskSnapshotCalls, 0);
@@ -335,6 +336,7 @@ test("startWebHost 的 /api/ui-snapshot 会区分 idle 与 active task", async (
     const response = await fetch(`http://localhost:${activePort}/api/ui-snapshot`);
     assert.equal(response.status, 200);
     const payload = await response.json();
+    assert.equal(payload.kind, "task");
     assert.equal(payload.workspace.cwd, "/tmp/active");
     assert.equal(payload.workspace.tasks.length, 1);
     assert.deepEqual(payload.task, activeTaskSnapshot);

@@ -256,7 +256,7 @@ function App() {
               workspace={workspace}
               task={task}
               availableAgents={availableAgents}
-              taskLogFilePath={uiSnapshot.taskLogFilePath}
+              taskLogFilePath={uiSnapshot.taskView.taskLogFilePath}
               taskUrl={uiSnapshot.taskUrl}
               isMaximized={panelMode === "chat-only"}
               onToggleMaximize={() => {
@@ -296,7 +296,7 @@ function App() {
                 workspace={workspace}
                 task={task}
                 availableAgents={availableAgents}
-                taskLogFilePath={uiSnapshot.taskLogFilePath}
+                taskLogFilePath={uiSnapshot.taskView.taskLogFilePath}
                 taskUrl={uiSnapshot.taskUrl}
                 isMaximized={panelMode === "chat-only"}
                 onToggleMaximize={() => {
