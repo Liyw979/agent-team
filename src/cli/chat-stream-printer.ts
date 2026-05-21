@@ -99,7 +99,12 @@ export function renderChatStreamEntries(entries: ChatMessageItem[]): string {
   }
 
   return entries.map((entry) => {
-    const sender = entry.senderDisplayName?.trim() || entry.sender;
+    const sender =
+      "senderDisplayName" in entry
+      && typeof entry.senderDisplayName === "string"
+      && entry.senderDisplayName.trim().length > 0
+        ? entry.senderDisplayName.trim()
+        : entry.sender;
     return `${renderMessageBox(`[${formatTimestamp(entry.timestamp)}] ${sender}`, entry.content)}\n`;
   }).join("\n");
 }

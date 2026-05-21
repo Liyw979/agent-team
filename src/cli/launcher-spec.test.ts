@@ -3,19 +3,21 @@ import { test } from "bun:test";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
+type LauncherSpecInput = {
+  nodeBinary: string;
+  repoRoot: string;
+  argv: string[];
+  env: Record<string, string>;
+  platform: NodeJS.Platform;
+};
+type LauncherSpec = {
+  command: string;
+  args: string[];
+  cwd: string;
+  env: Record<string, string>;
+};
 const { buildCliLauncherSpec } = require("./launcher-spec.cjs") as {
-  buildCliLauncherSpec: (input: {
-    nodeBinary: string;
-    repoRoot: string;
-    argv: string[];
-    env: Record<string, string | undefined>;
-    platform?: NodeJS.Platform;
-  }) => {
-    command: string;
-    args: string[];
-    cwd: string;
-    env: Record<string, string | undefined>;
-  };
+  buildCliLauncherSpec: (input: LauncherSpecInput) => LauncherSpec;
 };
 
 test("buildCliLauncherSpec 鐩存帴浣跨敤褰撳墠 Node 杩涚▼鍚姩 CLI 鍏ュ彛", () => {

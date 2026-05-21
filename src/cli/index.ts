@@ -59,6 +59,19 @@ interface ActiveUiHost {
 }
 
 type RunnableCliCommand = Extract<ParsedCliCommand, { kind: "task.headless" | "task.ui" }>;
+type RenderTaskMessagesOptions = {
+  includeHistory: boolean;
+  printAttach: boolean;
+  printMessages: boolean;
+};
+type UiHostState =
+  | {
+      kind: "inactive";
+    }
+  | {
+      kind: "active";
+      host: ActiveUiHost;
+    };
 
 const WITHOUT_TASK_RUN_FAILURE_CONTEXT: CliRunFailureContext = {
   kind: "without-task",
@@ -77,12 +90,14 @@ function sleep(ms: number) {
 
 function printRunDiagnostics(logFilePath: string) {
   process.stdout.write(`${renderTaskSessionSummary({
+    kind: "log-only",
     logFilePath,
   })}\n\n`);
 }
 
 function printRunDiagnosticsWithTaskUrl(logFilePath: string, taskUrl: string) {
   process.stdout.write(`${renderTaskSessionSummary({
+    kind: "with-url",
     logFilePath,
     taskUrl,
   })}\n\n`);
@@ -177,32 +192,34 @@ function validateTaskUiCommand(
 }
 
 function buildTaskAttachEntries(task: TaskSnapshot): TaskAttachCommandEntry[] {
-  return task.agents.map((agent) => ({
-    agentId: agent.id,
-    opencodeAttachCommand:
-      agent.opencodeAttachBaseUrl && agent.opencodeSessionId
-        ? buildCliOpencodeAttachCommand(
-            agent.opencodeAttachBaseUrl,
-            agent.opencodeSessionId,
-          )
-        : null,
-  }));
+  return task.agents.map((agent) => {
+    if (agent.opencodeAttachBaseUrl && agent.opencodeSessionId) {
+      return {
+        kind: "attached",
+        agentId: agent.id,
+        opencodeAttachCommand: buildCliOpencodeAttachCommand(
+          agent.opencodeAttachBaseUrl,
+          agent.opencodeSessionId,
+        ),
+      };
+    }
+    return {
+      kind: "pending",
+      agentId: agent.id,
+    };
+  });
 }
 
 async function renderTaskMessages(
   context: CliContext,
   previousMessages: TaskSnapshot["messages"],
-  options?: {
-    includeHistory?: boolean;
-    printAttach?: boolean;
-    printMessages?: boolean;
-  },
+  options: RenderTaskMessagesOptions,
 ) {
   let lastMessages = previousMessages;
-  let attachPrinted = options?.printAttach !== true;
+  let attachPrinted = !options.printAttach;
   let lastAttachEntries: TaskAttachCommandEntry[] = [];
-  let includeHistory = options?.includeHistory === true;
-  const printMessages = options?.printMessages !== false;
+  let includeHistory = options.includeHistory;
+  const printMessages = options.printMessages;
 
   while (true) {
     const snapshot = await context.orchestrator.getTaskSnapshot();
@@ -298,9 +315,8 @@ async function ensureUiHost(
 
 async function ensureUiAssetsAvailable(userDataPath: string): Promise<string> {
   const assets = await ensureRuntimeAssets(userDataPath);
-  const webRoot = assets.webRoot;
-  if (webRoot) {
-    return webRoot;
+  if (assets.kind === "available") {
+    return assets.webRoot;
   }
 
   fail(
@@ -415,7 +431,9 @@ async function run() {
   let observedSettledTaskState = false;
   let forceProcessExit = false;
   let interrupted = false;
-  let activeUiHost: ActiveUiHost | null = null;
+  let activeUiHost: UiHostState = {
+    kind: "inactive",
+  };
   const handleSignal = (signal: NodeJS.Signals) => {
     if (interrupted) {
       return;
@@ -430,15 +448,17 @@ async function run() {
     }
     void Promise.resolve()
       .then(async () => {
-        if (activeUiHost) {
-          await activeUiHost.close().catch(() => undefined);
-          activeUiHost = null;
+        if (activeUiHost.kind === "active") {
+          await activeUiHost.host.close().catch(() => {});
+          activeUiHost = {
+            kind: "inactive",
+          };
         }
         await disposeCliContext(context, {
           awaitPendingTaskRuns: plan.awaitPendingTaskRuns,
         });
       })
-      .catch(() => undefined)
+      .catch(() => {})
       .finally(() => {
         process.exit(plan.exitCode);
       });
@@ -451,7 +471,10 @@ async function run() {
       didPrintTaskDiagnosticsForCrash = true;
       observedSettledTaskState = true;
     } else if (command.kind === "task.ui") {
-      activeUiHost = await handleTaskUiCommand(context, command, compiledTopology);
+      activeUiHost = {
+        kind: "active",
+        host: await handleTaskUiCommand(context, command, compiledTopology),
+      };
       didPrintTaskDiagnosticsForCrash = true;
       observedSettledTaskState = true;
       const disposeOptions = resolveCliDisposeOptions({
@@ -459,7 +482,7 @@ async function run() {
         observedSettledTaskState,
       });
       if (disposeOptions.keepAliveUntilSignal) {
-        await new Promise<void>(() => undefined);
+        await new Promise<void>(() => {});
       }
     }
   } finally {
@@ -471,9 +494,11 @@ async function run() {
         observedSettledTaskState,
       });
       forceProcessExit = disposeOptions.forceProcessExit;
-      if (activeUiHost) {
-        await activeUiHost.close().catch(() => undefined);
-        activeUiHost = null;
+      if (activeUiHost.kind === "active") {
+        await activeUiHost.host.close().catch(() => {});
+        activeUiHost = {
+          kind: "inactive",
+        };
       }
       if (disposeOptions.shouldDisposeContext) {
         await disposeCliContext(context, disposeOptions);
