@@ -1037,42 +1037,8 @@ export class Orchestrator {
     return formatAgentDispatchContent(content, targetAgentIds);
   }
 
-  private extractAgentDisplayContent(
-    content: string,
-    options?: { preferTrailingDeliverySection?: boolean },
-  ): string {
-    const trimmed = content.trim();
-    if (!trimmed) {
-      return "";
-    }
-
-    const trailingSection = options?.preferTrailingDeliverySection
-      ? this.extractTrailingTopLevelSection(trimmed)
-      : trimmed;
-    return trailingSection.replace(/\n(?:---|\*\*\*)(?:\s*\n?)*$/u, "").trim();
-  }
-
-  private extractTrailingTopLevelSection(content: string): string {
-    const headingPattern = /^#{1,2}\s+[^\n]+/gm;
-    const headings = [...content.matchAll(headingPattern)];
-    const [lastHeading] = headings.slice(-1);
-    if (!lastHeading) {
-      return content;
-    }
-
-    const lastHeadingIndex = lastHeading.index;
-    const trailingSection = content.slice(lastHeadingIndex).trim();
-    return trailingSection || content;
-  }
-
   protected createDisplayContent(parsedDecision: ParsedDecision): string {
-    const preferTrailingDeliverySection = parsedDecision.kind === "invalid";
-    const cleanContent = this.extractAgentDisplayContent(
-      parsedDecision.cleanContent,
-      {
-        preferTrailingDeliverySection,
-      },
-    );
+    const cleanContent = parsedDecision.cleanContent.trim();
     if (parsedDecision.kind === "invalid") {
       return [cleanContent, parsedDecision.validationError]
         .filter(Boolean)

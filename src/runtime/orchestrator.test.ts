@@ -147,6 +147,29 @@ type ConfigureTestOrchestratorDependencies = (
 
 type TestOrchestratorOptions = ConstructorParameters<typeof Orchestrator>[0];
 
+function requireSingleMessage<T extends MessageRecord>(
+  messages: T[],
+  description: string,
+): T {
+  assert.equal(messages.length, 1, description);
+  const message = messages[0];
+  assert.ok(message);
+  return message;
+}
+
+function requireSingleTriggeredAgentFinalMessage(
+  messages: MessageRecord[],
+  description: string,
+) {
+  return requireSingleMessage(
+    messages.filter(
+      (message): message is Extract<MessageRecord, { kind: "agent-final"; routingKind: "triggered" }> =>
+        message.kind === "agent-final" && message.routingKind === "triggered",
+    ),
+    description,
+  );
+}
+
 class TestOrchestrator extends Orchestrator {
   private readonly dependencies: TestOrchestratorDependencies;
 
@@ -4094,6 +4117,126 @@ test("单 Agent 且没有下游时，任务结束后仍保留该 Agent 的最终
   }
   assert.equal(baFinalMessage.content, "验证成功。");
   assert.equal(baFinalMessageIndex < completionMessageIndex, true);
+});
+
+test("agent-final 入库前会保留完整正文和尾部分隔线", async () => {
+  const userDataPath = createTempDir();
+  initAppFileLogger(userDataPath);
+  const projectPath = createTempDir();
+  const orchestrator = new TestOrchestrator({
+    cwd: projectPath,
+    userDataPath,
+    enableEventStream: false,
+  });
+  stubOpenCodeSessions(orchestrator);
+
+  await orchestrator.getWorkspaceSnapshot();
+  await addCustomAgent(orchestrator, "BA", "你是 BA。", "BA", false);
+  await orchestrator.saveTopology({ topology: withAgentNodeRecords({
+      nodes: ["BA"],
+      edges: [],
+    }),
+  });
+
+  const finalMessage = `前置分析
+
+## 结论
+这里是最终判断。
+---`;
+  orchestrator.opencodeRunner.run = async () =>
+    buildCompletedExecutionResult({
+      agent: "BA",
+      finalMessage,
+      messageId: "msg-full-final",
+      timestamp: toUtcIsoTimestamp("2026-04-21T13:20:00.000Z"),
+    });
+
+  const submittedTask = await orchestrator.submitTask({ content: "@BA 请输出完整结果。",
+    mentionAgentId: "BA",
+  });
+
+  const snapshot = await waitForTaskSnapshot(
+    orchestrator,
+    submittedTask.task.id,
+    (current) => current.task.status === "finished",
+    8000,
+  );
+
+  const baFinalMessage = requireSingleMessage(
+    snapshot.messages.filter(
+      (message) => message.sender === "BA" && message.kind === "agent-final",
+    ),
+    "缺少 BA 最终消息",
+  );
+  assert.equal(baFinalMessage.content, finalMessage);
+});
+
+test("agent-final 入库前会移除协议 trigger 并保留正文细节", async () => {
+  const userDataPath = createTempDir();
+  initAppFileLogger(userDataPath);
+  const projectPath = createTempDir();
+  const orchestrator = new TestOrchestrator({
+    cwd: projectPath,
+    userDataPath,
+    enableEventStream: false,
+  });
+  stubOpenCodeSessions(orchestrator);
+
+  await orchestrator.getWorkspaceSnapshot();
+  await addCustomAgent(orchestrator, "漏洞论证", "你负责漏洞论证。", "漏洞论证", false);
+  await orchestrator.saveTopology({ topology: withAgentNodeRecords({
+      nodes: ["漏洞论证"],
+      edges: [],
+      flow: {
+        start: {
+          id: "__start__",
+          targets: ["漏洞论证"],
+        },
+        end: {
+          id: "__end__",
+          sources: ["漏洞论证"],
+          incoming: [
+            {
+              source: "漏洞论证",
+              trigger: "<done>",
+            },
+          ],
+        },
+      },
+    }),
+  });
+
+  const expectedContent = `正文
+
+继续处理。
+
+如果你愿意，我可以继续补测试。
+---`;
+  orchestrator.opencodeRunner.run = async ({ agent }) =>
+    buildCompletedExecutionResult({
+      agent,
+      finalMessage: `<done>${expectedContent}</done>`,
+      messageId: "msg-trigger-clean-final",
+      timestamp: toUtcIsoTimestamp("2026-04-21T13:30:00.000Z"),
+    });
+
+  const submittedTask = await orchestrator.submitTask({ content: "@漏洞论证 请输出完整结果。",
+    mentionAgentId: "漏洞论证",
+  });
+
+  const snapshot = await waitForTaskSnapshot(
+    orchestrator,
+    submittedTask.task.id,
+    (current) => current.task.status === "finished",
+    8000,
+  );
+
+  const finalMessage = requireSingleTriggeredAgentFinalMessage(
+    snapshot.messages.filter((message) => message.sender === "漏洞论证"),
+    "缺少漏洞论证最终消息",
+  );
+  assert.equal(finalMessage.trigger, "<done>");
+  assert.equal(finalMessage.content, expectedContent);
 });
 
 test("agent 运行中时会先把过程消息追加到 task messages", async () => {
