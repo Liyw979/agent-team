@@ -446,15 +446,15 @@ export class Orchestrator {
     validateProjectAgents();
     this.syncTopology(agents);
     const topology = this.store.getTopology();
+    const defaultTarget = resolvePrimaryTopologyStartTarget(topology);
+    const defaultTargetPayload = defaultTarget.kind === "found"
+      ? { defaultTargetAgentId: defaultTarget.agentId }
+      : {};
     const resolution = resolveTaskSubmissionTarget({
       content: payload.content,
       availableAgents: agents.map((agent) => agent.id),
       ...withOptionalString({}, "mentionAgentId", payload.mentionAgentId),
-      ...withOptionalString(
-        {},
-        "defaultTargetAgentId",
-        resolvePrimaryTopologyStartTarget(topology) ?? undefined,
-      ),
+      ...defaultTargetPayload,
     });
     if (!resolution.ok) {
       throw new Error(resolution.message);
@@ -1564,12 +1564,15 @@ export class Orchestrator {
     );
     const explicitStartTarget = resolvePrimaryTopologyStartTarget(topology);
     const endIncoming = [...explicitEndIncoming, ...endIncomingFromEdges];
+    const startTargets = topology.flow.start.targets.length > 0
+      ? topology.flow.start.targets
+      : explicitStartTarget.kind === "found"
+        ? [explicitStartTarget.agentId]
+        : [];
     const flow = createTopologyFlowRecord({
       nodes,
       edges,
-      startTargets:
-        topology.flow.start.targets ??
-        (explicitStartTarget ? [explicitStartTarget] : []),
+      startTargets,
       endIncoming,
     });
     collectTopologyTriggerShapes({

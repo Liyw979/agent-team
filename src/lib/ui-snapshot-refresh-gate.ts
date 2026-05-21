@@ -48,20 +48,46 @@ function isTerminalTaskStatus(status: string) {
   return status === "failed";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isRawUiSnapshotPayload(value: unknown): value is UiSnapshotPayload {
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (
+    value["kind"] === "workspace" &&
+    isRecord(value["workspace"]) &&
+    typeof value["launchCwd"] === "string" &&
+    typeof value["taskUrl"] === "string"
+  ) {
+    return true;
+  }
+  return (
+    value["kind"] === "task" &&
+    isRecord(value["workspace"]) &&
+    isRecord(value["task"]) &&
+    typeof value["launchCwd"] === "string" &&
+    typeof value["taskUrl"] === "string" &&
+    typeof value["taskLogFilePath"] === "string"
+  );
+}
+
 export function isSemanticallyOlderUiSnapshot(
   baseline: UiSnapshotPayload,
   candidate: UiSnapshotPayload,
 ) {
-  const baselineTask = baseline.task;
-  const candidateTask = candidate.task;
-
-  if (!baselineTask) {
+  if (baseline.kind === "workspace") {
     return false;
   }
 
-  if (!candidateTask) {
+  if (candidate.kind === "workspace") {
     return true;
   }
+
+  const baselineTask = baseline.task;
+  const candidateTask = candidate.task;
 
   if (baselineTask.task.id !== candidateTask.task.id) {
     return false;
@@ -123,12 +149,16 @@ export function isSemanticallyNewerUiSnapshot(
   baseline: UiSnapshotPayload,
   candidate: UiSnapshotPayload,
 ) {
-  const baselineTask = baseline.task;
-  const candidateTask = candidate.task;
-
-  if (!baselineTask || !candidateTask || baselineTask.task.id !== candidateTask.task.id) {
+  if (
+    baseline.kind === "workspace" ||
+    candidate.kind === "workspace" ||
+    baseline.task.task.id !== candidate.task.task.id
+  ) {
     return false;
   }
+
+  const baselineTask = baseline.task;
+  const candidateTask = candidate.task;
 
   const baselineAgents = new Map(baselineTask.agents.map((agent) => [agent.id, agent]));
   for (const candidateAgent of candidateTask.agents) {
@@ -230,7 +260,7 @@ export function resolveUiSnapshotQueryData(
   previousPayload: UiSnapshotPayload,
   nextPayload: UiSnapshotPayload,
 ) {
-  if (!previousPayload.task) {
+  if (previousPayload.kind === "workspace") {
     return nextPayload;
   }
 
@@ -247,9 +277,11 @@ export function resolveUiSnapshotQueryStructuralSharing(
   oldData: unknown,
   newData: unknown,
 ) {
-  const nextPayload = newData as UiSnapshotPayload;
-  if (!oldData || typeof oldData !== "object") {
-    return nextPayload;
+  if (!isRawUiSnapshotPayload(newData)) {
+    return newData;
   }
-  return resolveUiSnapshotQueryData(oldData as UiSnapshotPayload, nextPayload);
+  if (!isRawUiSnapshotPayload(oldData)) {
+    return newData;
+  }
+  return resolveUiSnapshotQueryData(oldData, newData);
 }

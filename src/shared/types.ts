@@ -15,6 +15,14 @@ export type TaskStatus =
 export type AgentRoutingKind = "default" | "triggered" | "invalid";
 
 export type PermissionMode = "allow" | "ask" | "deny";
+export type AgentIdResolution =
+  | {
+      kind: "found";
+      agentId: string;
+    }
+  | {
+      kind: "missing";
+    };
 
 const BUILD_AGENT_ID = "Build";
 declare const UTC_ISO_TIMESTAMP_BRAND: unique symbol;
@@ -548,12 +556,12 @@ export interface AgentRuntimeActivity {
 
 export interface AgentRuntimeSnapshot {
   agentId: string;
-  sessionId: string | null;
+  sessionId: string;
   status: AgentStatus;
   runtimeStatus: AgentStatus;
   messageCount: number;
-  updatedAt: string | null;
-  headline: string | null;
+  updatedAt: string;
+  headline: string;
   activeToolNames: string[];
   activities: AgentRuntimeActivity[];
 }
@@ -575,14 +583,23 @@ export interface WorkspaceSnapshot {
   tasks: TaskSnapshot[];
 }
 
-export interface UiSnapshotPayload {
-  workspace: WorkspaceSnapshot | null;
-  task: TaskSnapshot | null;
+interface UiSnapshotPayloadBase {
   // Browser bootstrap only uses this to show where the current UI session was launched from.
-  launchCwd: string | null;
-  taskLogFilePath: string | null;
-  taskUrl: string | null;
+  launchCwd: string;
+  taskUrl: string;
 }
+
+export type UiSnapshotPayload =
+  | (UiSnapshotPayloadBase & {
+      kind: "workspace";
+      workspace: WorkspaceSnapshot;
+    })
+  | (UiSnapshotPayloadBase & {
+      kind: "task";
+      workspace: WorkspaceSnapshot;
+      task: TaskSnapshot;
+      taskLogFilePath: string;
+    });
 
 export interface SubmitTaskPayload {
   content: string;
@@ -699,49 +716,41 @@ export function isDecisionAgentInTopology(
 
 export function resolveBuildAgentId(
   agents: ReadonlyArray<Pick<TopologyAgentSeed, "id"> | string>,
-): string | null {
-  for (const agent of agents) {
-    const agentId = typeof agent === "string" ? agent : agent.id;
-    if (usesOpenCodeBuiltinPrompt(agentId)) {
-      return agentId;
-    }
-  }
-  return null;
+): AgentIdResolution {
+  const agentId = agents
+    .map((agent) => (typeof agent === "string" ? agent : agent.id))
+    .find((agentId) => usesOpenCodeBuiltinPrompt(agentId));
+  return typeof agentId === "string"
+    ? { kind: "found", agentId }
+    : { kind: "missing" };
 }
 
 export function resolvePrimaryTopologyStartTarget(
   topology: Pick<TopologyRecord, "flow" | "nodes">,
-): string | null {
-  const explicitStartTarget = topology.flow.start.targets.find(
+): AgentIdResolution {
+  const agentId = topology.flow.start.targets.find(
     (target) => target.trim().length > 0,
-  );
-  if (explicitStartTarget) {
-    return explicitStartTarget;
-  }
-  return topology.nodes[0] ?? null;
-}
-
-function resolveTopologyStartAgent(
-  agents: Array<Pick<TopologyAgentSeed, "id">>,
-): string | null {
-  return resolveBuildAgentId(agents);
+  ) ?? topology.nodes[0];
+  return typeof agentId === "string"
+    ? { kind: "found", agentId }
+    : { kind: "missing" };
 }
 
 export function resolveTopologyAgentOrder(
   agents: Array<Pick<TopologyAgentSeed, "id">>,
-  preferredOrderIds?: string[] | null,
+  preferredOrderIds: ReadonlyArray<string> = [],
 ): string[] {
   const availableAgentIds = agents.map((agent) => agent.id);
   const availableAgentSet = new Set(availableAgentIds);
   const order: string[] = [];
-  const push = (name: string | null | undefined) => {
-    if (!name || !availableAgentSet.has(name) || order.includes(name)) {
+  const push = (name: string) => {
+    if (!availableAgentSet.has(name) || order.includes(name)) {
       return;
     }
     order.push(name);
   };
 
-  for (const name of preferredOrderIds ?? []) {
+  for (const name of preferredOrderIds) {
     push(name);
   }
 
@@ -749,7 +758,10 @@ export function resolveTopologyAgentOrder(
     return order;
   }
 
-  push(resolveTopologyStartAgent(agents));
+  const startAgent = resolveBuildAgentId(agents);
+  if (startAgent.kind === "found") {
+    push(startAgent.agentId);
+  }
   for (const agentId of availableAgentIds) {
     push(agentId);
   }
@@ -764,18 +776,13 @@ export function createDefaultTopology(
   const names = new Set(nodes);
   const edges: TopologyEdge[] = [];
 
-  const startAgentId = resolveTopologyStartAgent(agents);
-  const startAgent = agents.find((agent) => agent.id === startAgentId) ?? null;
-  const nextAgent = agents.find((agent) => agent.id !== startAgent?.id) ?? null;
+  const startAgent = resolveBuildAgentId(agents);
 
   const push = (
-    source: string | undefined,
-    target: string | undefined,
+    source: string,
+    target: string,
     trigger: TopologyEdge["trigger"],
   ) => {
-    if (!source || !target) {
-      return;
-    }
     if (!names.has(source) || !names.has(target)) {
       return;
     }
@@ -788,7 +795,20 @@ export function createDefaultTopology(
     });
   };
 
-  push(startAgent?.id, nextAgent?.id, DEFAULT_TOPOLOGY_TRIGGER);
+  if (startAgent.kind === "found") {
+    const nextAgentIds = agents
+      .map((agent) => agent.id)
+      .filter((agentId) => agentId !== startAgent.agentId);
+    const nextAgentId = nextAgentIds.find((agentId) => names.has(agentId));
+    if (typeof nextAgentId === "string") {
+      push(startAgent.agentId, nextAgentId, DEFAULT_TOPOLOGY_TRIGGER);
+    }
+  }
+
+  const startTargets =
+    startAgent.kind === "found"
+      ? [startAgent.agentId]
+      : nodes.slice(0, 1);
 
   return {
     nodes,
@@ -796,11 +816,7 @@ export function createDefaultTopology(
     flow: createTopologyFlowRecord({
       nodes,
       edges,
-      startTargets: startAgent?.id
-        ? [startAgent.id]
-        : nodes[0]
-          ? [nodes[0]]
-          : [],
+      startTargets,
     }),
     nodeRecords: buildTopologyNodeRecords({
       nodes,

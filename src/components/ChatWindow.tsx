@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import { withOptionalString } from "@shared/object-utils";
 import {
+  type AgentIdResolution,
   resolvePrimaryTopologyStartTarget,
   type TaskSnapshot,
   type WorkspaceSnapshot,
@@ -148,12 +149,10 @@ function getCaretCoordinates(textarea: HTMLTextAreaElement, position: number) {
   return result;
 }
 
-function getDefaultAgentId(
-  workspace: WorkspaceSnapshot,
+function getDefaultAgent(
   task: TaskSnapshot,
-): string | undefined {
-  const topology = task?.topology ?? workspace?.topology;
-  return topology ? (resolvePrimaryTopologyStartTarget(topology) ?? undefined) : undefined;
+): AgentIdResolution {
+  return resolvePrimaryTopologyStartTarget(task.topology);
 }
 
 function MessageBubble({
@@ -469,7 +468,7 @@ export function ChatWindow({
   onOpenAgentTerminal,
   onSubmit,
 }: ChatWindowProps) {
-  const defaultAgentId = getDefaultAgentId(workspace, task);
+  const defaultAgent = getDefaultAgent(task);
   const hasAvailableAgents = availableAgents.length > 0;
   const [draft, setDraft] = useState("");
   const [mentionContext, setMentionContext] = useState<MentionContext | null>(null);
@@ -532,11 +531,11 @@ export function ChatWindow({
   }, [availableAgents, mentionQuery]);
 
   useEffect(() => {
-    const defaultIndex = defaultAgentId
-      ? mentionOptions.findIndex((option) => option.agentId === defaultAgentId)
+    const defaultIndex = defaultAgent.kind === "found"
+      ? mentionOptions.findIndex((option) => option.agentId === defaultAgent.agentId)
       : -1;
     setActiveIndex(defaultIndex >= 0 ? defaultIndex : 0);
-  }, [defaultAgentId, mentionOptions]);
+  }, [defaultAgent, mentionOptions]);
 
   useEffect(() => {
     return () => {
@@ -704,10 +703,13 @@ export function ChatWindow({
     if (!content || submitting) {
       return;
     }
+    const defaultTargetPayload = defaultAgent.kind === "found"
+      ? { defaultTargetAgentId: defaultAgent.agentId }
+      : {};
     const resolution = resolveTaskSubmissionTarget({
       content,
       availableAgents,
-      ...withOptionalString({}, "defaultTargetAgentId", defaultAgentId),
+      ...defaultTargetPayload,
     });
     if (!resolution.ok) {
       setSubmitError(resolution.message);
@@ -953,8 +955,8 @@ export function ChatWindow({
               }}
               placeholder={
                 hasAvailableAgents
-                  ? defaultAgentId
-                    ? `默认向${defaultAgentId}发送，可以使用@指定Agent`
+                  ? defaultAgent.kind === "found"
+                    ? `默认向${defaultAgent.agentId}发送，可以使用@指定Agent`
                     : "当前拓扑缺少 start node，请使用@指定Agent发送消息"
                   : "当前还没有可用 Agent，请先配置团队成员"
               }

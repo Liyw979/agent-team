@@ -70,8 +70,8 @@ export function getPersistedCompletionSeedAgentIds(input: {
   }
 
   const defaultEntryAgent = resolveBuildAgentId(input.topology.nodes);
-  if (seeds.size === 0 && defaultEntryAgent) {
-    seeds.add(defaultEntryAgent);
+  if (seeds.size === 0 && defaultEntryAgent.kind === "found") {
+    seeds.add(defaultEntryAgent.agentId);
   }
 
   return [...seeds].filter((name) => validNames.has(name));

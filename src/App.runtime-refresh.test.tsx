@@ -94,6 +94,7 @@ function createUiSnapshot(input: {
   messages: TaskSnapshot["messages"];
 }): UiSnapshotPayload {
   return {
+    kind: "task",
     workspace: {
       cwd: WORKSPACE_CWD,
       name: "app-runtime-refresh",
@@ -133,7 +134,7 @@ function createUiSnapshot(input: {
       topology: createSingleAgentTopology("误报论证-1"),
     },
     launchCwd: WORKSPACE_CWD,
-    taskLogFilePath: null,
+    taskLogFilePath: "/tmp/agent-team-app-runtime-refresh/task.log",
     taskUrl: "http://localhost:4310/",
   };
 }
@@ -493,6 +494,7 @@ test("submitTaskMutation 成功后会失效 ui-snapshot 查询并立即重拉", 
     if (requestUrl.pathname === "/api/tasks/submit") {
       submitTaskRequestCount += 1;
       currentSnapshot = refreshedSnapshot;
+      assert.equal(refreshedSnapshot.kind, "task");
       return new Response(JSON.stringify(refreshedSnapshot.task), { status: 200 });
     }
     throw new Error(`unexpected request: ${requestUrl.pathname} ${init?.method ?? "GET"}`);
