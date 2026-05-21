@@ -821,13 +821,22 @@ export class Orchestrator {
       );
     }
 
+    const topology = this.store.getTopology();
     const result = await this.executeRuntimeAgentOnce(
       task,
-      null,
       agentId,
       agentId,
       prompt,
       "",
+      topology,
+      isExecutionDecisionAgent({
+        state: { kind: "absent" },
+        topology,
+        runtimeAgentId: agentId,
+        executableAgentId: agentId,
+      }),
+      [],
+      agentId,
     );
     if (!(behavior.completeTaskOnFinish ?? true)) {
       return;
@@ -991,14 +1000,10 @@ export class Orchestrator {
   }
 
   private resolveAllowedDecisionTriggers(input: {
-    state: GraphTaskState | null;
     topology: Pick<TopologyRecord, "edges" | "flow">;
     runtimeAgentId: string;
     executableAgentId: string;
   }): AllowedDecisionTrigger[] {
-    const effectiveTopology = input.state
-      ? buildEffectiveTopology(input.state)
-      : input.topology;
     const sourceAgentIds = [
       ...new Set([input.runtimeAgentId, input.executableAgentId]),
     ];
@@ -1011,8 +1016,8 @@ export class Orchestrator {
     };
 
     for (const trigger of collectTopologyTriggerShapes({
-      edges: effectiveTopology.edges,
-      endIncoming: effectiveTopology.flow.end.incoming,
+      edges: input.topology.edges,
+      endIncoming: input.topology.flow.end.incoming,
     })) {
       if (!sourceAgentIds.includes(trigger.source)) {
         continue;
@@ -1048,19 +1053,14 @@ export class Orchestrator {
   }
 
   private extractTrailingTopLevelSection(content: string): string {
-    const headingPattern = /(^|\n)(#{1,2}\s+[^\n]+)\n/g;
-    let lastHeadingIndex = -1;
-    let match: RegExpExecArray | null = headingPattern.exec(content);
-    while (match) {
-      const prefix = match[1] ?? "";
-      lastHeadingIndex = match.index + prefix.length;
-      match = headingPattern.exec(content);
-    }
-
-    if (lastHeadingIndex < 0) {
+    const headingPattern = /^#{1,2}\s+[^\n]+/gm;
+    const headings = [...content.matchAll(headingPattern)];
+    const [lastHeading] = headings.slice(-1);
+    if (!lastHeading) {
       return content;
     }
 
+    const lastHeadingIndex = lastHeading.index;
     const trailingSection = content.slice(lastHeadingIndex).trim();
     return trailingSection || content;
   }
@@ -1349,7 +1349,7 @@ export class Orchestrator {
   }
 
   private resolveExecutableAgentId(
-    state: GraphTaskState | null,
+    state: GraphTaskState,
     runtimeAgentId: string,
   ): string {
     const availableAgents = this.listWorkspaceAgents();
@@ -1357,9 +1357,7 @@ export class Orchestrator {
       return runtimeAgentId;
     }
 
-    const templateName = state
-      ? getRuntimeTemplateName(state, runtimeAgentId)
-      : null;
+    const templateName = getRuntimeTemplateName(state, runtimeAgentId);
     if (
       templateName &&
       availableAgents.some((agent) => agent.id === templateName)
@@ -1371,12 +1369,9 @@ export class Orchestrator {
   }
 
   private resolveMessageSenderDisplayName(
-    state: GraphTaskState | null,
+    state: GraphTaskState,
     runtimeAgentId: string,
   ): string {
-    if (!state) {
-      return runtimeAgentId;
-    }
     return (
       state.runtimeNodes.find((node) => node.id === runtimeAgentId)
         ?.displayName ?? runtimeAgentId
@@ -1755,6 +1750,14 @@ export class Orchestrator {
         state,
         job.agentId,
       );
+      const topology = buildEffectiveTopology(state);
+      const storedTopology = this.store.getTopology();
+      const decisionAgent = isExecutionDecisionAgent({
+        state: { kind: "available", value: state },
+        topology: storedTopology,
+        runtimeAgentId: job.agentId,
+        executableAgentId,
+      });
       let prompt: AgentExecutionPrompt;
       let forwardedAgentMessage = "";
       if (job.kind === "raw") {
@@ -1769,7 +1772,7 @@ export class Orchestrator {
         }
         const sourceAgentId = batch.source.agentId;
         const edgeForwardingConfig = this.getEdgeForwardingConfig(
-          buildEffectiveTopology(state),
+          topology,
           sourceAgentId,
           job.agentId,
           batch.routingKind === "default"
@@ -1814,40 +1817,42 @@ export class Orchestrator {
         forwardedAgentMessage =
           forwardedContext.kind === "empty" ? "" : forwardedContext.agentMessage;
       }
-      if (prompt.mode === "control") {
-        return {
-          agentId: job.agentId,
-          promise: this.executeRuntimeAgentOnce(
-            task,
-            state,
-            job.agentId,
-            executableAgentId,
-            prompt,
-            forwardedAgentMessage,
-          ),
-        };
-      }
       return {
         agentId: job.agentId,
-          promise: this.executeRuntimeAgentOnce(
-            task,
+        promise: this.executeRuntimeAgentOnce(
+          task,
+          job.agentId,
+          executableAgentId,
+          prompt,
+          forwardedAgentMessage,
+          topology,
+          decisionAgent,
+          decisionAgent
+            ? this.resolveAllowedDecisionTriggers({
+                topology,
+                runtimeAgentId: job.agentId,
+                executableAgentId,
+              })
+            : [],
+          this.resolveMessageSenderDisplayName(
             state,
             job.agentId,
-            executableAgentId,
-            prompt,
-            forwardedAgentMessage,
           ),
+        ),
       };
     });
   }
 
   private async executeRuntimeAgentOnce(
     task: TaskRecord,
-    state: GraphTaskState | null,
     runtimeAgentId: string,
     executableAgentId: string,
     prompt: AgentExecutionPrompt,
     forwardedAgentMessage: string,
+    topology: TopologyRecord,
+    decisionAgent: boolean,
+    allowedDecisionTriggers: AllowedDecisionTrigger[],
+    senderDisplayName: string,
   ): Promise<GraphAgentResult> {
     this.store.updateTaskAgentRun(task.id, runtimeAgentId, "running");
     this.updateTaskStatusIfActive(task.id, "running");
@@ -1913,22 +1918,7 @@ export class Orchestrator {
         payload: this.hydrateTask(task.id),
       });
 
-      const topology = this.store.getTopology();
       const dispatchedContent = this.buildAgentExecutionPrompt(prompt);
-      const decisionAgent = isExecutionDecisionAgent({
-        state: state ? { kind: "available", value: state } : { kind: "absent" },
-        topology,
-        runtimeAgentId,
-        executableAgentId,
-      });
-      const allowedDecisionTriggers = decisionAgent
-        ? this.resolveAllowedDecisionTriggers({
-            state,
-            topology,
-            runtimeAgentId,
-            executableAgentId,
-          })
-        : [];
       const responsePromise = this.opencodeRunner.run({
         sessionId: agentSessionId,
         content: dispatchedContent,
@@ -1955,13 +1945,10 @@ export class Orchestrator {
         decisionAgent,
         allowedDecisionTriggers,
       );
-      const effectiveTopology = state
-        ? buildEffectiveTopology(state)
-        : topology;
       const resolvedDecision = this.resolveParsedDecisionValue({
         parsedDecision,
         decisionAgent,
-        topology: effectiveTopology,
+        topology,
         sourceAgentIds: [runtimeAgentId, executableAgentId],
       });
       const agentContextContent = this.resolveAgentContextContent(
@@ -1984,10 +1971,7 @@ export class Orchestrator {
         status: response.status,
         responseNote: parsedDecision.opinion ?? "",
         rawResponse: response.finalMessage,
-        senderDisplayName: this.resolveMessageSenderDisplayName(
-          state,
-          runtimeAgentId,
-        ),
+        senderDisplayName,
       };
       let taskMessage: MessageRecord;
       if (resolvedDecision === "triggered" && parsedDecision.kind === "valid") {
@@ -2078,13 +2062,6 @@ export class Orchestrator {
       };
       return invalidResult;
     } catch (error) {
-      const topology = this.store.getTopology();
-      const decisionAgent = isExecutionDecisionAgent({
-        state: state ? { kind: "available", value: state } : { kind: "absent" },
-        topology,
-        runtimeAgentId,
-        executableAgentId,
-      });
       this.store.updateTaskAgentStatus(
         task.id,
         runtimeAgentId,
@@ -2200,10 +2177,14 @@ export class Orchestrator {
   }
 
   private createTrailingMessageTimestamp(taskId: string): string {
-    const latestTimestamp =
-      this.store.listMessages(taskId).at(-1)?.timestamp ?? null;
     const nowMs = Date.now();
-    const latestMs = latestTimestamp ? Date.parse(latestTimestamp) : Number.NaN;
+    const messages = this.store.listMessages(taskId);
+    const [latestMessage] = messages.slice(-1);
+    if (!latestMessage) {
+      return new Date(nowMs).toISOString();
+    }
+
+    const latestMs = Date.parse(latestMessage.timestamp);
     const nextMs = Number.isFinite(latestMs)
       ? Math.max(nowMs, latestMs + 1)
       : nowMs;
@@ -2269,26 +2250,22 @@ export class Orchestrator {
       : {};
   }
 
-  private extractSessionIdFromOpenCodeEvent(event: unknown): string | null {
+  private findOpenCodeSessionId(event: unknown): string[] {
     const record = this.asRecord(event);
     const properties = this.asRecord(record["properties"]);
     const payload = this.asRecord(record["payload"]);
-    const candidates = [
+    return [
       record["sessionID"],
       record["sessionId"],
       properties["sessionID"],
       properties["sessionId"],
       payload["sessionID"],
       payload["sessionId"],
-    ];
-
-    for (const candidate of candidates) {
-      if (typeof candidate === "string" && candidate.trim()) {
-        return candidate.trim();
-      }
-    }
-
-    return null;
+    ].flatMap((candidate) =>
+      typeof candidate === "string" && candidate.trim()
+        ? [candidate.trim()]
+        : [],
+    );
   }
 
   private scheduleRuntimeSync(taskId: string) {
@@ -2561,12 +2538,12 @@ export class Orchestrator {
     }
 
     const onEvent = (event: unknown) => {
-      const sessionId = this.extractSessionIdFromOpenCodeEvent(event);
-      if (!sessionId) {
+      const sessionIds = this.findOpenCodeSessionId(event);
+      if (sessionIds.length === 0) {
         return;
       }
       const runtimeOverlay = [...this.taskRuntimeOverlays.values()].find((item) =>
-        [...item.agentSessions.values()].some((currentSessionId) => currentSessionId === sessionId)
+        [...item.agentSessions.values()].some((currentSessionId) => sessionIds.includes(currentSessionId))
       );
       if (!runtimeOverlay) {
         return;
