@@ -2,11 +2,18 @@ import assert from "node:assert/strict";
 import { test } from "bun:test";
 
 import type { MessageRecord } from "@shared/types";
+import type { ChatMessageItem } from "../lib/chat-messages";
 import {
   collectIncrementalChatTranscript,
   renderChatStreamEntries,
 } from "./chat-stream-printer";
 import { toUtcIsoTimestamp } from "@shared/types";
+
+function singleEntry(entries: ChatMessageItem[]): ChatMessageItem {
+  assert.equal(entries.length, 1);
+  const [entry = assert.fail("缺少群聊条目")] = entries;
+  return entry;
+}
 
 type TestMessageInputBase = {
   id: string;
@@ -147,9 +154,9 @@ test("collectIncrementalChatTranscript 只返回新增的群聊合并消息", ()
   ];
 
   const entries = collectIncrementalChatTranscript(previous, next);
-  assert.equal(entries.length, 1);
-  assert.equal(entries[0]?.sender, "Build");
-  assert.match(entries[0]?.content ?? "", /@CodeReview/);
+  const entry = singleEntry(entries);
+  assert.equal(entry.sender, "Build");
+  assert.match(entry.content, /@CodeReview/);
 });
 
 test("collectIncrementalChatTranscript 在没有新增群聊消息时返回空数组", () => {
@@ -211,6 +218,23 @@ test("renderChatStreamEntries 输出的是群聊文本，不包含 agent runtime
   assert.match(output, /│ {4}Build 已完成。/);
   assert.match(output, /│ {4}@CodeReview/);
   assert.doesNotMatch(output, /tool|thinking|step|activeToolNames/i);
+});
+
+test("renderChatStreamEntries 优先展示 senderDisplayName", () => {
+  const output = renderChatStreamEntries([
+    {
+      id: "m1",
+      sender: "TaskReview",
+      senderDisplayName: "TaskReview-1",
+      timestamp: toUtcIsoTimestamp("2026-04-19T10:00:00.000Z"),
+      content: "已完成审查。",
+      kinds: ["agent-final"],
+      messageChain: [],
+    },
+  ]);
+
+  assert.match(output, /TaskReview-1/);
+  assert.doesNotMatch(output, /\] TaskReview\s/);
 });
 
 test("renderChatStreamEntries 的标题左对齐，正文上下不保留空白 padding", () => {

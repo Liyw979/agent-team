@@ -19,14 +19,41 @@ const EXCLUDED_RUNTIME_WEB_SOURCE_PATHS = new Set([
   "src/cli/generated-embedded-assets.ts",
 ]);
 
-interface ResolvedRuntimeAssets {
-  webRoot: string | null;
-}
+type ResolvedRuntimeAssets =
+  | {
+      kind: "available";
+      webRoot: string;
+    }
+  | {
+      kind: "unavailable";
+    };
 
-interface ResolveRuntimeWebRootInput {
-  fallbackWebRoot: string | null;
-  fallbackIndexHtmlExists: boolean;
-}
+type RuntimeWebRootCandidate =
+  | {
+      kind: "available";
+      webRoot: string;
+    }
+  | {
+      kind: "unavailable";
+    };
+
+type SourceMtimeResult =
+  | {
+      kind: "found";
+      mtimeMs: number;
+    }
+  | {
+      kind: "missing";
+    };
+
+type RuntimeDirResult =
+  | {
+      kind: "found";
+      runtimeDir: string;
+    }
+  | {
+      kind: "missing";
+    };
 
 interface ResolveCompiledEmbeddedWebRootInput {
   runtimeRoot: string;
@@ -35,25 +62,39 @@ interface ResolveCompiledEmbeddedWebRootInput {
 
 function resolveSourceAssetFallback(input: {
   repoWebRootExists: boolean;
-  distBuiltAtMs: number | null;
-  latestSourceUpdatedAtMs: number | null;
+  distBuiltAtMs: SourceMtimeResult;
+  latestSourceUpdatedAtMs: SourceMtimeResult;
 }): "webRoot" | "unavailable" {
   if (!input.repoWebRootExists) {
     return "unavailable";
   }
 
-  if (!Number.isFinite(input.distBuiltAtMs) || !Number.isFinite(input.latestSourceUpdatedAtMs)) {
+  if (input.distBuiltAtMs.kind === "missing" || input.latestSourceUpdatedAtMs.kind === "missing") {
     return "unavailable";
   }
 
-  return (input.distBuiltAtMs ?? 0) >= (input.latestSourceUpdatedAtMs ?? 0)
+  return input.distBuiltAtMs.mtimeMs >= input.latestSourceUpdatedAtMs.mtimeMs
     ? "webRoot"
     : "unavailable";
 }
 
 export function isCompiledRuntime(): boolean {
-  const runtimeDir = (import.meta as ImportMeta & { dir?: string }).dir ?? "";
-  return isCompiledRuntimeDir(runtimeDir) || isCompiledRuntimeExecutable(process.execPath);
+  const runtimeDirResult = readImportMetaRuntimeDir(import.meta);
+  return (
+    runtimeDirResult.kind === "found" && isCompiledRuntimeDir(runtimeDirResult.runtimeDir)
+  ) || isCompiledRuntimeExecutable(process.execPath);
+}
+
+function readImportMetaRuntimeDir(meta: ImportMeta): RuntimeDirResult {
+  if ("dir" in meta && typeof meta.dir === "string") {
+    return {
+      kind: "found",
+      runtimeDir: meta.dir,
+    };
+  }
+  return {
+    kind: "missing",
+  };
 }
 
 function isCompiledRuntimeDir(runtimeDir: string): boolean {
@@ -64,11 +105,8 @@ function isCompiledRuntimeDir(runtimeDir: string): boolean {
 }
 
 function isCompiledRuntimeExecutable(execPath: string): boolean {
-  const normalizedExecPath = (execPath || "").replace(/\\/g, "/");
+  const normalizedExecPath = execPath.replace(/\\/g, "/");
   const executableName = path.posix.basename(normalizedExecPath).toLowerCase();
-  if (!executableName) {
-    return false;
-  }
 
   return executableName !== "node"
     && executableName !== "node.exe"
@@ -82,33 +120,34 @@ function getRepoWebDistRoot(): string {
 
 function shouldReuseRepoWebDist(input: {
   repoWebRootExists: boolean;
-  distBuiltAtMs: number | null;
-  latestSourceUpdatedAtMs: number | null;
+  distBuiltAtMs: SourceMtimeResult;
+  latestSourceUpdatedAtMs: SourceMtimeResult;
 }) {
   return resolveSourceAssetFallback(input) === "webRoot";
 }
 
-function resolveCompiledEmbeddedWebRoot(input: ResolveCompiledEmbeddedWebRootInput): string | null {
+function resolveCompiledEmbeddedWebRoot(input: ResolveCompiledEmbeddedWebRootInput): RuntimeWebRootCandidate {
   return input.embeddedAssetRelativePaths.includes("index.html")
-    ? path.join(input.runtimeRoot, "web")
-    : null;
+    ? {
+        kind: "available",
+        webRoot: path.join(input.runtimeRoot, "web"),
+      }
+    : {
+        kind: "unavailable",
+      };
 }
 
-function resolveRuntimeWebRoot(input: ResolveRuntimeWebRootInput): string | null {
-  if (!input.fallbackWebRoot) {
-    return null;
+function resolveRuntimeWebRoot(candidate: RuntimeWebRootCandidate): ResolvedRuntimeAssets {
+  if (candidate.kind === "unavailable") {
+    return candidate;
   }
-
-  return input.fallbackIndexHtmlExists ? input.fallbackWebRoot : null;
-}
-
-function hasIndexHtmlFile(webRoot: string | null): boolean {
-  if (!webRoot) {
-    return false;
-  }
-
+  const webRoot = candidate.webRoot;
   const indexPath = path.join(webRoot, "index.html");
-  return fs.existsSync(indexPath) && fs.statSync(indexPath).isFile();
+  return fs.existsSync(indexPath) && fs.statSync(indexPath).isFile()
+    ? candidate
+    : {
+        kind: "unavailable",
+      };
 }
 
 function isRuntimeWebSourcePath(relativePath: string): boolean {
@@ -116,59 +155,82 @@ function isRuntimeWebSourcePath(relativePath: string): boolean {
   return !EXCLUDED_RUNTIME_WEB_SOURCE_PATHS.has(normalized);
 }
 
-function getLatestSourceAwareMtimeMs(targetPath: string): number | null {
+function foundMtime(mtimeMs: number): SourceMtimeResult {
+  return {
+    kind: "found",
+    mtimeMs,
+  };
+}
+
+function missingMtime(): SourceMtimeResult {
+  return {
+    kind: "missing",
+  };
+}
+
+function latestMtime(left: SourceMtimeResult, right: SourceMtimeResult): SourceMtimeResult {
+  if (left.kind === "missing") {
+    return right;
+  }
+  if (right.kind === "missing") {
+    return left;
+  }
+  return left.mtimeMs >= right.mtimeMs ? left : right;
+}
+
+function readFileMtime(filePath: string): SourceMtimeResult {
+  return fs.existsSync(filePath)
+    ? foundMtime(fs.statSync(filePath).mtimeMs)
+    : missingMtime();
+}
+
+function getLatestSourceAwareMtimeMs(targetPath: string): SourceMtimeResult {
   if (!fs.existsSync(targetPath)) {
-    return null;
+    return missingMtime();
   }
 
   const stat = fs.statSync(targetPath);
   if (stat.isFile()) {
     const relativePath = path.relative(REPO_ROOT, targetPath).replace(/\\/g, "/");
-    return isRuntimeWebSourcePath(relativePath) ? stat.mtimeMs : null;
+    return isRuntimeWebSourcePath(relativePath)
+      ? foundMtime(stat.mtimeMs)
+      : missingMtime();
   }
 
   if (!stat.isDirectory()) {
-    return null;
+    return missingMtime();
   }
 
-  let latest: number | null = null;
-  for (const entry of fs.readdirSync(targetPath, { withFileTypes: true })) {
-    const childLatest = getLatestSourceAwareMtimeMs(path.join(targetPath, entry.name));
-    if (typeof childLatest === "number" && (latest === null || childLatest > latest)) {
-      latest = childLatest;
-    }
-  }
-  return latest;
+  return fs.readdirSync(targetPath, { withFileTypes: true }).reduce(
+    (latest, entry) => latestMtime(latest, getLatestSourceAwareMtimeMs(path.join(targetPath, entry.name))),
+    missingMtime(),
+  );
 }
 
 function getLatestRepoWebSourceUpdatedAtMs() {
-  let latest: number | null = null;
-
-  for (const relativePath of WEB_SOURCE_WATCH_PATHS) {
-    const candidate = getLatestSourceAwareMtimeMs(path.join(REPO_ROOT, relativePath));
-    if (typeof candidate === "number" && (latest === null || candidate > latest)) {
-      latest = candidate;
-    }
-  }
-
-  return latest;
+  return WEB_SOURCE_WATCH_PATHS.reduce(
+    (latest, relativePath) => latestMtime(latest, getLatestSourceAwareMtimeMs(path.join(REPO_ROOT, relativePath))),
+    missingMtime(),
+  );
 }
 
 export async function ensureRuntimeAssets(userDataPath: string): Promise<ResolvedRuntimeAssets> {
   const runtimeRoot = path.join(userDataPath, "runtime", packageJson.version);
   fs.mkdirSync(runtimeRoot, { recursive: true });
 
-  let fallbackWebRoot: string | null = null;
+  let candidate: RuntimeWebRootCandidate = {
+    kind: "unavailable",
+  };
 
   if (isCompiledRuntime()) {
     const compiledEmbeddedWebRoot = resolveCompiledEmbeddedWebRoot({
       runtimeRoot,
       embeddedAssetRelativePaths: EMBEDDED_WEB_ASSETS.map((asset) => asset.relativePath),
     });
-    if (compiledEmbeddedWebRoot) {
-      fallbackWebRoot = compiledEmbeddedWebRoot;
+    if (compiledEmbeddedWebRoot.kind === "available") {
+      candidate = compiledEmbeddedWebRoot;
       for (const asset of EMBEDDED_WEB_ASSETS) {
-        const targetPath = path.join(fallbackWebRoot, asset.relativePath);
+        const targetPath = path.join(candidate.webRoot, asset.relativePath);
         fs.mkdirSync(path.dirname(targetPath), { recursive: true });
         fs.writeFileSync(targetPath, Buffer.from(asset.base64, "base64"));
       }
@@ -178,19 +240,15 @@ export async function ensureRuntimeAssets(userDataPath: string): Promise<Resolve
     const repoIndexPath = path.join(repoWebRoot, "index.html");
     if (shouldReuseRepoWebDist({
       repoWebRootExists: fs.existsSync(repoIndexPath),
-      distBuiltAtMs: fs.existsSync(repoIndexPath) ? fs.statSync(repoIndexPath).mtimeMs : null,
+      distBuiltAtMs: readFileMtime(repoIndexPath),
       latestSourceUpdatedAtMs: getLatestRepoWebSourceUpdatedAtMs(),
     })) {
-      fallbackWebRoot = repoWebRoot;
+      candidate = {
+        kind: "available",
+        webRoot: repoWebRoot,
+      };
     }
   }
 
-  const webRoot = resolveRuntimeWebRoot({
-    fallbackWebRoot,
-    fallbackIndexHtmlExists: hasIndexHtmlFile(fallbackWebRoot),
-  });
-
-  return {
-    webRoot,
-  };
+  return resolveRuntimeWebRoot(candidate);
 }

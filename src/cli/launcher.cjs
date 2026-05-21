@@ -23,5 +23,5 @@ child.on("exit", (code, signal) => {
     process.kill(process.pid, signal);
     return;
   }
-  process.exit(code ?? 0);
+  process.exit(Number.isInteger(code) ? code : 0);
 });

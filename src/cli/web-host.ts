@@ -37,7 +37,7 @@ function json(response: http.ServerResponse, statusCode: number, body: unknown) 
   response.end(JSON.stringify(body));
 }
 
-function text(response: http.ServerResponse, statusCode: number, body: string, extraHeaders?: Record<string, string>) {
+function text(response: http.ServerResponse, statusCode: number, body: string, extraHeaders: Record<string, string> = {}) {
   response.writeHead(statusCode, {
     "content-type": "text/plain; charset=utf-8",
     "cache-control": "no-store",
@@ -58,30 +58,39 @@ async function readJsonBody(request: http.IncomingMessage): Promise<unknown> {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+  return Object.prototype.toString.call(value) === "[object Object]";
 }
 
 function parseSubmitTaskPayload(body: unknown): SubmitTaskPayload {
-  const content = isRecord(body) ? body["content"] : undefined;
-  const hasMentionAgentId = isRecord(body) && Object.hasOwn(body, "mentionAgentId");
-  const mentionAgentId = isRecord(body) ? body["mentionAgentId"] : undefined;
+  if (!isRecord(body) || !Object.hasOwn(body, "content")) {
+    throw new Error("非法请求：content 必须是非空字符串");
+  }
+  const content = body["content"];
   if (typeof content !== "string" || content.trim() === "") {
     throw new Error("非法请求：content 必须是非空字符串");
   }
+  if (!Object.hasOwn(body, "mentionAgentId")) {
+    return {
+      content,
+    };
+  }
+  const mentionAgentId = body["mentionAgentId"];
   if (
-    hasMentionAgentId
-    && (typeof mentionAgentId !== "string" || mentionAgentId.trim() === "")
+    typeof mentionAgentId !== "string" || mentionAgentId.trim() === ""
   ) {
     throw new Error("非法请求：mentionAgentId 必须是非空字符串");
   }
   return {
     content,
-    ...(hasMentionAgentId ? { mentionAgentId: mentionAgentId as string } : {}),
+    mentionAgentId,
   };
 }
 
 function parseOpenAgentTerminalPayload(body: unknown): OpenAgentTerminalPayload {
-  const agentId = isRecord(body) ? body["agentId"] : undefined;
+  if (!isRecord(body) || !Object.hasOwn(body, "agentId")) {
+    throw new Error("非法请求：agentId 必须是非空字符串");
+  }
+  const agentId = body["agentId"];
   if (typeof agentId !== "string" || agentId.trim() === "") {
     throw new Error("非法请求：agentId 必须是非空字符串");
   }
@@ -179,7 +188,8 @@ export async function startWebHost(
       return;
     }
 
-    const url = new URL(request.url, `http://${request.headers.host ?? UI_LOOPBACK_HOST}`);
+    const requestHost = typeof request.headers.host === "string" ? request.headers.host : UI_LOOPBACK_HOST;
+    const url = new URL(request.url, `http://${requestHost}`);
     try {
       if (request.method === "GET" && url.pathname === "/healthz") {
         json(response, 200, {

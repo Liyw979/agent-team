@@ -10,6 +10,12 @@ function createTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "agent-team-topology-file-"));
 }
 
+function singleNode(nodes: Array<{ id: string }>) {
+  assert.equal(nodes.length, 1);
+  const [node = assert.fail("缺少拓扑节点")] = nodes;
+  return node;
+}
+
 test("loadTeamDslDefinitionFile 读取 .yaml 文件时支持 YAML 语法", () => {
   const tempDir = createTempDir();
   const filePath = path.join(tempDir, "team.topology.yaml");
@@ -23,12 +29,12 @@ links: []
 `, "utf8");
 
   const parsed = loadTeamDslDefinitionFile<{
-    entry?: string;
-    nodes?: Array<{ id?: string }>;
+    entry: string;
+    nodes: Array<{ id: string }>;
   }>(filePath);
 
   assert.equal(parsed.entry, "BA");
-  assert.equal(parsed.nodes?.[0]?.id, "BA");
+  assert.equal(singleNode(parsed.nodes).id, "BA");
 });
 
 test("isSupportedTopologyFile 只接受 .yaml 与 .yml", () => {
