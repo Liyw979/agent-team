@@ -46,5 +46,7 @@ export function appendAppLog(
   };
 
   fs.mkdirSync(path.dirname(appLogFilePath), { recursive: true });
-  fs.appendFileSync(appLogFilePath, `${JSON.stringify(record)}\n`, "utf8");
+  const line = `${JSON.stringify(record)}\n`;
+  fs.appendFileSync(appLogFilePath, line, "utf8");
+  process.stdout.write(line);
 }

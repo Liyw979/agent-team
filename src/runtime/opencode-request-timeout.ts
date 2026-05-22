@@ -1,19 +1,15 @@
 const SESSION_CREATE_TIMEOUT_MS = 12_000;
+const SESSION_MESSAGE_TIMEOUT_MS = 300_000;
 
-interface ResolveOpenCodeRequestTimeoutInput {
+export interface ResolveOpenCodeRequestTimeoutInput {
   pathname: string;
   method: "GET" | "POST";
 }
 
-export function shouldTimeboxOpenCodeRequest(
+export function getOpenCodeRequestTimeoutMs(
   input: ResolveOpenCodeRequestTimeoutInput,
-): boolean {
-  return !(
-    input.method === "POST"
-    && /^\/session\/[^/]+\/message$/.test(input.pathname)
-  );
-}
-
-export function getOpenCodeRequestTimeoutMs(): number {
-  return SESSION_CREATE_TIMEOUT_MS;
+): number {
+  return input.method === "POST" && /^\/session\/[^/]+\/message$/.test(input.pathname)
+    ? SESSION_MESSAGE_TIMEOUT_MS
+    : SESSION_CREATE_TIMEOUT_MS;
 }

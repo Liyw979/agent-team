@@ -57,7 +57,6 @@ import {
   type OpenCodeRuntimeActivity,
   type OpenCodeShutdownReport,
 } from "./opencode-client";
-import { OpenCodeRunner } from "./opencode-runner";
 import { StoreService } from "./store";
 import {
   buildRuntimeActivityFreshness,
@@ -92,7 +91,7 @@ import type { CompiledTeamDsl } from "./team-dsl";
 import { shouldScheduleEventStreamReconnect } from "./event-stream-lifecycle";
 import { isExecutionDecisionAgent } from "./decision-agent-context";
 import { resolveTaskAgentIdsToPrewarm } from "./task-session-prewarm";
-import { appendAppLog, bindCurrentTaskLog } from "./app-log";
+import { bindCurrentTaskLog } from "./app-log";
 import {
   buildInjectedConfigFromAgents,
   extractDslAgentsFromTopology,
@@ -270,7 +269,6 @@ export function isTerminalTaskStatus(status: TaskRecord["status"]) {
 export class Orchestrator {
   readonly store: StoreService;
   private startedOpenCodeClient!: OpenCodeClient;
-  private startedOpenCodeRunner!: OpenCodeRunner;
   private hasStartedOpenCode = false;
   readonly cwd: string;
   private readonly events = new EventEmitter();
@@ -313,13 +311,6 @@ export class Orchestrator {
       throw new Error("OpenCodeClient 尚未启动。");
     }
     return this.startedOpenCodeClient;
-  }
-
-  get opencodeRunner(): OpenCodeRunner {
-    if (!this.hasStartedOpenCode) {
-      throw new Error("OpenCodeRunner 尚未启动。");
-    }
-    return this.startedOpenCodeRunner;
   }
 
   async dispose(
@@ -1099,50 +1090,6 @@ export class Orchestrator {
     return created;
   }
 
-  private listTaskAgentSessionEntries(
-    taskId: string,
-    agentSessions: ReadonlyMap<string, string>,
-  ) {
-    return this.store.listTaskAgents(taskId).map((agent) => {
-      const sessionId = agentSessions.get(agent.id);
-      return {
-        agentId: agent.id,
-        sessionId: sessionId === undefined ? "" : sessionId,
-      };
-    });
-  }
-
-  private appendTaskAgentSessionsLog(
-    taskId: string,
-    reason: "initialized" | "session-created",
-    agentSessions: ReadonlyMap<string, string>,
-  ) {
-    appendAppLog(
-      "info",
-      "task.opencode_sessions_snapshot",
-      {
-        reason,
-        agentSessions: this.listTaskAgentSessionEntries(taskId, agentSessions),
-      },
-    );
-  }
-
-  private appendAgentSessionCreatedLog(
-    task: TaskRecord,
-    agentId: string,
-    sessionId: string,
-  ) {
-    appendAppLog(
-      "info",
-      "agent.opencode_session_created",
-      {
-        agentId,
-        sessionId,
-        taskTitle: task.title,
-      },
-    );
-  }
-
   private overlayTaskAgents(
     task: TaskRecord,
     agents: TaskAgentRecord[],
@@ -1170,8 +1117,6 @@ export class Orchestrator {
       agent.id,
     );
     overlay.agentSessions.set(agent.id, sessionId);
-    this.appendAgentSessionCreatedLog(task, agent.id, sessionId);
-    this.appendTaskAgentSessionsLog(task.id, "session-created", overlay.agentSessions);
     return sessionId;
   }
 
@@ -1201,9 +1146,7 @@ export class Orchestrator {
     const client = new OpenCodeClient({
       server,
     });
-    const runner = new OpenCodeRunner(client);
     this.startedOpenCodeClient = client;
-    this.startedOpenCodeRunner = runner;
     this.hasStartedOpenCode = true;
     overlay.attachBaseUrl = `http://${client.host}:${server.port}`;
   }
@@ -1245,8 +1188,6 @@ export class Orchestrator {
 
     const refreshedTask = this.store.getTask(task.id);
     if (!refreshedTask.initializedAt) {
-      const overlay = this.ensureTaskRuntimeOverlay(currentTask.id);
-      this.appendTaskAgentSessionsLog(currentTask.id, "initialized", overlay.agentSessions);
       this.store.updateTaskInitialized(
         task.id,
         new Date().toISOString(),
@@ -1885,10 +1826,10 @@ export class Orchestrator {
       });
 
       const dispatchedContent = this.buildAgentExecutionPrompt(prompt);
-      const responsePromise = this.opencodeRunner.run({
-        sessionId: agentSessionId,
-        content: dispatchedContent,
+      const responsePromise = this.opencodeClient.submitMessage(agentSessionId, {
         agent: executableAgentId,
+        runtimeAgent: runtimeAgentId,
+        content: dispatchedContent,
         allowedDecisionTriggers: allowedDecisionTriggers.map((item) => item.trigger),
       });
       const response = await this.awaitExecutionWithProgressSync({
@@ -1897,15 +1838,6 @@ export class Orchestrator {
         agentIds: [runtimeAgentId],
       });
 
-      if (response.status === "error") {
-        throw new Error(
-          ("error" in response.rawMessage
-            ? response.rawMessage.error
-            : "") ||
-            response.finalMessage ||
-            `${runtimeAgentId} 返回错误状态`,
-        );
-      }
       const parsedDecision = parseDecisionPure(
         response.finalMessage,
         decisionAgent,
@@ -1934,7 +1866,7 @@ export class Orchestrator {
         timestamp: toUtcIsoTimestamp(response.timestamp),
         kind: "agent-final",
         runCount: currentAgent.runCount,
-        status: response.status,
+        status: "completed",
         responseNote: parsedDecision.opinion ?? "",
         rawResponse: response.finalMessage,
         senderDisplayName,

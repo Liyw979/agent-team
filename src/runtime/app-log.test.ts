@@ -15,6 +15,21 @@ function createTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "agent-team-app-log-"));
 }
 
+function captureStdout(action: () => void): string {
+  const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+  const stdoutMessages: string[] = [];
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    stdoutMessages.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+    return true;
+  }) as typeof process.stdout.write;
+  try {
+    action();
+    return stdoutMessages.join("");
+  } finally {
+    process.stdout.write = originalStdoutWrite;
+  }
+}
+
 test("appendAppLog writes task-scoped records into logs/tasks/<taskId>.log", () => {
   const userDataPath = createTempDir();
   initAppFileLogger(userDataPath);
@@ -31,6 +46,19 @@ test("appendAppLog writes task-scoped records into logs/tasks/<taskId>.log", () 
   assert.equal(JSON.parse(lines[0]!).taskId, "task-123");
   assert.equal(JSON.parse(lines[1]!).event, "task.failed");
   assert.equal(JSON.parse(lines[1]!).taskId, "task-123");
+});
+
+test("appendAppLog writes the same task record to stdout", () => {
+  const userDataPath = createTempDir();
+  initAppFileLogger(userDataPath);
+  bindCurrentTaskLog("task-stdout");
+
+  const stdout = captureStdout(() => appendAppLog("warn", "task.warning", { message: "check" }));
+  const logFilePath = buildTaskLogFilePath(userDataPath, "task-stdout");
+  const [fileLine] = fs.readFileSync(logFilePath, "utf8").trim().split("\n");
+
+  assert.equal(stdout, `${fileLine}\n`);
+  assert.equal(JSON.parse(stdout).event, "task.warning");
 });
 
 test("appendAppLog does not recreate the legacy agent-team.log file", () => {

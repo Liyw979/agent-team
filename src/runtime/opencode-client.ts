@@ -1,10 +1,12 @@
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { parseDecision } from "./decision-parser";
-import { buildSubmitMessageBody } from "./opencode-request-body";
 import { toOpenCodeAgentId } from "./opencode-agent-id";
 import { appendAppLog } from "./app-log";
 import { extractOpenCodeServeBaseUrl } from "./opencode-serve-launch";
-import { getOpenCodeRequestTimeoutMs, shouldTimeboxOpenCodeRequest } from "./opencode-request-timeout";
+import {
+  getOpenCodeRequestTimeoutMs,
+  type ResolveOpenCodeRequestTimeoutInput,
+} from "./opencode-request-timeout";
 import { resolveWindowsCmdPath } from "./windows-shell";
 import type { OpenCodeInjectedConfig } from "./project-agent-source";
 import { toUtcIsoTimestamp, type UtcIsoTimestamp } from "@shared/types";
@@ -16,9 +18,11 @@ export interface ServeHandle {
 
 type OpenCodeEvent = Record<string, unknown>;
 
-export interface SubmitMessagePayload {
+interface SubmitMessagePayload {
   content: string;
   agent: string;
+  runtimeAgent: string;
+  allowedDecisionTriggers: string[];
 }
 
 interface OpenCodeMessageBase {
@@ -38,7 +42,6 @@ export type OpenCodeNormalizedMessage =
     });
 
 export interface OpenCodeExecutionResult {
-  status: "completed" | "error";
   finalMessage: string;
   messageId: string;
   timestamp: UtcIsoTimestamp;
@@ -95,15 +98,7 @@ const TOOL_CALL_DETAIL_CONTAINERS = [
 
 const MAX_RUNTIME_MESSAGES = 100;
 const SERVE_BASE_URL_TIMEOUT_MS = 10_000;
-const TRANSPORT_ERROR_RECOVERY_TIMEOUT_MS = 180_000;
-const RETRYABLE_CLIENT_INTERVAL_MS = 60_000;
-interface SessionWaiter {
-  sessionId: string;
-  after: number;
-  resolve: () => void;
-  reject: (error: Error) => void;
-}
-
+const RETRYABLE_CLIENT_INTERVAL_MS = 120_000;
 interface WorkspaceEventState {
   eventPump: Promise<void>;
   eventSubscribers: Set<(event: OpenCodeEvent) => void>;
@@ -117,43 +112,6 @@ type RequestOptions =
       method: "POST";
       body: string;
     };
-
-interface RecoveredTransportExecutionResult {
-  kind: "recovered";
-  result: OpenCodeExecutionResult;
-}
-
-interface TimedOutTransportExecutionResult {
-  kind: "timed_out";
-}
-
-type TransportRecoveryResult =
-  | RecoveredTransportExecutionResult
-  | TimedOutTransportExecutionResult;
-
-type TransportRecoveryInspection =
-  | {
-    kind: "empty";
-    messageCount: 0;
-  }
-  | {
-    kind: "submitted-message-missing";
-    messageCount: number;
-  }
-  | {
-    kind: "waiting-without-related-reply";
-    messageCount: number;
-  }
-  | {
-    kind: "waiting-with-related-reply";
-    messageCount: number;
-    relatedReplyCount: number;
-  }
-  | {
-    kind: "recovered";
-    messageCount: number;
-    result: OpenCodeExecutionResult;
-  };
 
 class RetryableSubmitMessageError extends Error {}
 
@@ -172,9 +130,6 @@ const idleWorkspaceEventState: WorkspaceEventState = {
 export class OpenCodeClient {
   workspaceEventState: WorkspaceEventState = idleWorkspaceEventState;
   readonly host = "127.0.0.1";
-  readonly sessionIdleAt = new Map<string, number>();
-  readonly sessionErrors = new Map<string, string>();
-  readonly sessionWaiters = new Map<string, SessionWaiter[]>();
   private readonly runningServe: ServeHandle;
 
   constructor(input: { server: ServeHandle }) {
@@ -255,211 +210,156 @@ export class OpenCodeClient {
   async submitMessage(
     sessionId: string,
     payload: SubmitMessagePayload,
-  ): Promise<OpenCodeNormalizedMessage> {
+  ): Promise<OpenCodeExecutionResult> {
     const opencodeAgent = toOpenCodeAgentId(payload.agent);
-    let immediateRetryUsed = false;
-    while (true) {
+    const runtimeAgent = payload.runtimeAgent;
+    const attempt = async (
+      content: string,
+      retryCount: number,
+    ): Promise<OpenCodeExecutionResult> => {
       try {
-        const body = buildSubmitMessageBody({
-          agent: opencodeAgent,
-          content: payload.content,
-        });
-
         const response = await this.request(`/session/${sessionId}/message`, {
           method: "POST",
-          body: JSON.stringify(body),
+          body: JSON.stringify({
+            agent: opencodeAgent,
+            parts: [
+              {
+                type: "text",
+                text: content,
+              },
+            ],
+          }),
         }).catch((error) => {
-          throw new RetryableSubmitMessageError(String(error));
+          const message = String(error);
+          appendAppLog("error", "opencode.submit_message_request_error", {
+            sessionId,
+            agent: opencodeAgent,
+            runtimeAgent,
+            retryCount,
+            message,
+          });
+          throw new RetryableSubmitMessageError(message);
         });
 
         if (!response.ok) {
+          appendAppLog("error", "opencode.submit_message_failed", {
+            sessionId,
+            agent: opencodeAgent,
+            runtimeAgent,
+            retryCount,
+            status: response.status,
+            statusText: response.statusText,
+          });
           throw new RetryableSubmitMessageError(`OpenCode 请求失败: ${response.status}`);
         }
 
-        try {
-          return this.parseMessageEnvelope(
-            await this.readJsonResponse(response),
-            opencodeAgent,
-            "OpenCode 提交消息响应",
-          );
-        } catch {
+        const parsedMessage = await this.readJsonResponse(response)
+          .then((raw) => this.parseMessageEnvelope(raw, opencodeAgent, "OpenCode 提交消息响应"))
+          .then((message) => ({
+            kind: "valid" as const,
+            message,
+          }))
+          .catch(() => ({
+            kind: "invalid" as const,
+          }));
+        if (parsedMessage.kind === "invalid") {
           appendAppLog("error", "opencode.submit_message_invalid_response", {
             sessionId,
             agent: opencodeAgent,
+            runtimeAgent,
+            retryCount,
             status: response.status,
+            statusText: response.statusText,
           });
           throw new RetryableSubmitMessageError("OpenCode 提交消息响应缺少有效的消息实体");
         }
-      } catch (error) {
-        if (!(error instanceof RetryableSubmitMessageError)) {
-          throw error;
-        }
-        this.logRetriedMessageResend(sessionId, opencodeAgent, error.message);
-        if (immediateRetryUsed) {
-          await new Promise((resolve) => setTimeout(resolve, RETRYABLE_CLIENT_INTERVAL_MS));
-        }
-        immediateRetryUsed = true;
-      }
-    }
-  }
 
-  async resolveExecutionResult(
-    sessionId: string,
-    submitted: OpenCodeNormalizedMessage,
-    agentId: string,
-    allowedDecisionTriggers: string[],
-  ): Promise<OpenCodeExecutionResult> {
-    let currentSubmitted = submitted;
-    let immediateRetryUsed = false;
-    while (true) {
-      try {
-        const submittedAt = Date.parse(currentSubmitted.timestamp) || Date.now();
-        const messageCompletionPromise = this.waitForMessageCompletion(
-          sessionId,
-          currentSubmitted.id,
-          8000,
-        );
-        let latest: OpenCodeNormalizedMessage;
-        try {
-          const resolved = await Promise.race([
-            messageCompletionPromise.then((message) => ({
-              kind: "message" as const,
-              message,
-            })),
-            this.waitForSessionSettled(sessionId, submittedAt, 8000).then(() => ({
-              kind: "session-settled" as const,
-            })),
-          ]);
-          latest = resolved.kind === "session-settled"
-            ? await this.getSessionMessage(sessionId, currentSubmitted.id)
-            : resolved.message;
-        } catch (error) {
-          try {
-            latest = await this.getLatestAssistantMessage(sessionId);
-          } catch (latestError) {
-            if (error instanceof RetryableExecutionResultError) {
-              throw error;
-            }
-            throw latestError;
-          }
-        }
-
-        const finalMessage = this.messageHasError(latest.raw)
-          ? this.readMessageError(latest.raw, `OpenCode session ${sessionId} 最终消息`)
-          : latest.content;
-        if (!finalMessage.trim()) {
-          throw new RetryableExecutionResultError(this.buildEmptyAssistantResultError(sessionId, latest));
-        }
-
-        const result: OpenCodeExecutionResult = {
-          status: this.messageHasError(latest.raw) ? "error" : "completed",
-          finalMessage,
-          messageId: latest.id,
-          timestamp: latest.timestamp,
-          rawMessage: latest,
-        };
-        if (result.status === "error" || allowedDecisionTriggers.length === 0) {
-          return result;
-        }
-
-        if (
-          parseDecision(
+        const result = this.buildExecutionResult(sessionId, parsedMessage.message, {
+          agent: opencodeAgent,
+          runtimeAgent,
+          retryCount,
+        });
+        if (payload.allowedDecisionTriggers.length > 0) {
+          const parsedDecision = parseDecision(
             result.finalMessage,
             true,
-            allowedDecisionTriggers.map((trigger) => ({ trigger })),
-          ).kind === "valid"
-        ) {
-          return result;
+            payload.allowedDecisionTriggers.map((trigger) => ({ trigger })),
+          );
+          if (parsedDecision.kind !== "valid") {
+            appendAppLog("warn", "opencode.submit_message_missing_trigger", {
+              sessionId,
+              agent: opencodeAgent,
+              runtimeAgent,
+              retryCount,
+              messageId: result.messageId,
+              allowedDecisionTriggers: payload.allowedDecisionTriggers,
+            });
+            throw new RetryableSubmitMessageError(`OpenCode 未返回需要的 trigger: ${payload.allowedDecisionTriggers.join(" / ")}`);
+          }
         }
-
-        this.logRetriedMessageResend(
-          sessionId,
-          agentId,
-          `OpenCode 未返回需要的 trigger: ${allowedDecisionTriggers.join(" / ")}`,
-        );
-        if (immediateRetryUsed) {
-          await new Promise((resolve) => setTimeout(resolve, RETRYABLE_CLIENT_INTERVAL_MS));
-        }
-        immediateRetryUsed = true;
-        currentSubmitted = await this.submitMessage(
-          sessionId,
-          {
-            agent: agentId,
-            content: `回复需要包含 ${allowedDecisionTriggers.join(" / ")} 中的一个`,
-          },
-        );
+        return result;
       } catch (error) {
-        if (!(error instanceof RetryableExecutionResultError)) {
+        if (!(error instanceof RetryableSubmitMessageError) && !(error instanceof RetryableExecutionResultError)) {
           throw error;
         }
-        if (immediateRetryUsed) {
+        const retryReason = error.message;
+        const nextContent = "生成完整回复";
+        this.logRetriedMessageResend(sessionId, opencodeAgent, runtimeAgent, retryReason, retryCount, nextContent);
+        if (retryCount > 0) {
           await new Promise((resolve) => setTimeout(resolve, RETRYABLE_CLIENT_INTERVAL_MS));
         }
-        immediateRetryUsed = true;
+        return attempt(nextContent, retryCount + 1);
       }
-    }
+    };
+
+    return attempt(payload.content, 0);
   }
 
-  async recoverExecutionResultAfterTransportError(
+  private buildExecutionResult(
     sessionId: string,
-    startedAt: string,
-    errorMessage: string,
-    timeoutMs = TRANSPORT_ERROR_RECOVERY_TIMEOUT_MS,
-  ): Promise<TransportRecoveryResult> {
-    const startedAtMs = Date.parse(startedAt);
-    const lowerBound = Number.isFinite(startedAtMs) ? startedAtMs - 2_000 : Date.now() - 2_000;
-    const deadline = Date.now() + timeoutMs;
-    appendAppLog("info", "opencode.transport_recovery_started", {
-      sessionId,
-      startedAt,
-      errorMessage,
-      timeoutMs,
-    });
-
-    while (Date.now() < deadline) {
-      const inspection = await this.inspectTransportRecovery(sessionId, lowerBound);
-      if (inspection.kind === "recovered") {
-        appendAppLog("info", "opencode.transport_recovery_succeeded", {
-          sessionId,
-          recoveredMessageId: inspection.result.messageId,
-          recoveredAt: inspection.result.timestamp,
-        });
-        return {
-          kind: "recovered",
-          result: inspection.result,
-        };
-      }
-      await new Promise((resolve) => setTimeout(resolve, 400));
-    }
-
-    const finalInspection = await this.inspectTransportRecovery(sessionId, lowerBound);
-    if (finalInspection.kind === "recovered") {
-      appendAppLog("info", "opencode.transport_recovery_succeeded", {
+    message: OpenCodeNormalizedMessage,
+    logContext: {
+      agent: string;
+      runtimeAgent: string;
+      retryCount: number;
+    },
+  ): OpenCodeExecutionResult {
+    const finalMessage = this.messageHasError(message.raw)
+      ? this.readMessageError(message.raw, `OpenCode session ${sessionId} 最终消息`)
+      : message.content;
+    if (!finalMessage.trim()) {
+      const reason = this.buildEmptyAssistantResultError(sessionId, message);
+      appendAppLog("warn", "opencode.execution_empty_final", {
         sessionId,
-        recoveredMessageId: finalInspection.result.messageId,
-        recoveredAt: finalInspection.result.timestamp,
+        agent: logContext.agent,
+        runtimeAgent: logContext.runtimeAgent,
+        retryCount: logContext.retryCount,
+        messageId: message.id,
+        reason,
       });
-      return {
-        kind: "recovered",
-        result: finalInspection.result,
-      };
+      throw new RetryableExecutionResultError(reason);
+    }
+    if (this.messageHasError(message.raw)) {
+      appendAppLog("error", "opencode.execution_error_message", {
+        sessionId,
+        agent: logContext.agent,
+        runtimeAgent: logContext.runtimeAgent,
+        retryCount: logContext.retryCount,
+        messageId: message.id,
+        reason: finalMessage,
+      });
+      throw new RetryableExecutionResultError(finalMessage);
     }
 
-    appendAppLog("error", "opencode.transport_recovery_timed_out", {
-      sessionId,
-      startedAt,
-      errorMessage,
-      timeoutMs,
-      ...this.buildTransportRecoveryTimeoutDetails(finalInspection),
-    });
     return {
-      kind: "timed_out",
+      finalMessage,
+      messageId: message.id,
+      timestamp: message.timestamp,
+      rawMessage: message,
     };
   }
 
-  async getSessionRuntime(
-    sessionId: string,
-  ): Promise<OpenCodeSessionRuntime> {
+  async getSessionRuntime( sessionId: string ): Promise<OpenCodeSessionRuntime> {
     const list = await this.listSessionMessages(sessionId, MAX_RUNTIME_MESSAGES);
     if (list.length === 0) {
       return {
@@ -474,15 +374,25 @@ export class OpenCodeClient {
     return this.buildRuntimeSnapshot(sessionId, list);
   }
 
-  private logRetriedMessageResend(sessionId: string, agent: string, reason: string) {
-    const message = `Agent ${agent}: ${reason}异常，已重新发送消息`;
+  private logRetriedMessageResend(
+    sessionId: string,
+    agent: string,
+    runtimeAgent: string,
+    reason: string,
+    retryCount: number,
+    nextContent: string,
+  ) {
+    const message = `Agent ${runtimeAgent}: ${reason}异常，将重新发送消息`;
     appendAppLog("warn", "opencode.submit_message_retried", {
       sessionId,
       agent,
+      runtimeAgent,
+      retryCount,
+      nextRetryCount: retryCount + 1,
+      nextContent,
       reason,
       message,
     });
-    process.stdout.write(`${message}\n`);
   }
 
   async shutdown(): Promise<OpenCodeShutdownReport> {
@@ -503,9 +413,6 @@ export class OpenCodeClient {
   }
 
   private clearSessionState() {
-    this.sessionIdleAt.clear();
-    this.sessionErrors.clear();
-    this.sessionWaiters.clear();
   }
 
   private async terminateServeHandle(): Promise<OpenCodeShutdownReport> {
@@ -666,7 +573,6 @@ export class OpenCodeClient {
     if (Object.keys(config.agent).length > 0) {
       serverEnv["OPENCODE_CONFIG_CONTENT"] = JSON.stringify(config);
     }
-    appendAppLog("info", "opencode.serve_starting", { spawnCwd: cwd });
     const launchArgs = ["serve"];
     const spawnSpec = process.platform === "win32"
       ? {
@@ -739,15 +645,6 @@ export class OpenCodeClient {
       });
       throw new Error(message);
     }
-
-    appendAppLog("info", "opencode.serve_started", {
-      spawnCwd: cwd,
-      pid: childProcess.pid,
-      port,
-      baseUrl,
-      command: spawnSpec.command,
-      args: spawnSpec.args,
-    });
 
     return {
       process: childProcess,
@@ -882,28 +779,6 @@ export class OpenCodeClient {
 
   private handleEvent(event: OpenCodeEvent) {
     const eventType = typeof event["type"] === "string" ? event["type"] : "";
-    if (eventType === "session.idle") {
-      const properties = this.expectRecord(
-        event["properties"],
-        "OpenCode 事件 session.idle.properties",
-      );
-      const sessionId = this.readRequiredTrimmedString(
-        properties["sessionID"],
-        "OpenCode 事件 session.idle.properties.sessionID",
-      );
-      this.sessionIdleAt.set(sessionId, Date.now());
-      const waiters = this.sessionWaiters.get(sessionId) || [];
-      const ready = waiters.filter((waiter) => waiter.after <= Date.now());
-      this.sessionWaiters.set(
-        sessionId,
-        waiters.filter((waiter) => waiter.after > Date.now()),
-      );
-      for (const waiter of ready) {
-        waiter.resolve();
-      }
-      return;
-    }
-
     if (eventType === "session.error") {
       const properties = this.expectRecord(
         event["properties"],
@@ -917,12 +792,7 @@ export class OpenCodeClient {
         properties["error"],
         "OpenCode 事件 session.error.properties.error",
       );
-      this.sessionErrors.set(sessionId, error);
-      const waiters = this.sessionWaiters.get(sessionId) || [];
-      this.sessionWaiters.delete(sessionId);
-      for (const waiter of waiters) {
-        waiter.reject(new Error(error));
-      }
+      appendAppLog("error", "opencode.session_error", { sessionId, message: error });
     }
   }
 
@@ -935,10 +805,6 @@ export class OpenCodeClient {
       headers["content-type"] = "application/json";
     }
 
-    const shouldTimebox = shouldTimeboxOpenCodeRequest({
-      pathname,
-      method: options.method,
-    });
     const url = `${this.buildBaseUrl(this.runningServe.port)}${pathname}`;
     const requestInit: RequestInit = {
       method: options.method,
@@ -948,7 +814,10 @@ export class OpenCodeClient {
       requestInit.body = options.body;
     }
     try {
-      return await this.fetchWithTimeout(url, requestInit, shouldTimebox);
+      return await this.fetchWithTimeout(url, requestInit, {
+        pathname,
+        method: options.method,
+      });
     } catch (error) {
       appendAppLog("error", "opencode.request_failed", {
         method: options.method,
@@ -959,11 +828,12 @@ export class OpenCodeClient {
     }
   }
 
-  private async fetchWithTimeout(url: string, init: RequestInit, shouldTimebox: boolean): Promise<Response> {
-    if (!shouldTimebox) {
-      return fetch(url, init);
-    }
-    const timeoutMs = getOpenCodeRequestTimeoutMs();
+  private async fetchWithTimeout(
+    url: string,
+    init: RequestInit,
+    timeoutInput: ResolveOpenCodeRequestTimeoutInput,
+  ): Promise<Response> {
+    const timeoutMs = getOpenCodeRequestTimeoutMs(timeoutInput);
     const controller = new AbortController();
     const method = typeof init.method === "string" ? init.method.toUpperCase() : "GET";
     const timeoutMessage = `OpenCode 请求超时: ${method} ${url} 超过 ${timeoutMs}ms`;
@@ -984,261 +854,6 @@ export class OpenCodeClient {
     } finally {
       clearTimeout(timeout);
     }
-  }
-
-  async waitForSessionSettled(sessionId: string, after: number, timeoutMs: number): Promise<void> {
-    const idleAt = this.sessionIdleAt.get(sessionId);
-    if (typeof idleAt === "number" && idleAt >= after) {
-      return;
-    }
-
-    const error = this.sessionErrors.get(sessionId);
-    if (error) {
-      throw new Error(error);
-    }
-
-    await new Promise<void>((resolve, reject) => {
-      const waiter: SessionWaiter = {
-        sessionId,
-        after,
-        resolve: () => {
-          clearTimeout(timeout);
-          resolve();
-        },
-        reject: (reason) => {
-          clearTimeout(timeout);
-          reject(reason);
-        },
-      };
-      const timeout = setTimeout(() => {
-        const waiters = this.sessionWaiters.get(sessionId) || [];
-        this.sessionWaiters.set(
-          sessionId,
-          waiters.filter((item) => item !== waiter),
-        );
-        resolve();
-      }, timeoutMs);
-
-      this.sessionWaiters.set(sessionId, [...(this.sessionWaiters.get(sessionId) || []), waiter]);
-    });
-  }
-
-  async waitForMessageCompletion(
-    sessionId: string,
-    messageId: string,
-    timeoutMs: number,
-  ): Promise<OpenCodeNormalizedMessage> {
-    const startedAt = Date.now();
-    let latestNonEmptyMessage = "";
-    while (Date.now() - startedAt < timeoutMs) {
-      try {
-        const message = await this.getSessionMessage(sessionId, messageId);
-        if (message.content.trim()) {
-          latestNonEmptyMessage = message.content;
-        }
-        if (this.isTerminalMessage(message)) {
-          return message;
-        }
-      } catch {
-        // keep polling until timeout
-      }
-      await new Promise((resolve) => setTimeout(resolve, 400));
-    }
-
-    try {
-      return await this.getSessionMessage(sessionId, messageId);
-    } catch {
-      if (latestNonEmptyMessage) {
-        throw new RetryableExecutionResultError(
-          `OpenCode session ${sessionId} 返回了未完成的 assistant 消息: messageId=${messageId}, preview=${this.shortenText(latestNonEmptyMessage, 48)}`,
-        );
-      }
-      throw new RetryableExecutionResultError(`OpenCode session ${sessionId} 未返回任何有效的 assistant 消息`);
-    }
-  }
-
-  async getLatestAssistantMessage(
-    sessionId: string,
-  ): Promise<OpenCodeNormalizedMessage> {
-    const list = await this.listSessionMessages(sessionId, 0);
-    for (let index = list.length - 1; index >= 0; index -= 1) {
-      const message = this.parseMessageEnvelope(
-        list[index],
-        "assistant",
-        `OpenCode session ${sessionId} 最新消息`,
-      );
-      if (message.sender === "assistant" || message.sender === "system") {
-        return message;
-      }
-    }
-    throw new RetryableExecutionResultError(`OpenCode session ${sessionId} 未返回任何有效的 assistant 消息`);
-  }
-
-  private async inspectTransportRecovery(
-    sessionId: string,
-    lowerBoundMs: number,
-  ): Promise<TransportRecoveryInspection> {
-    const messages = await this.listSessionMessages(sessionId, MAX_RUNTIME_MESSAGES);
-    if (messages.length === 0) {
-      return {
-        kind: "empty",
-        messageCount: 0,
-      };
-    }
-
-    const normalizedRecords = messages.map((raw) => {
-      const envelope = this.expectRecord(raw, `OpenCode session ${sessionId} 消息列表项`);
-      const info = "info" in envelope
-        ? this.expectRecord(envelope["info"], `OpenCode session ${sessionId} 消息列表项.info`)
-        : envelope;
-      const normalized = this.parseMessageEnvelope(
-        raw,
-        "assistant",
-        `OpenCode session ${sessionId} 消息列表项`,
-      );
-      return {
-        raw,
-        info,
-        normalized,
-        createdAtMs: Date.parse(normalized.timestamp),
-      };
-    });
-
-    const submittedMessage = normalizedRecords
-      .filter((record) =>
-        record.normalized.sender === "user"
-        && Number.isFinite(record.createdAtMs)
-        && record.createdAtMs >= lowerBoundMs)
-      .sort((left, right) => left.createdAtMs - right.createdAtMs)[0];
-    if (!submittedMessage) {
-      return {
-        kind: "submitted-message-missing",
-        messageCount: messages.length,
-      };
-    }
-
-    const relatedReplies = this.collectRelatedTransportReplies(normalizedRecords, submittedMessage.normalized.id)
-      .sort((left, right) => {
-        const leftTimestamp = Date.parse(left.normalized.timestamp) || 0;
-        const rightTimestamp = Date.parse(right.normalized.timestamp) || 0;
-        return rightTimestamp - leftTimestamp;
-      });
-
-    const finalReply = relatedReplies
-      .filter((record) =>
-        this.isRecoverableReplyCandidate(record.info, record.normalized))[0];
-    if (!finalReply) {
-      if (relatedReplies.length === 0) {
-        return {
-          kind: "waiting-without-related-reply",
-          messageCount: messages.length,
-        };
-      }
-
-      return {
-        kind: "waiting-with-related-reply",
-        messageCount: messages.length,
-        relatedReplyCount: relatedReplies.length,
-      };
-    }
-
-    const message = finalReply.normalized;
-    const status = this.messageHasError(message.raw) ? "error" : "completed";
-    return {
-      kind: "recovered",
-      result: {
-        status,
-        finalMessage: status === "error"
-          ? this.readMessageError(message.raw, `OpenCode session ${sessionId} 恢复结果`)
-          : message.content,
-        messageId: message.id,
-        timestamp: message.timestamp,
-        rawMessage: message,
-      },
-      messageCount: messages.length,
-    };
-  }
-
-  private buildTransportRecoveryTimeoutDetails(inspection: Exclude<TransportRecoveryInspection, { kind: "recovered" }>) {
-    const baseDetails = {
-      observedMessageCount: inspection.messageCount,
-      recoveryState: inspection.kind,
-    };
-    if (inspection.kind === "waiting-with-related-reply") {
-      return {
-        ...baseDetails,
-        relatedReplyCount: inspection.relatedReplyCount,
-      };
-    }
-
-    return baseDetails;
-  }
-
-  private collectRelatedTransportReplies(
-    records: Array<{
-      raw: unknown;
-      info: Record<string, unknown>;
-      normalized: OpenCodeNormalizedMessage;
-      createdAtMs: number;
-    }>,
-    rootMessageId: string,
-  ) {
-    const childrenByParent = new Map<string, typeof records>();
-    for (const record of records) {
-      if (!("parentID" in record.info)) {
-        continue;
-      }
-      const parentMessageId = this.readRequiredTrimmedString(
-        record.info["parentID"],
-        "OpenCode 消息 info.parentID",
-      );
-      const siblings = childrenByParent.get(parentMessageId) || [];
-      siblings.push(record);
-      childrenByParent.set(parentMessageId, siblings);
-    }
-
-    const relatedReplies: typeof records = [];
-    const pending = [...(childrenByParent.get(rootMessageId) || [])];
-    const seenMessageIds = new Set<string>();
-
-    while (pending.length > 0) {
-      const current = pending.shift();
-      if (!current) {
-        continue;
-      }
-      const currentMessageId = current.normalized.id;
-      if (seenMessageIds.has(currentMessageId)) {
-        continue;
-      }
-      seenMessageIds.add(currentMessageId);
-      if (
-        current.normalized.sender !== "assistant"
-        && current.normalized.sender !== "system"
-      ) {
-        continue;
-      }
-      relatedReplies.push(current);
-      pending.push(...(childrenByParent.get(currentMessageId) || []));
-    }
-
-    return relatedReplies;
-  }
-
-  async getSessionMessage(
-    sessionId: string,
-    messageId: string,
-  ): Promise<OpenCodeNormalizedMessage> {
-    const response = await this.request(`/session/${sessionId}/message/${messageId}`, {
-      method: "GET",
-    });
-    if (!response.ok) {
-      throw new RetryableExecutionResultError(`OpenCode session ${sessionId} 未找到消息 ${messageId}`);
-    }
-    return this.parseMessageEnvelope(
-      await this.readJsonResponse(response),
-      "assistant",
-      `OpenCode session ${sessionId} 的消息 ${messageId}`,
-    );
   }
 
   async listSessionMessages(
@@ -1331,10 +946,6 @@ export class OpenCodeClient {
     };
   }
 
-  private isTerminalMessage(message: OpenCodeNormalizedMessage): boolean {
-    return this.hasCompletedTimestamp(message.raw) || this.messageHasError(message.raw);
-  }
-
   private messageHasError(raw: unknown): boolean {
     const envelope = this.expectRecord(raw, "OpenCode 消息");
     const info = "info" in envelope
@@ -1375,20 +986,6 @@ export class OpenCodeClient {
     return "";
   }
 
-  private hasCompletedTimestamp(raw: unknown): boolean {
-    const envelope = this.expectRecord(raw, "OpenCode 消息");
-    const info = "info" in envelope
-      ? this.expectRecord(envelope["info"], "OpenCode 消息.info")
-      : envelope;
-    if ("time" in info) {
-      const time = this.expectRecord(info["time"], "OpenCode 消息.info.time");
-      if (this.isIsoLikeValue(time["completed"])) {
-        return true;
-      }
-    }
-    return this.isIsoLikeValue(info["completedAt"]);
-  }
-
   private buildEmptyAssistantResultError(
     sessionId: string,
     message: OpenCodeNormalizedMessage,
@@ -1409,30 +1006,6 @@ export class OpenCodeClient {
       .filter(Boolean);
     const partSummary = partTypes.length > 0 ? partTypes.join(",") : "none";
     return `OpenCode session ${sessionId} 返回了空的 assistant 结果: messageId=${message.id}, finish=${finish}, partTypes=${partSummary}`;
-  }
-
-  private isRecoverableReplyCandidate(
-    info: Record<string, unknown>,
-    message: OpenCodeNormalizedMessage,
-  ): boolean {
-    if (message.sender !== "assistant" && message.sender !== "system" && message.sender !== "unknown") {
-      return false;
-    }
-
-    if (this.messageHasError(message.raw)) {
-      return true;
-    }
-
-    return this.isTerminalRecoverableFinish(info) && message.content.trim().length > 0;
-  }
-
-  private isTerminalRecoverableFinish(info: Record<string, unknown>): boolean {
-    if (typeof info["finish"] !== "string") {
-      return false;
-    }
-
-    const finish = info["finish"].trim();
-    return finish.length > 0 && finish !== "tool-calls";
   }
 
   buildRuntimeSnapshot(sessionId: string, messages: unknown[]): OpenCodeSessionRuntime {
@@ -1994,15 +1567,6 @@ export class OpenCodeClient {
       return new Date(value).toISOString();
     }
     throw new Error(`${context} 缺少合法时间`);
-  }
-
-  private isIsoLikeValue(value: unknown): boolean {
-    try {
-      this.toIsoString(value, "OpenCode 时间字段");
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   private readMessageTimestamp(info: Record<string, unknown>, context: string): string {
