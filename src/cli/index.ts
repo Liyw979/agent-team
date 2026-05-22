@@ -226,8 +226,11 @@ async function renderTaskMessages(
     const attachEntries = buildTaskAttachEntries(snapshot);
 
     if (!attachPrinted) {
-      process.stdout.write(renderTaskAttachCommands(attachEntries));
-      attachPrinted = true;
+      const attachCommands = renderTaskAttachCommands(attachEntries);
+      if (attachCommands.length > 0) {
+        process.stdout.write(`attach:\n${attachCommands}`);
+        attachPrinted = true;
+      }
       lastAttachEntries = attachEntries;
     } else {
       const newAttachEntries = collectNewTaskAttachCommandEntries(lastAttachEntries, attachEntries);

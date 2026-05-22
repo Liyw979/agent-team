@@ -29,10 +29,7 @@ export function renderTaskAttachCommands(entries: TaskAttachCommandEntry[]): str
     return "";
   }
 
-  let output = "attach:\n";
-  for (const entry of visibleEntries) {
-    output += `- ${entry.agentId} | ${entry.opencodeAttachCommand}\n`;
-  }
-  output += "\n";
-  return output;
+  return `${visibleEntries
+    .map((entry) => `- ${entry.agentId} | ${entry.opencodeAttachCommand}`)
+    .join("\n")}\n\n`;
 }

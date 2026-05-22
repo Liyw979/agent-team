@@ -16,9 +16,10 @@ test("renderTaskAttachCommands 在 CLI 里只展示底层 opencode attach 命令
     },
   ]);
 
-  assert.match(output, /^attach:\n/);
-  assert.match(output, /- Build \| opencode attach 'http:\/\/127\.0\.0\.1:43127' --session 'session-1'/);
-  assert.doesNotMatch(output, /^\nattach:\n/);
+  assert.equal(
+    output,
+    "- Build | opencode attach 'http://127.0.0.1:43127' --session 'session-1'\n\n",
+  );
   assert.doesNotMatch(output, /opencode attach:/);
   assert.doesNotMatch(output, /task attach/);
 });
