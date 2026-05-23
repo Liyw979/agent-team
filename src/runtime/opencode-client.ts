@@ -304,6 +304,7 @@ export class OpenCodeClient {
         }
         const retryReason = error.message;
         const nextContent = "生成完整回复";
+        await this.abortSession(sessionId);
         this.logRetriedMessageResend(sessionId, opencodeAgent, runtimeAgent, retryReason, retryCount, nextContent);
         if (retryCount > 0) {
           await new Promise((resolve) => setTimeout(resolve, RETRYABLE_CLIENT_INTERVAL_MS));
@@ -313,6 +314,29 @@ export class OpenCodeClient {
     };
 
     return attempt(payload.content, 0);
+  }
+
+  private async abortSession( sessionId: string ): Promise<void> {
+    const response = await this.request(`/session/${sessionId}/abort`, {
+      method: "POST",
+      body: "",
+    }).catch((error) => {
+      appendAppLog("error", "opencode.abort_session_failed", {
+        sessionId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    });
+    if (response.ok) {
+      return;
+    }
+
+    appendAppLog("error", "opencode.abort_session_failed", {
+      sessionId,
+      status: response.status,
+      statusText: response.statusText,
+    });
+    throw new Error(`OpenCode 中止 session 失败: ${response.status}`);
   }
 
   private buildExecutionResult(
@@ -801,7 +825,7 @@ export class OpenCodeClient {
     options: RequestOptions,
   ): Promise<Response> {
     const headers: Record<string, string> = {};
-    if (options.method === "POST") {
+    if (options.method === "POST" && options.body.length > 0) {
       headers["content-type"] = "application/json";
     }
 
@@ -810,7 +834,7 @@ export class OpenCodeClient {
       method: options.method,
       headers,
     };
-    if (options.method === "POST") {
+    if (options.method === "POST" && options.body.length > 0) {
       requestInit.body = options.body;
     }
     try {
