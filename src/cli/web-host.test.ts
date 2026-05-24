@@ -341,7 +341,7 @@ test("startWebHost 的 /api/ui-snapshot 会区分 idle 与 active task", async (
     assert.equal(payload.workspace.cwd, "/tmp/active");
     assert.equal(payload.workspace.tasks.length, 1);
     assert.deepEqual(payload.task, activeTaskSnapshot);
-    assert.equal(payload.taskLogFilePath, "/tmp/user-data/logs/tasks/task-active.log");
+    assert.equal(payload.taskLogFilePath, path.join("/tmp/user-data", "logs", "tasks", "task-active.log"));
     assert.equal(payload.launchCwd, "/tmp/active");
     assert.equal(payload.taskUrl, `http://localhost:${activePort}/`);
     assert.equal(activeTaskSnapshotCalls, 1);

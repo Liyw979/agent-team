@@ -7,9 +7,10 @@ import path from "node:path";
 import { resolveWorkspaceCwdFromFilesystem } from "./workspace-cwd";
 
 test("不存在的 cwd 必须直接报错", () => {
+  const missingWorkspacePath = path.resolve("/tmp/missing-workspace");
   assert.throws(
     () => resolveWorkspaceCwdFromFilesystem("/tmp/missing-workspace", "/Users/liyw/code/agent-team"),
-    /工作目录不存在：\/tmp\/missing-workspace/u,
+    new RegExp(`工作目录不存在：${missingWorkspacePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "u"),
   );
 });
 

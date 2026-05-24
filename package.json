@@ -11,7 +11,7 @@
     "build:web": "vite build",
     "build:embedded-assets": "bun run build:web && node src/cli/generate-embedded-assets.mjs",
     "knip": "bun run build:embedded-assets && knip",
-    "test": "bun run build:embedded-assets && tsx --test",
+    "test": "bun run build:embedded-assets && bun test",
     "serve:dist": "vite --host localhost --mode production",
     "cli": "node src/cli/launcher.cjs",
     "dist:win": "bun run build && bun build --compile --target bun-windows-x64 ./src/cli/index.ts --outfile ./dist/agent-team.exe",
@@ -46,7 +46,6 @@
     "knip": "^6.5.0",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
-    "tsx": "^4.21.0",
     "typescript": "^5.7.3",
     "vite": "^5.4.21"
   }
