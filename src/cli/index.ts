@@ -129,7 +129,6 @@ async function disposeCliContext(context: CliContext, options: CliDisposeOptions
 async function createCliContext(input: {
   cwd: string;
   userDataPath: string;
-  enableEventStream: boolean;
   compiledTopology: ReturnType<typeof compileTeamDsl>;
 }): Promise<CliContext> {
   const userDataPath = input.userDataPath;
@@ -148,7 +147,6 @@ async function createCliContext(input: {
       userDataPath,
       opencodeClient,
       autoOpenTaskSession: false,
-      enableEventStream: input.enableEventStream,
     });
     await orchestrator.initialize();
     return {
@@ -445,7 +443,6 @@ async function run() {
   const context = await createCliContext({
     cwd: resolveCommandCwd(command),
     userDataPath,
-    enableEventStream: false,
     compiledTopology,
   });
   let observedSettledTaskState = false;

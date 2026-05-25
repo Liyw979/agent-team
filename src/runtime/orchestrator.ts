@@ -86,7 +86,6 @@ import {
   getRuntimeTemplateName,
 } from "./runtime-topology-graph";
 import type { CompiledTeamDsl } from "./team-dsl";
-import { shouldScheduleEventStreamReconnect } from "./event-stream-lifecycle";
 import { isExecutionDecisionAgent } from "./decision-agent-context";
 import { resolveTaskAgentIdsToPrewarm } from "./task-session-prewarm";
 import { bindCurrentTaskLog } from "./app-log";
@@ -164,7 +163,6 @@ interface OrchestratorOptions {
   userDataPath: string;
   opencodeClient: OpenCodeClient;
   autoOpenTaskSession?: boolean;
-  enableEventStream?: boolean;
   runtimeRefreshDebounceMs?: number;
   terminalLauncher?: (input: { command: string }) => Promise<void>;
 }
@@ -202,6 +200,15 @@ interface TaskRuntimeOverlay {
   agentSessions: Map<string, string>;
   activityFreshnessByMessageId: Map<string, RuntimeActivityFreshness>;
 }
+
+type ScheduledTimerState =
+  | {
+      kind: "idle";
+    }
+  | {
+      kind: "scheduled";
+      timer: ReturnType<typeof setTimeout>;
+    };
 
 type AgentExecutionPrompt =
   | {
@@ -275,14 +282,11 @@ export class Orchestrator {
       completeTask: async (input) => this.completeTask(input),
     },
   });
-  private readonly enableEventStream: boolean;
   private readonly taskRuntimeOverlays = new Map<string, TaskRuntimeOverlay>();
-  private readonly runtimeEventCallbacks = new Set<(event: unknown) => void>();
-  private readonly pendingRuntimeSyncTasks = new Map<
-    string,
-    ReturnType<typeof setTimeout>
-  >();
-  private readonly pendingEventReconnects = new Set<ReturnType<typeof setTimeout>>();
+  private readonly activeRuntimeExecutionSessions = new Set<string>();
+  private readonly runtimePollingSyncSessions = new Set<string>();
+  private runtimePollingState: ScheduledTimerState = { kind: "idle" };
+  private runtimeSyncState: ScheduledTimerState = { kind: "idle" };
   readonly pendingTaskRuns = new Set<Promise<void>>();
   private readonly runtimeRefreshDebounceMs: number;
   private readonly terminalLauncher: (input: { command: string }) => Promise<void>;
@@ -294,7 +298,6 @@ export class Orchestrator {
     acquireProcessWorkspaceCwd(this.cwd);
     this.store = new StoreService();
     this.opencodeClient = options.opencodeClient;
-    this.enableEventStream = options.enableEventStream ?? true;
     this.runtimeRefreshDebounceMs = options.runtimeRefreshDebounceMs ?? 120;
     this.terminalLauncher = options.terminalLauncher ?? launchTerminalCommand;
   }
@@ -312,10 +315,8 @@ export class Orchestrator {
       };
     }
     this.isDisposing = true;
-    this.pendingRuntimeSyncTasks.forEach((timer) => clearTimeout(timer));
-    this.pendingRuntimeSyncTasks.clear();
-    this.pendingEventReconnects.forEach((timer) => clearTimeout(timer));
-    this.pendingEventReconnects.clear();
+    this.stopRuntimeSync();
+    this.stopRuntimePolling();
     const awaitPendingTaskRuns = options.awaitPendingTaskRuns ?? true;
     if (awaitPendingTaskRuns && this.pendingTaskRuns.size > 0) {
       await Promise.allSettled([...this.pendingTaskRuns]);
@@ -323,7 +324,6 @@ export class Orchestrator {
       this.pendingTaskRuns.clear();
     }
     this.taskRuntimeOverlays.clear();
-    this.runtimeEventCallbacks.clear();
     try {
       return await this.opencodeClient.shutdown();
     } finally {
@@ -393,19 +393,8 @@ export class Orchestrator {
     const task = this.requireCurrentTask();
     await this.runtime.deleteTask(task.id);
     this.taskRuntimeOverlays.delete(task.id);
-    const runtimeSyncTimer = this.pendingRuntimeSyncTasks.get(task.id);
-    if (runtimeSyncTimer) {
-      clearTimeout(runtimeSyncTimer);
-      this.pendingRuntimeSyncTasks.delete(task.id);
-    }
-    if (this.taskRuntimeOverlays.size === 0) {
-      this.runtimeEventCallbacks.forEach((callback) => {
-        this.opencodeClient.disconnectEvents(callback);
-      });
-      this.runtimeEventCallbacks.clear();
-      this.pendingEventReconnects.forEach((timer) => clearTimeout(timer));
-      this.pendingEventReconnects.clear();
-    }
+    this.stopRuntimeSync();
+    this.stopRuntimePolling();
     this.store.deleteTask(task.id);
     return this.hydrateWorkspace();
   }
@@ -1146,7 +1135,7 @@ export class Orchestrator {
     await this.ensureTaskServer(currentTask.id);
     await this.ensureTaskAgentSessions(currentTask);
     if (this.hasTaskRuntimeSessions(currentTask.id)) {
-      await this.ensureTaskRuntimeEventStream();
+      this.ensureRuntimePolling();
     }
 
     const refreshedTask = this.store.getTask(task.id);
@@ -2033,84 +2022,86 @@ export class Orchestrator {
     return id;
   }
 
-  private asRecord(value: unknown): Record<string, unknown> {
-    return value && typeof value === "object"
-      ? (value as Record<string, unknown>)
-      : {};
-  }
-
-  private findOpenCodeSessionId(event: unknown): string[] {
-    const record = this.asRecord(event);
-    const properties = this.asRecord(record["properties"]);
-    const payload = this.asRecord(record["payload"]);
-    return [
-      record["sessionID"],
-      record["sessionId"],
-      properties["sessionID"],
-      properties["sessionId"],
-      payload["sessionID"],
-      payload["sessionId"],
-    ].flatMap((candidate) =>
-      typeof candidate === "string" && candidate.trim()
-        ? [candidate.trim()]
-        : [],
-    );
-  }
-
-  private scheduleRuntimeSync(taskId: string) {
+  private scheduleRuntimeSync() {
+    const task = this.requireCurrentTask();
+    const taskId = task.id;
     const overlay = this.taskRuntimeOverlays.get(taskId);
     if (!overlay) {
       return;
     }
 
-    const existing = this.pendingRuntimeSyncTasks.get(taskId);
-    if (existing) {
-      clearTimeout(existing);
-    }
+    this.stopRuntimeSync();
 
     const timer = setTimeout(() => {
-      this.pendingRuntimeSyncTasks.delete(taskId);
+      this.runtimeSyncState = { kind: "idle" };
       const overlayAfterDelay = this.taskRuntimeOverlays.get(taskId);
       if (!overlayAfterDelay) {
         throw new Error(`Task ${taskId} 缺少运行态 overlay，无法同步过程消息`);
       }
-      void this.syncVisibleRuntimeActivities({
-        taskId,
-        agentIds: [...overlayAfterDelay.agentSessions.keys()],
-      });
+      void this.syncRuntimePollingActivities(taskId, overlayAfterDelay).catch(() => undefined);
     }, this.runtimeRefreshDebounceMs);
-    this.pendingRuntimeSyncTasks.set(taskId, timer);
+    this.runtimeSyncState = { kind: "scheduled", timer };
   }
 
-  private scheduleEventStreamReconnect() {
-    if (
-      !shouldScheduleEventStreamReconnect({
-        hasProjectRecord: true,
-        isDisposing: this.isDisposing,
-      })
-    ) {
+  private stopRuntimeSync() {
+    if (this.runtimeSyncState.kind === "scheduled") {
+      clearTimeout(this.runtimeSyncState.timer);
+    }
+    this.runtimeSyncState = { kind: "idle" };
+  }
+
+  private async syncRuntimePollingActivities(
+    taskId: string,
+    overlay: TaskRuntimeOverlay,
+  ) {
+    const entries = [...overlay.agentSessions.entries()].filter(([, sessionId]) =>
+      sessionId.trim().length > 0
+      && !this.activeRuntimeExecutionSessions.has(sessionId)
+      && !this.runtimePollingSyncSessions.has(sessionId)
+    );
+    if (entries.length === 0) {
       return;
     }
-    if (this.pendingEventReconnects.size > 0) {
+    const agentIds = entries.map(([agentId]) => agentId);
+    const sessionIds = entries.map(([, sessionId]) => sessionId);
+    sessionIds.forEach((sessionId) => this.runtimePollingSyncSessions.add(sessionId));
+    try {
+      await this.syncVisibleRuntimeActivities({
+        taskId,
+        agentIds,
+      });
+    } finally {
+      sessionIds.forEach((sessionId) => this.runtimePollingSyncSessions.delete(sessionId));
+    }
+  }
+
+  private stopRuntimePolling() {
+    if (this.runtimePollingState.kind === "scheduled") {
+      clearTimeout(this.runtimePollingState.timer);
+    }
+    this.runtimePollingState = { kind: "idle" };
+  }
+
+  private hasRuntimeSessions(): boolean {
+    return [...this.taskRuntimeOverlays.values()].some((overlay) =>
+      [...overlay.agentSessions.values()].some((sessionId) => sessionId.trim().length > 0)
+    );
+  }
+
+  private ensureRuntimePolling() {
+    if (this.isDisposing || this.runtimePollingState.kind === "scheduled" || !this.hasRuntimeSessions()) {
       return;
     }
 
     const timer = setTimeout(() => {
-      this.pendingEventReconnects.delete(timer);
-      if (
-        !shouldScheduleEventStreamReconnect({
-          hasProjectRecord: true,
-          isDisposing: this.isDisposing,
-        })
-      ) {
+      this.runtimePollingState = { kind: "idle" };
+      if (this.isDisposing || !this.hasRuntimeSessions()) {
         return;
       }
-      if (![...this.taskRuntimeOverlays.values()].some((overlay) => [...overlay.agentSessions.values()].some((sessionId) => sessionId.trim().length > 0))) {
-        return;
-      }
-      void this.ensureTaskRuntimeEventStream();
-    }, 1000);
-    this.pendingEventReconnects.add(timer);
+      this.scheduleRuntimeSync();
+      this.ensureRuntimePolling();
+    }, this.runtimeRefreshDebounceMs);
+    this.runtimePollingState = { kind: "scheduled", timer };
   }
 
   private getTaskAgentRunCount(
@@ -2269,70 +2260,51 @@ export class Orchestrator {
     taskId: string;
     agentIds: string[];
   }): Promise<OpenCodeExecutionResult> {
+    const overlay = this.taskRuntimeOverlays.get(input.taskId);
+    if (!overlay) {
+      throw new Error(`Task ${input.taskId} 缺少运行态 overlay，无法同步过程消息`);
+    }
+    const executionSessionIds = input.agentIds.flatMap((agentId) => {
+      const sessionId = overlay.agentSessions.get(agentId) ?? "";
+      return sessionId.trim().length > 0 ? [sessionId] : [];
+    });
     const settled = {
       done: false,
     };
     const trackedExecution = input.execution.finally(() => {
       settled.done = true;
     });
+    executionSessionIds.forEach((sessionId) => this.activeRuntimeExecutionSessions.add(sessionId));
 
-    while (!settled.done) {
+    try {
+      while (!settled.done) {
+        await this.syncVisibleRuntimeActivities({
+          taskId: input.taskId,
+          agentIds: input.agentIds,
+        });
+        if (settled.done) {
+          break;
+        }
+        const waitResult = await Promise.race([
+          trackedExecution.then(() => "settled" as const),
+          new Promise<"tick">((resolve) => {
+            setTimeout(() => {
+              resolve("tick");
+            }, RUNTIME_PROGRESS_SYNC_INTERVAL_MS);
+          }),
+        ]);
+        if (waitResult === "settled") {
+          break;
+        }
+      }
+
       await this.syncVisibleRuntimeActivities({
         taskId: input.taskId,
         agentIds: input.agentIds,
       });
-      if (settled.done) {
-        break;
-      }
-      const waitResult = await Promise.race([
-        trackedExecution.then(() => "settled" as const),
-        new Promise<"tick">((resolve) => {
-          setTimeout(() => {
-            resolve("tick");
-          }, RUNTIME_PROGRESS_SYNC_INTERVAL_MS);
-        }),
-      ]);
-      if (waitResult === "settled") {
-        break;
-      }
+      return trackedExecution;
+    } finally {
+      executionSessionIds.forEach((sessionId) => this.activeRuntimeExecutionSessions.delete(sessionId));
     }
-
-    await this.syncVisibleRuntimeActivities({
-      taskId: input.taskId,
-      agentIds: input.agentIds,
-    });
-    return trackedExecution;
-  }
-
-  private async ensureTaskRuntimeEventStream() {
-    if (!this.enableEventStream) {
-      return;
-    }
-
-    if (this.runtimeEventCallbacks.size > 0) {
-      return;
-    }
-
-    const onEvent = (event: unknown) => {
-      const sessionIds = this.findOpenCodeSessionId(event);
-      if (sessionIds.length === 0) {
-        return;
-      }
-      const runtimeOverlay = [...this.taskRuntimeOverlays.values()].find((item) =>
-        [...item.agentSessions.values()].some((currentSessionId) => sessionIds.includes(currentSessionId))
-      );
-      if (!runtimeOverlay) {
-        return;
-      }
-      this.scheduleRuntimeSync(runtimeOverlay.taskId);
-    };
-    this.runtimeEventCallbacks.add(onEvent);
-    void this.opencodeClient
-      .connectEvents(onEvent)
-      .catch(() => undefined)
-      .finally(() => {
-        this.runtimeEventCallbacks.delete(onEvent);
-        this.scheduleEventStreamReconnect();
-      });
   }
 }

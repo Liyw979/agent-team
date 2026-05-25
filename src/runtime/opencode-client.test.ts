@@ -828,44 +828,6 @@ test("消息列表查询接口空响应体时直接抛错", async () => {
   );
 });
 
-test("同一 cwd 下多个订阅者会共享一个 event pump 并同时收到事件", async () => {
-  const { client } = createClient();
-  let startEventPumpCount = 0;
-  let emitEvent: (event: Record<string, unknown>) => void = () => {};
-  let releasePump: () => void = () => {};
-  let notifyFirstPumpReady: () => void = () => {};
-  const firstPumpReady = new Promise<void>((resolve) => {
-    notifyFirstPumpReady = resolve;
-  });
-
-  Reflect.set(client, "startEventPump", async (onEvent: (event: Record<string, unknown>) => void) => {
-    startEventPumpCount += 1;
-    return new Promise<void>((resolve) => {
-      emitEvent = onEvent;
-      releasePump = resolve;
-      notifyFirstPumpReady();
-    });
-  });
-
-  const firstEvents: Array<Record<string, unknown>> = [];
-  const secondEvents: Array<Record<string, unknown>> = [];
-  const firstConnect = client.connectEvents((event) => {
-    firstEvents.push(event);
-  });
-  await firstPumpReady;
-  const secondConnect = client.connectEvents((event) => {
-    secondEvents.push(event);
-  });
-
-  emitEvent({ type: "session.idle", properties: { sessionID: "session-1" } });
-  releasePump();
-  await Promise.all([firstConnect, secondConnect]);
-
-  assert.equal(startEventPumpCount, 1);
-  assert.deepEqual(firstEvents, [{ type: "session.idle", properties: { sessionID: "session-1" } }]);
-  assert.deepEqual(secondEvents, [{ type: "session.idle", properties: { sessionID: "session-1" } }]);
-});
-
 test("getAttachBaseUrl 只读取已经启动的 serve 地址", async () => {
   const client = new OpenCodeClient({
     server: createDetachedServeHandle(43128),
@@ -1323,37 +1285,4 @@ test("buildRuntimeSnapshot 会用 freshness 元数据区分 placeholder 与 stru
     ),
     true,
   );
-});
-
-test("startEventPump 在单条 SSE 数据非法时保留原始载荷并继续消费后续事件", async () => {
-  const { client } = createClient();
-  const typed = client as unknown as {
-    startEventPump: (
-      onEvent: (event: Record<string, unknown>) => void,
-    ) => Promise<void>;
-  };
-
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () => new Response(new ReadableStream({
-    start(controller) {
-      controller.enqueue(new TextEncoder().encode(
-        "data: not-json\n\ndata: {\"type\":\"session.idle\",\"properties\":{\"sessionID\":\"session-1\"}}\n\n",
-      ));
-      controller.close();
-    },
-  }), { status: 200 })) as unknown as typeof fetch;
-
-  const events: Array<Record<string, unknown>> = [];
-  try {
-    await typed.startEventPump((event: Record<string, unknown>) => {
-      events.push(event);
-    });
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-
-  assert.deepEqual(events, [
-    { payload: { raw: "not-json" } },
-    { type: "session.idle", properties: { sessionID: "session-1" } },
-  ]);
 });

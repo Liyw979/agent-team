@@ -16,8 +16,6 @@ export interface ServeHandle {
   port: number;
 }
 
-type OpenCodeEvent = Record<string, unknown>;
-
 interface SubmitMessagePayload {
   content: string;
   agent: string;
@@ -99,10 +97,6 @@ const TOOL_CALL_DETAIL_CONTAINERS = [
 const MAX_RUNTIME_MESSAGES = 100;
 const SERVE_BASE_URL_TIMEOUT_MS = 10_000;
 const RETRYABLE_CLIENT_INTERVAL_MS = 120_000;
-interface WorkspaceEventState {
-  eventPump: Promise<void>;
-  eventSubscribers: Set<(event: OpenCodeEvent) => void>;
-}
 
 type RequestOptions =
   | {
@@ -120,30 +114,12 @@ export interface OpenCodeShutdownReport {
   killedPids: number[];
 }
 
-const idleEventPumpPromise = Promise.resolve();
-
-const idleWorkspaceEventState: WorkspaceEventState = {
-  eventPump: idleEventPumpPromise,
-  eventSubscribers: new Set(),
-};
-
 export class OpenCodeClient {
-  workspaceEventState: WorkspaceEventState = idleWorkspaceEventState;
   readonly host = "127.0.0.1";
   private readonly runningServe: ServeHandle;
 
   constructor(input: { server: ServeHandle }) {
     this.runningServe = input.server;
-  }
-
-  protected getWorkspaceEventState(): WorkspaceEventState {
-    if (this.workspaceEventState === idleWorkspaceEventState) {
-      this.workspaceEventState = {
-        eventPump: idleEventPumpPromise,
-        eventSubscribers: new Set(),
-      };
-    }
-    return this.workspaceEventState;
   }
 
   async createSession(
@@ -179,32 +155,6 @@ export class OpenCodeClient {
       });
       throw new Error("OpenCode 创建 session 响应缺少有效的 session id");
     }
-  }
-
-  async connectEvents(
-    onEvent: (event: OpenCodeEvent) => void,
-  ): Promise<void> {
-    const state = this.getWorkspaceEventState();
-    state.eventSubscribers.add(onEvent);
-    if (state.eventPump !== idleEventPumpPromise) {
-      return state.eventPump;
-    }
-
-    const eventPump = this.startEventPump((event) => {
-      for (const subscriber of state.eventSubscribers) {
-        subscriber(event);
-      }
-    }).finally(() => {
-      if (state.eventPump === eventPump) {
-        state.eventPump = idleEventPumpPromise;
-      }
-    });
-    state.eventPump = eventPump;
-    await eventPump;
-  }
-
-  disconnectEvents(onEvent: (event: OpenCodeEvent) => void): void {
-    this.workspaceEventState.eventSubscribers.delete(onEvent);
   }
 
   async submitMessage(
@@ -428,9 +378,6 @@ export class OpenCodeClient {
     } catch {
       // ignore shutdown errors
     } finally {
-      this.workspaceEventState.eventPump = idleEventPumpPromise;
-      this.workspaceEventState.eventSubscribers.clear();
-      this.workspaceEventState = idleWorkspaceEventState;
       this.clearSessionState();
     }
     return report;
@@ -753,70 +700,6 @@ export class OpenCodeClient {
       process.kill(pid, "SIGKILL");
     } catch {
       // ignore
-    }
-  }
-
-  private async startEventPump(
-    onEvent: (event: OpenCodeEvent) => void,
-  ): Promise<void> {
-    const response = await fetch(`${this.buildBaseUrl(this.runningServe.port)}/global/event`);
-    if (!response.ok || !response.body) {
-      return;
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) {
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-      const chunks = buffer.split("\n\n");
-      buffer = chunks.pop() || "";
-
-      for (const chunk of chunks) {
-        const dataLines = chunk
-          .split("\n")
-          .filter((line) => line.startsWith("data:"))
-          .map((line) => line.slice(5).trim());
-
-        for (const dataLine of dataLines) {
-          if (!dataLine) {
-            continue;
-          }
-
-          try {
-            const event = JSON.parse(dataLine) as OpenCodeEvent;
-            this.handleEvent(event);
-            onEvent(event);
-          } catch {
-            onEvent({ payload: { raw: dataLine } });
-          }
-        }
-      }
-    }
-  }
-
-  private handleEvent(event: OpenCodeEvent) {
-    const eventType = typeof event["type"] === "string" ? event["type"] : "";
-    if (eventType === "session.error") {
-      const properties = this.expectRecord(
-        event["properties"],
-        "OpenCode 事件 session.error.properties",
-      );
-      const sessionId = this.readRequiredTrimmedString(
-        properties["sessionID"],
-        "OpenCode 事件 session.error.properties.sessionID",
-      );
-      const error = this.readEventError(
-        properties["error"],
-        "OpenCode 事件 session.error.properties.error",
-      );
-      appendAppLog("error", "opencode.session_error", { sessionId, message: error });
     }
   }
 
