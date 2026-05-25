@@ -610,15 +610,6 @@ export interface OpenAgentTerminalPayload {
   agentId: string;
 }
 
-export interface AgentTeamEvent {
-  type:
-    | "task-created"
-    | "task-updated"
-    | "message-created"
-    | "agent-status-changed";
-  payload: unknown;
-}
-
 export function normalizeTopologyEdgeTrigger(value: unknown): TopologyTrigger {
   if (typeof value !== "string") {
     throw new Error(`非法拓扑 trigger：${String(value)}`);
