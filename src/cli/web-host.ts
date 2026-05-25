@@ -3,7 +3,6 @@ import http from "node:http";
 import path from "node:path";
 import { URL } from "node:url";
 import type {
-  AgentTeamEvent,
   OpenAgentTerminalPayload,
   SubmitTaskPayload,
   UiSnapshotPayload,
@@ -172,16 +171,6 @@ function resolveStaticFilePath(webRoot: string, pathname: string): string {
 export async function startWebHost(
   options: StartWebHostOptions,
 ): Promise<{ close: () => Promise<void> }> {
-  const subscriptions = new Set<http.ServerResponse>();
-  let unsubscribed = false;
-
-  const unsubscribe = options.orchestrator.subscribe((event: AgentTeamEvent) => {
-    const payload = `data: ${JSON.stringify(event)}\n\n`;
-    for (const response of subscriptions) {
-      response.write(payload);
-    }
-  });
-
   const requestHandler = async (request: http.IncomingMessage, response: http.ServerResponse) => {
     if (!request.url) {
       text(response, 400, "missing url");
@@ -219,21 +208,6 @@ export async function startWebHost(
         const payload = parseOpenAgentTerminalPayload(await readJsonBody(request));
         await options.orchestrator.openAgentTerminal(payload);
         json(response, 200, { ok: true });
-        return;
-      }
-
-      if (request.method === "GET" && url.pathname === "/api/events") {
-        response.writeHead(200, {
-          "content-type": "text/event-stream; charset=utf-8",
-          "cache-control": "no-store",
-          connection: "keep-alive",
-        });
-        response.write(`data: ${JSON.stringify({ type: "connected" })}\n\n`);
-        subscriptions.add(response);
-        request.on("close", () => {
-          subscriptions.delete(response);
-          response.end();
-        });
         return;
       }
 
@@ -279,20 +253,7 @@ export async function startWebHost(
     }
   };
 
-  const unsubscribeOnce = () => {
-    if (unsubscribed) {
-      return;
-    }
-    unsubscribed = true;
-    unsubscribe();
-  };
-
   const teardown = async (servers: readonly http.Server[]) => {
-    unsubscribeOnce();
-    for (const response of subscriptions) {
-      response.end();
-    }
-    subscriptions.clear();
     await closeBoundServers(servers);
   };
 

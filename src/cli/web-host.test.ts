@@ -16,7 +16,6 @@ import {
 } from "./ui-host-launch";
 
 const UI_LOOPBACK_IPV4_HOST = "127.0.0.1";
-const createNoopUnsubscribe = () => {};
 
 async function reservePort() {
   return await new Promise<number>((resolve, reject) => {
@@ -102,7 +101,6 @@ test("startWebHost 会按 JSON 解析 /api/tasks/submit 请求体", async () => 
   const capturedPayloads: SubmitTaskPayload[] = [];
   const host = await startWebHost({
     orchestrator: {
-      subscribe: () => createNoopUnsubscribe,
       submitTask: async (payload: SubmitTaskPayload) => {
         capturedPayloads.push(payload);
         return {
@@ -168,7 +166,6 @@ test("startWebHost 会同时监听 IPv4 和 IPv6 loopback，避免 localhost 命
   });
   const host = await startWebHost({
     orchestrator: {
-      subscribe: () => createNoopUnsubscribe,
       submitTask: async () => {
         throw new Error("unexpected submitTask");
       },
@@ -217,7 +214,6 @@ test("startWebHost 在 single-page-app 模式下返回静态入口与资源文�
   const webRoot = createStaticWebRoot();
   const host = await startWebHost({
     orchestrator: {
-      subscribe: () => createNoopUnsubscribe,
       submitTask: async () => {
         throw new Error("unexpected submitTask");
       },
@@ -261,7 +257,6 @@ test("startWebHost 的 /api/ui-snapshot 会区分 idle 与 active task", async (
   });
   const idleHost = await startWebHost({
     orchestrator: {
-      subscribe: () => createNoopUnsubscribe,
       submitTask: async () => {
         throw new Error("unexpected submitTask");
       },
@@ -307,7 +302,6 @@ test("startWebHost 的 /api/ui-snapshot 会区分 idle 与 active task", async (
   });
   const activeHost = await startWebHost({
     orchestrator: {
-      subscribe: () => createNoopUnsubscribe,
       submitTask: async () => {
         throw new Error("unexpected submitTask");
       },
@@ -359,7 +353,6 @@ test("startWebHost 的 /api/tasks/runtime 始终绑定当前进程 task，不接
   });
   const host = await startWebHost({
     orchestrator: {
-      subscribe: () => createNoopUnsubscribe,
       submitTask: async () => {
         throw new Error("unexpected submitTask");
       },
@@ -396,7 +389,6 @@ test("startWebHost 的 /api/tasks/open-agent-terminal 只透传 agentId", async 
   const capturedPayloads: Array<{ agentId: string }> = [];
   const host = await startWebHost({
     orchestrator: {
-      subscribe: () => createNoopUnsubscribe,
       submitTask: async () => {
         throw new Error("unexpected submitTask");
       },
@@ -439,7 +431,6 @@ test("startWebHost 在 submit 请求缺少有效 content 时返回 400", async (
   const port = await reservePort();
   const host = await startWebHost({
     orchestrator: {
-      subscribe: () => createNoopUnsubscribe,
       submitTask: async () => {
         throw new Error("unexpected submitTask");
       },
@@ -481,7 +472,6 @@ test("startWebHost 在 submit 请求提供非法 mentionAgentId 时返回 400", 
   const port = await reservePort();
   const host = await startWebHost({
     orchestrator: {
-      subscribe: () => createNoopUnsubscribe,
       submitTask: async () => {
         throw new Error("unexpected submitTask");
       },
@@ -524,7 +514,6 @@ test("startWebHost 在 open-agent-terminal 请求缺少有效 agentId 时返回 
   const port = await reservePort();
   const host = await startWebHost({
     orchestrator: {
-      subscribe: () => createNoopUnsubscribe,
       submitTask: async () => {
         throw new Error("unexpected submitTask");
       },
@@ -562,7 +551,7 @@ test("startWebHost 在 open-agent-terminal 请求缺少有效 agentId 时返回 
   }
 });
 
-test("startWebHost 任一 bind host 监听失败时会关闭已监听 server 并取消订阅", async () => {
+test("startWebHost 任一 bind host 监听失败时会关闭已监听 server", async () => {
   const availableBindHosts = await resolveAvailableLoopbackBindHosts();
   if (availableBindHosts.length < 2) {
     return;
@@ -578,16 +567,10 @@ test("startWebHost 任一 bind host 监听失败时会关闭已监听 server 并
     assert.fail("测试未能占住第二个 loopback host 的端口");
   }
 
-  let unsubscribeCallCount = 0;
   try {
     await assert.rejects(
       startWebHost({
         orchestrator: {
-          subscribe: () => {
-            return () => {
-              unsubscribeCallCount += 1;
-            };
-          },
           submitTask: async () => {
             throw new Error("unexpected submitTask");
           },
@@ -615,14 +598,12 @@ test("startWebHost 任一 bind host 监听失败时会关闭已监听 server 并
     await blocker.reservation.close();
   }
 
-  assert.equal(unsubscribeCallCount, 1);
   const taskSnapshot = buildTaskSnapshot({
     id: "task-123",
     cwd: "/tmp/demo",
   });
   const reusedHost = await startWebHost({
     orchestrator: {
-      subscribe: () => createNoopUnsubscribe,
       submitTask: async () => {
         throw new Error("unexpected submitTask");
       },

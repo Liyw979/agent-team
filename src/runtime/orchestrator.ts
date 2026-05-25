@@ -1,11 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { EventEmitter } from "node:events";
 import path from "node:path";
 import { withOptionalString } from "@shared/object-utils";
 import { resolveTaskSubmissionTarget } from "@shared/task-submission";
 import { buildCliOpencodeAttachCommand } from "@shared/terminal-commands";
 import {
-  type AgentTeamEvent,
   type AgentProgressActivityKind,
   type AgentProgressMessageRecord,
   type AgentFinalMessageRecord,
@@ -271,7 +269,6 @@ export class Orchestrator {
   private startedOpenCodeClient!: OpenCodeClient;
   private hasStartedOpenCode = false;
   readonly cwd: string;
-  private readonly events = new EventEmitter();
   private readonly runtime = new TaskRuntime({
     host: {
       createBatchRunners: async ({ taskId, state, batch }) =>
@@ -344,13 +341,6 @@ export class Orchestrator {
     } finally {
       releaseProcessWorkspaceCwd(this.cwd);
     }
-  }
-
-  subscribe(listener: (event: AgentTeamEvent) => void): () => void {
-    this.events.on("agent-team-event", listener);
-    return () => {
-      this.events.off("agent-team-event", listener);
-    };
   }
 
   async getWorkspaceSnapshot(): Promise<WorkspaceSnapshot> {
@@ -492,11 +482,6 @@ export class Orchestrator {
       task,
       this.listWorkspaceAgents(),
     );
-    this.emit({
-      type: "task-updated",
-      payload: snapshot,
-    });
-
     const taskAgent = snapshot.agents.find(
       (item) => item.id === payload.agentId,
     );
@@ -618,11 +603,6 @@ export class Orchestrator {
     this.store.insertMessage(taskCreatedMessage);
 
     const snapshot = this.hydrateTask(taskId);
-    this.emit({
-      type: "task-created",
-      payload: snapshot,
-    });
-
     return snapshot;
   }
 
@@ -658,7 +638,6 @@ export class Orchestrator {
       targetRunCount,
     );
     this.store.insertMessage(message);
-    this.emit({ type: "message-created", payload: message });
 
     const forwardedContent = stripTargetMentionPure(
       content,
@@ -1644,10 +1623,6 @@ export class Orchestrator {
           ),
         };
         this.store.insertMessage(triggerMessage);
-        this.emit({
-          type: "message-created",
-          payload: triggerMessage,
-        });
       }
     }
 
@@ -1777,10 +1752,6 @@ export class Orchestrator {
       };
       this.store.insertMessage(missingAgentMessage);
       this.updateTaskStatusIfActive(task.id, "failed");
-      this.emit({
-        type: "message-created",
-        payload: missingAgentMessage,
-      });
       return {
         agentId: runtimeAgentId,
         messageId: missingAgentMessage.id,
@@ -1810,20 +1781,6 @@ export class Orchestrator {
       if (!latestAgent) {
         throw new Error(`当前工作区缺少 Agent ${executableAgentId}`);
       }
-
-      this.emit({
-        type: "agent-status-changed",
-        payload: {
-          taskId: task.id,
-          agentId: runtimeAgentId,
-          status: "running",
-          runCount: currentAgent.runCount,
-        },
-      });
-      this.emit({
-        type: "task-updated",
-        payload: this.hydrateTask(task.id),
-      });
 
       const dispatchedContent = this.buildAgentExecutionPrompt(prompt);
       const responsePromise = this.opencodeClient.submitMessage(agentSessionId, {
@@ -1905,28 +1862,6 @@ export class Orchestrator {
         this.updateTaskStatusIfActive(task.id, "running");
       }
 
-      this.emit({
-        type: "message-created",
-        payload: taskMessage,
-      });
-      this.emit({
-        type: "agent-status-changed",
-        payload: {
-          taskId: task.id,
-          agentId: runtimeAgentId,
-          status: agentStatus,
-          runCount:
-            this.store
-              .listTaskAgents(task.id)
-              .find((item) => item.id === runtimeAgentId)?.runCount ??
-            currentAgent.runCount,
-        },
-      });
-      this.emit({
-        type: "task-updated",
-        payload: this.hydrateTask(task.id),
-      });
-
       const signal = this.parseSignal(response.finalMessage);
       const baseGraphAgentResult = {
         agentId: runtimeAgentId,
@@ -1975,26 +1910,6 @@ export class Orchestrator {
       };
       this.store.insertMessage(failedMessage);
       this.updateTaskStatusIfActive(task.id, "failed");
-      this.emit({
-        type: "message-created",
-        payload: failedMessage,
-      });
-      this.emit({
-        type: "agent-status-changed",
-        payload: {
-          taskId: task.id,
-          agentId: runtimeAgentId,
-          status: "failed",
-          runCount:
-            this.store
-              .listTaskAgents(task.id)
-              .find((item) => item.id === runtimeAgentId)?.runCount ?? 0,
-        },
-      });
-      this.emit({
-        type: "task-updated",
-        payload: this.hydrateTask(task.id),
-      });
 
       return {
         agentId: runtimeAgentId,
@@ -2064,14 +1979,6 @@ export class Orchestrator {
             status: "failed",
           };
     this.store.insertMessage(completionMessage);
-    this.emit({
-      type: "message-created",
-      payload: completionMessage,
-    });
-    this.emit({
-      type: "task-updated",
-      payload: snapshot,
-    });
   }
 
   private createTrailingMessageTimestamp(taskId: string): string {
@@ -2370,16 +2277,7 @@ export class Orchestrator {
 
     for (const message of emittedMessages) {
       this.store.insertMessage(message);
-      this.emit({
-        type: "message-created",
-        payload: message,
-      });
     }
-
-    this.emit({
-      type: "task-updated",
-      payload: this.hydrateTask(input.taskId),
-    });
   }
 
   private async awaitExecutionWithProgressSync(input: {
@@ -2420,10 +2318,6 @@ export class Orchestrator {
       agentIds: input.agentIds,
     });
     return trackedExecution;
-  }
-
-  private emit(event: AgentTeamEvent) {
-    this.events.emit("agent-team-event", event);
   }
 
   private async ensureTaskRuntimeEventStream() {
