@@ -8,6 +8,8 @@ import {
   initAppFileLogger,
 } from "../runtime/app-log";
 import { Orchestrator } from "../runtime/orchestrator";
+import { OpenCodeClient } from "../runtime/opencode-client";
+import { buildInjectedConfigFromAgents } from "../runtime/project-agent-source";
 import { resolveCliUserDataPath } from "../runtime/user-data-path";
 import { compileTeamDsl, matchesAppliedTeamDsl } from "../runtime/team-dsl";
 import { collectIncrementalChatTranscript, renderChatStreamEntries } from "./chat-stream-printer";
@@ -128,21 +130,35 @@ async function createCliContext(input: {
   cwd: string;
   userDataPath: string;
   enableEventStream: boolean;
+  compiledTopology: ReturnType<typeof compileTeamDsl>;
 }): Promise<CliContext> {
   const userDataPath = input.userDataPath;
   const cwd = resolveWorkspaceCwdFromFilesystem(input.cwd, process.cwd());
   await ensureRuntimeAssets(userDataPath);
-  const orchestrator = new Orchestrator({
+  const server = await OpenCodeClient.startServer(
     cwd,
-    userDataPath,
-    autoOpenTaskSession: false,
-    enableEventStream: input.enableEventStream,
+    buildInjectedConfigFromAgents(input.compiledTopology.agents),
+  );
+  const opencodeClient = new OpenCodeClient({
+    server,
   });
-  await orchestrator.initialize();
-  return {
-    orchestrator,
-    userDataPath,
-  };
+  try {
+    const orchestrator = new Orchestrator({
+      cwd,
+      userDataPath,
+      opencodeClient,
+      autoOpenTaskSession: false,
+      enableEventStream: input.enableEventStream,
+    });
+    await orchestrator.initialize();
+    return {
+      orchestrator,
+      userDataPath,
+    };
+  } catch (error) {
+    await opencodeClient.shutdown();
+    throw error;
+  }
 }
 
 async function ensureYamlTopologyApplied(
@@ -430,6 +446,7 @@ async function run() {
     cwd: resolveCommandCwd(command),
     userDataPath,
     enableEventStream: false,
+    compiledTopology,
   });
   let observedSettledTaskState = false;
   let forceProcessExit = false;
