@@ -3,5 +3,8 @@
   "entry": [
     "src/cli/index.ts",
     "src/**/*.test.{ts,tsx}"
+  ],
+  "ignoreDependencies": [
+    "tsx"
   ]
 }

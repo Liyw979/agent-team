@@ -93,7 +93,6 @@ import { isExecutionDecisionAgent } from "./decision-agent-context";
 import { resolveTaskAgentIdsToPrewarm } from "./task-session-prewarm";
 import { bindCurrentTaskLog } from "./app-log";
 import {
-  buildInjectedConfigFromAgents,
   extractDslAgentsFromTopology,
   resolveProjectAgents,
   validateProjectAgents,
@@ -165,6 +164,7 @@ function getTopologyEndIncoming(
 interface OrchestratorOptions {
   cwd: string;
   userDataPath: string;
+  opencodeClient: OpenCodeClient;
   autoOpenTaskSession?: boolean;
   enableEventStream?: boolean;
   runtimeRefreshDebounceMs?: number;
@@ -268,8 +268,7 @@ export function isTerminalTaskStatus(status: TaskRecord["status"]) {
 
 export class Orchestrator {
   readonly store: StoreService;
-  private startedOpenCodeClient!: OpenCodeClient;
-  private hasStartedOpenCode = false;
+  readonly opencodeClient: OpenCodeClient;
   readonly cwd: string;
   private readonly events = new EventEmitter();
   private readonly runtime = new TaskRuntime({
@@ -297,6 +296,7 @@ export class Orchestrator {
     // A single orchestrator process is bound to one workspace root for its whole lifetime.
     acquireProcessWorkspaceCwd(this.cwd);
     this.store = new StoreService();
+    this.opencodeClient = options.opencodeClient;
     this.enableEventStream = options.enableEventStream ?? true;
     this.runtimeRefreshDebounceMs = options.runtimeRefreshDebounceMs ?? 120;
     this.terminalLauncher = options.terminalLauncher ?? launchTerminalCommand;
@@ -304,13 +304,6 @@ export class Orchestrator {
 
   async initialize() {
     this.ensureWorkspaceRecord();
-  }
-
-  get opencodeClient(): OpenCodeClient {
-    if (!this.hasStartedOpenCode) {
-      throw new Error("OpenCodeClient 尚未启动。");
-    }
-    return this.startedOpenCodeClient;
   }
 
   async dispose(
@@ -335,11 +328,6 @@ export class Orchestrator {
     this.taskRuntimeOverlays.clear();
     this.runtimeEventCallbacks.clear();
     try {
-      if (!this.hasStartedOpenCode) {
-        return {
-          killedPids: [],
-        };
-      }
       return await this.opencodeClient.shutdown();
     } finally {
       releaseProcessWorkspaceCwd(this.cwd);
@@ -1090,6 +1078,17 @@ export class Orchestrator {
     return created;
   }
 
+  private setTaskAttachBaseUrl(
+    taskId: string,
+    attachBaseUrl: string,
+  ) {
+    const overlay = this.ensureTaskRuntimeOverlay(taskId);
+    this.taskRuntimeOverlays.set(taskId, {
+      ...overlay,
+      attachBaseUrl,
+    });
+  }
+
   private overlayTaskAgents(
     task: TaskRecord,
     agents: TaskAgentRecord[],
@@ -1111,8 +1110,7 @@ export class Orchestrator {
     if (existingSessionId) {
       return existingSessionId;
     }
-    const injectedConfig = buildInjectedConfigFromAgents(this.listWorkspaceAgents());
-    await this.ensureTaskServer(task.id, injectedConfig);
+    await this.ensureTaskServer(task.id);
     const sessionId = await this.opencodeClient.createSession(
       agent.id,
     );
@@ -1126,7 +1124,6 @@ export class Orchestrator {
 
   private async ensureTaskServer(
     taskId: string,
-    injectedConfig: ReturnType<typeof buildInjectedConfigFromAgents>,
   ): Promise<void> {
     const overlay = this.ensureTaskRuntimeOverlay(taskId);
     if (overlay.attachBaseUrl) {
@@ -1135,20 +1132,10 @@ export class Orchestrator {
     const existingAttachBaseUrl = [...this.taskRuntimeOverlays.values()]
       .find((currentOverlay) => currentOverlay.attachBaseUrl)?.attachBaseUrl ?? "";
     if (existingAttachBaseUrl) {
-      overlay.attachBaseUrl = existingAttachBaseUrl;
+      this.setTaskAttachBaseUrl(taskId, existingAttachBaseUrl);
       return;
     }
-    if (this.hasStartedOpenCode) {
-      overlay.attachBaseUrl = await this.opencodeClient.getAttachBaseUrl();
-      return;
-    }
-    const server = await OpenCodeClient.startServer(this.cwd, injectedConfig);
-    const client = new OpenCodeClient({
-      server,
-    });
-    this.startedOpenCodeClient = client;
-    this.hasStartedOpenCode = true;
-    overlay.attachBaseUrl = `http://${client.host}:${server.port}`;
+    this.setTaskAttachBaseUrl(taskId, await this.opencodeClient.getAttachBaseUrl());
   }
 
   private async ensureTaskAgentSessions(
@@ -1177,10 +1164,7 @@ export class Orchestrator {
   ): Promise<TaskSnapshot> {
     this.syncTaskAgents(task, agents);
     const currentTask = this.store.getTask(task.id);
-    await this.ensureTaskServer(
-      currentTask.id,
-      buildInjectedConfigFromAgents(this.listWorkspaceAgents()),
-    );
+    await this.ensureTaskServer(currentTask.id);
     await this.ensureTaskAgentSessions(currentTask);
     if (this.hasTaskRuntimeSessions(currentTask.id)) {
       await this.ensureTaskRuntimeEventStream();

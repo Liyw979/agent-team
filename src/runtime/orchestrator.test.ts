@@ -145,7 +145,8 @@ type ConfigureTestOrchestratorDependencies = (
   defaults: TestOrchestratorDependencies,
 ) => TestOrchestratorDependencies;
 
-type TestOrchestratorOptions = ConstructorParameters<typeof Orchestrator>[0];
+type BaseOrchestratorOptions = ConstructorParameters<typeof Orchestrator>[0];
+type TestOrchestratorOptions = Omit<BaseOrchestratorOptions, "opencodeClient">;
 
 function requireSingleMessage<T extends MessageRecord>(
   messages: T[],
@@ -170,6 +171,44 @@ function requireSingleTriggeredAgentFinalMessage(
   );
 }
 
+function createTestOpenCodeClient(): OpenCodeClient {
+  const client = new OpenCodeClient({
+    server: {
+      process: {
+        pid: 0,
+        killed: true,
+        kill() {
+          return true;
+        },
+        on() {
+          return this;
+        },
+        off() {
+          return this;
+        },
+        stderr: {
+          on() {
+            return this;
+          },
+        },
+        stdout: {
+          on() {
+            return this;
+          },
+        },
+      } as never,
+      port: 43127,
+    },
+  });
+  client.submitMessage = async () => buildCompletedExecutionResult({
+      agent: "Build",
+      finalMessage: "",
+      messageId: "msg-test",
+      timestamp: new Date().toISOString(),
+    });
+  return client;
+}
+
 class TestOrchestrator extends Orchestrator {
   private readonly dependencies: TestOrchestratorDependencies;
 
@@ -177,7 +216,10 @@ class TestOrchestrator extends Orchestrator {
     options: TestOrchestratorOptions,
     configureDependencies: ConfigureTestOrchestratorDependencies = (defaults) => defaults,
   ) {
-    super(options);
+    super({
+      ...options,
+      opencodeClient: createTestOpenCodeClient(),
+    });
     const defaults: TestOrchestratorDependencies = {
       trackBackgroundTask: (promise, context) => super.trackBackgroundTask(promise, context),
       createRuntimeBatchRunners: (taskId, state, batch) =>
@@ -213,42 +255,12 @@ class TestOrchestrator extends Orchestrator {
   }
 
   public initializeTestOpenCodeRuntime() {
-    const client = new OpenCodeClient({
-      server: {
-        process: {
-          pid: 0,
-          killed: true,
-          kill() {
-            return true;
-          },
-          on() {
-            return this;
-          },
-          off() {
-            return this;
-          },
-          stderr: {
-            on() {
-              return this;
-            },
-          },
-          stdout: {
-            on() {
-              return this;
-            },
-          },
-        } as never,
-        port: 43127,
-      },
-    });
-    Reflect.set(this, "startedOpenCodeClient", client);
-    client.submitMessage = async () => buildCompletedExecutionResult({
+    this.opencodeClient.submitMessage = async () => buildCompletedExecutionResult({
         agent: "Build",
         finalMessage: "",
         messageId: "msg-test",
         timestamp: new Date().toISOString(),
       });
-    Reflect.set(this, "hasStartedOpenCode", true);
   }
 }
 
@@ -2065,7 +2077,7 @@ test("第二个不同 cwd 的 Project 会在入口直接失败", async () => {
   );
 });
 
-test("同一 cwd 下多个 task 只会启动一次 OpenCode serve", async () => {
+test("同一 cwd 下 task 初始化只会读取一次 OpenCode attach 地址", async () => {
   const userDataPath = createTempDir();
   const cwd = createTempDir();
   const orchestrator = new TestOrchestrator({
@@ -2074,92 +2086,23 @@ test("同一 cwd 下多个 task 只会启动一次 OpenCode serve", async () => 
     enableEventStream: false,
   });
 
-  let startServerCount = 0;
-  const originalStartServer = OpenCodeClient.startServer;
-  const originalFetch = globalThis.fetch;
-  OpenCodeClient.startServer = async () => {
-    startServerCount += 1;
-    return {
-      process: {
-        pid: 0,
-        killed: true,
-        kill() {
-          return true;
-        },
-        on() {
-          return this;
-        },
-        off() {
-          return this;
-        },
-        stderr: {
-          on() {
-            return this;
-          },
-        },
-        stdout: {
-          on() {
-            return this;
-          },
-        },
-      } as never,
-      port: 43127,
-    };
+  let attachBaseUrlReadCount = 0;
+  orchestrator.opencodeClient.createSession = async (title: string) => `session:${title}`;
+  orchestrator.opencodeClient.getAttachBaseUrl = async () => {
+    attachBaseUrlReadCount += 1;
+    return "http://127.0.0.1:43127";
   };
-  try {
-    globalThis.fetch = (async (input: string | URL | Request) => {
-      const url = String(input);
-      if (url.endsWith("/session")) {
-        return new Response(JSON.stringify({ id: "session:test" }), {
-          status: 200,
-          headers: {
-            "content-type": "application/json",
-          },
-        });
-      }
-      if (url.endsWith("/global/event")) {
-        return new Response("", { status: 200 });
-      }
-      if (url.includes("/message")) {
-        return new Response(JSON.stringify({
-          id: "msg-1",
-          info: {
-            id: "msg-1",
-            role: "assistant",
-            time: {
-              completed: Date.now(),
-            },
-          },
-          parts: [{ type: "text", text: "ok" }],
-        }), {
-          status: 200,
-          headers: {
-            "content-type": "application/json",
-          },
-        });
-      }
-      return new Response(JSON.stringify([]), {
-        status: 200,
-        headers: {
-          "content-type": "application/json",
-        },
-      });
-    }) as typeof fetch;
 
-    await orchestrator.getWorkspaceSnapshot();
-    await addBuiltinAgents(orchestrator, ["Build"], "Build", []);
+  await orchestrator.getWorkspaceSnapshot();
+  await addBuiltinAgents(orchestrator, ["Build"], "Build", []);
 
-    await orchestrator.initializeTask();
-    await assert.rejects(
-      () => orchestrator.initializeTask(),
-      /当前进程只允许一个 Task/,
-    );
+  await orchestrator.initializeTask();
+  await assert.rejects(
+    () => orchestrator.initializeTask(),
+    /当前进程只允许一个 Task/,
+  );
 
-    assert.equal(startServerCount, 1);
-  } finally {
-    OpenCodeClient.startServer = originalStartServer;
-    globalThis.fetch = originalFetch;
-  }
+  assert.equal(attachBaseUrlReadCount, 1);
 });
 
 test("新的 Orchestrator 进程里不会再从旧工作区快照恢复 task attach session", async () => {
