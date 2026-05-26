@@ -1,4 +1,5 @@
 // 用户要求：submit message 的每次重试前必须先调用 abort，避免旧 OpenCode session 运行状态导致再次提交卡死。
+// 2026-05-26: 用户要求每次发送 OpenCode 请求都必须记录到当前 Task log 文件。
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { parseDecision } from "./decision-parser";
 import { toOpenCodeAgentId } from "./opencode-agent-id";
@@ -584,6 +585,10 @@ export class OpenCodeClient {
     if (options.method === "POST" && options.body.length > 0) {
       requestInit.body = options.body;
     }
+    appendAppLog("info", "opencode.request_sent", {
+      method: options.method,
+      url,
+    });
     const response = await this.fetchWithTimeout(url, requestInit, {
         pathname,
         method: options.method,
