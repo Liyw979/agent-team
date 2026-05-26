@@ -96,6 +96,20 @@ function buildTaskSnapshot(input: { id: string; cwd: string }): TaskSnapshot {
   };
 }
 
+function buildRunningTaskSnapshot(input: { id: string; cwd: string }): TaskSnapshot {
+  return {
+    ...buildTaskSnapshot(input),
+    agents: [{
+      taskId: input.id,
+      id: "BA",
+      opencodeSessionId: "session-ba",
+      opencodeAttachBaseUrl: "http://127.0.0.1:43127",
+      status: "running",
+      runCount: 1,
+    }],
+  };
+}
+
 test("startWebHost 会按 JSON 解析 /api/tasks/submit 请求体", async () => {
   const port = await reservePort();
   const capturedPayloads: SubmitTaskPayload[] = [];
@@ -123,9 +137,6 @@ test("startWebHost 会按 JSON 解析 /api/tasks/submit 请求体", async () => 
       },
       getWorkspaceSnapshot: async () => {
         throw new Error("unexpected getWorkspaceSnapshot");
-      },
-      getTaskRuntime: async () => {
-        throw new Error("unexpected getTaskRuntime");
       },
       openAgentTerminal: async () => {
         throw new Error("unexpected openAgentTerminal");
@@ -174,9 +185,6 @@ test("startWebHost 会同时监听 IPv4 和 IPv6 loopback，避免 localhost 命
         name: "demo",
         tasks: [taskSnapshot],
       }),
-      getTaskRuntime: async () => {
-        throw new Error("unexpected getTaskRuntime");
-      },
       openAgentTerminal: async () => {
         throw new Error("unexpected openAgentTerminal");
       },
@@ -220,9 +228,6 @@ test("startWebHost 在 single-page-app 模式下返回静态入口与资源文�
       getWorkspaceSnapshot: async () => {
         throw new Error("unexpected getWorkspaceSnapshot");
       },
-      getTaskRuntime: async () => {
-        throw new Error("unexpected getTaskRuntime");
-      },
       openAgentTerminal: async () => {
         throw new Error("unexpected openAgentTerminal");
       },
@@ -265,9 +270,6 @@ test("startWebHost 的 /api/ui-snapshot 会区分 idle 与 active task", async (
         throw new Error("unexpected getTaskSnapshot");
       },
       getWorkspaceSnapshot: async () => idleWorkspace,
-      getTaskRuntime: async () => {
-        throw new Error("unexpected getTaskRuntime");
-      },
       openAgentTerminal: async () => {
         throw new Error("unexpected openAgentTerminal");
       },
@@ -314,9 +316,6 @@ test("startWebHost 的 /api/ui-snapshot 会区分 idle 与 active task", async (
         name: "active",
         tasks: [activeTaskSnapshot],
       }),
-      getTaskRuntime: async () => {
-        throw new Error("unexpected getTaskRuntime");
-      },
       openAgentTerminal: async () => {
         throw new Error("unexpected openAgentTerminal");
       },
@@ -344,26 +343,32 @@ test("startWebHost 的 /api/ui-snapshot 会区分 idle 与 active task", async (
   }
 });
 
-test("startWebHost 的 /api/tasks/runtime 始终绑定当前进程 task，不接受查询参数覆盖", async () => {
+test("startWebHost 的 /api/ui-snapshot 会注入非持久化 OpenCode 过程消息", async () => {
   const port = await reservePort();
-  let runtimeCallCount = 0;
-  const taskSnapshot = buildTaskSnapshot({
-    id: "task-123",
-    cwd: "/tmp/demo",
+  const taskSnapshot = buildRunningTaskSnapshot({
+    id: "task-live-progress",
+    cwd: "/tmp/live-progress",
   });
   const host = await startWebHost({
     orchestrator: {
       submitTask: async () => {
         throw new Error("unexpected submitTask");
       },
+      getTaskSnapshot: async () => taskSnapshot,
       getWorkspaceSnapshot: async () => buildWorkspaceSnapshot({
-        cwd: "/tmp/demo",
-        name: "demo",
+        cwd: "/tmp/live-progress",
+        name: "live-progress",
         tasks: [taskSnapshot],
       }),
-      getTaskRuntime: async () => {
-        runtimeCallCount += 1;
-        return [];
+      opencodeClient: {
+        listSessionActivities: async () => [{
+          sourceMessageId: "msg-tool",
+          sourcePartIndex: 0,
+          kind: "tool",
+          label: "read",
+          detail: "参数: filePath=/tmp/demo.txt",
+          timestamp: "2026-04-30T12:00:01.000Z",
+        }],
       },
       openAgentTerminal: async () => {
         throw new Error("unexpected openAgentTerminal");
@@ -371,14 +376,30 @@ test("startWebHost 的 /api/tasks/runtime 始终绑定当前进程 task，不接
     } as never,
     port,
     staticAssets: { kind: "api-only" },
-    userDataPath: "/tmp",
+    userDataPath: "/tmp/user-data",
     bindHosts: [UI_LOOPBACK_IPV4_HOST],
   });
 
   try {
-    const response = await fetch(`http://localhost:${port}/api/tasks/runtime?taskId=task-overridden`);
+    const response = await fetch(`http://localhost:${port}/api/ui-snapshot`);
     assert.equal(response.status, 200);
-    assert.equal(runtimeCallCount, 1);
+    const payload = await response.json();
+    assert.equal(payload.kind, "task");
+    assert.equal(taskSnapshot.messages.length, 0);
+    assert.deepEqual(payload.task.messages, [{
+      id: "live:BA:msg-tool:0",
+      taskId: "task-live-progress",
+      content: "参数: filePath=/tmp/demo.txt",
+      sender: "BA",
+      timestamp: "2026-04-30T12:00:01.000Z",
+      kind: "agent-progress",
+      activityKind: "tool",
+      label: "read",
+      detail: "参数: filePath=/tmp/demo.txt",
+      detailState: "not_applicable",
+      sessionId: "session-ba",
+      runCount: 1,
+    }]);
   } finally {
     await host.close();
   }
@@ -394,9 +415,6 @@ test("startWebHost 的 /api/tasks/open-agent-terminal 只透传 agentId", async 
       },
       getWorkspaceSnapshot: async () => {
         throw new Error("unexpected getWorkspaceSnapshot");
-      },
-      getTaskRuntime: async () => {
-        throw new Error("unexpected getTaskRuntime");
       },
       openAgentTerminal: async (payload: { agentId: string }) => {
         capturedPayloads.push(payload);
@@ -437,9 +455,6 @@ test("startWebHost 在 submit 请求缺少有效 content 时返回 400", async (
       getWorkspaceSnapshot: async () => {
         throw new Error("unexpected getWorkspaceSnapshot");
       },
-      getTaskRuntime: async () => {
-        throw new Error("unexpected getTaskRuntime");
-      },
       openAgentTerminal: async () => {
         throw new Error("unexpected openAgentTerminal");
       },
@@ -477,9 +492,6 @@ test("startWebHost 在 submit 请求提供非法 mentionAgentId 时返回 400", 
       },
       getWorkspaceSnapshot: async () => {
         throw new Error("unexpected getWorkspaceSnapshot");
-      },
-      getTaskRuntime: async () => {
-        throw new Error("unexpected getTaskRuntime");
       },
       openAgentTerminal: async () => {
         throw new Error("unexpected openAgentTerminal");
@@ -519,9 +531,6 @@ test("startWebHost 在 open-agent-terminal 请求缺少有效 agentId 时返回 
       },
       getWorkspaceSnapshot: async () => {
         throw new Error("unexpected getWorkspaceSnapshot");
-      },
-      getTaskRuntime: async () => {
-        throw new Error("unexpected getTaskRuntime");
       },
       openAgentTerminal: async () => {
         throw new Error("unexpected openAgentTerminal");
@@ -580,9 +589,6 @@ test("startWebHost 任一 bind host 监听失败时会关闭已监听 server", a
           getWorkspaceSnapshot: async () => {
             throw new Error("unexpected getWorkspaceSnapshot");
           },
-          getTaskRuntime: async () => {
-            throw new Error("unexpected getTaskRuntime");
-          },
           openAgentTerminal: async () => {
             throw new Error("unexpected openAgentTerminal");
           },
@@ -612,9 +618,6 @@ test("startWebHost 任一 bind host 监听失败时会关闭已监听 server", a
         name: "demo",
         tasks: [taskSnapshot],
       }),
-      getTaskRuntime: async () => {
-        throw new Error("unexpected getTaskRuntime");
-      },
       openAgentTerminal: async () => {
         throw new Error("unexpected openAgentTerminal");
       },

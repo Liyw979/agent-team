@@ -292,27 +292,11 @@ function stubOpenCodeSessions(orchestrator: TestOrchestrator) {
   orchestrator.initializeTestOpenCodeRuntime();
   orchestrator.opencodeClient.createSession = async (title: string) => `session:${title}`;
   orchestrator.opencodeClient.getAttachBaseUrl = async () => "http://127.0.0.1:43127";
-  orchestrator.opencodeClient.getSessionRuntime = async (sessionId) => ({
-    sessionId,
-    messageCount: 0,
-    updatedAt: "",
-    headline: "",
-    activeToolNames: [],
-    activities: [],
-  });
 }
 
 function stubOpenCodeAttachBaseUrl(orchestrator: TestOrchestrator) {
   orchestrator.initializeTestOpenCodeRuntime();
   orchestrator.opencodeClient.getAttachBaseUrl = async () => "http://127.0.0.1:43127";
-  orchestrator.opencodeClient.getSessionRuntime = async (sessionId) => ({
-    sessionId,
-    messageCount: 0,
-    updatedAt: "",
-    headline: "",
-    activeToolNames: [],
-    activities: [],
-  });
 }
 
 function buildCompletedExecutionResult(input: {
@@ -4054,18 +4038,6 @@ test("agent 运行中不会把 OpenCode runtime 过程消息持久化到 task me
   });
   const task = await orchestrator.initializeTask();
 
-  let runtimeReadCount = 0;
-  orchestrator.opencodeClient.getSessionRuntime = async (sessionId) => {
-    runtimeReadCount += 1;
-    return {
-      sessionId,
-      messageCount: 1,
-      updatedAt: "2026-04-30T12:00:01.000Z",
-      headline: "读取文件中",
-      activeToolNames: ["read"],
-      activities: [],
-    };
-  };
   orchestrator.opencodeClient.submitMessage = async () =>
     new Promise<OpenCodeExecutionResult>((resolve) => {
       pendingRun.ready = true;
@@ -4089,7 +4061,6 @@ test("agent 运行中不会把 OpenCode runtime 过程消息持久化到 task me
   );
   const runningSnapshot = await orchestrator.getTaskSnapshot();
   assert.equal(runningSnapshot.task.status, "running");
-  assert.equal(runtimeReadCount, 0);
   assert.equal(
     runningSnapshot.messages.some((message) => message.kind === "agent-progress"),
     false,

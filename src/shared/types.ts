@@ -547,25 +547,6 @@ export function getMessageSenderDisplayName(
   }
 }
 
-export interface AgentRuntimeActivity {
-  kind: "tool" | "message" | "thinking" | "step";
-  label: string;
-  detail: string;
-  timestamp: UtcIsoTimestamp;
-}
-
-export interface AgentRuntimeSnapshot {
-  agentId: string;
-  sessionId: string;
-  status: AgentStatus;
-  runtimeStatus: AgentStatus;
-  messageCount: number;
-  updatedAt: string;
-  headline: string;
-  activeToolNames: string[];
-  activities: AgentRuntimeActivity[];
-}
-
 export interface TaskSnapshot {
   task: TaskRecord;
   agents: TaskAgentRecord[];
