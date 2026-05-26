@@ -1,3 +1,4 @@
+// 用户要求：submit message 的每次重试前必须先调用 abort，避免旧 OpenCode session 运行状态导致再次提交卡死。
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -227,7 +228,7 @@ test("submitMessage 在响应体缺少有效消息实体时直接失败", async 
   assert.deepEqual(readTaskRecords(userDataPath, taskId), []);
 });
 
-test("submitMessage 请求级失败由 request 层按 2 分钟间隔重试", async () => {
+test("submitMessage 请求级失败由 submit 重试接管且每次重试前先 abort", async () => {
   const userDataPath = createTempDir();
   const taskId = "task-submit-request-failed";
   initAppFileLogger(userDataPath);
@@ -267,11 +268,13 @@ test("submitMessage 请求级失败由 request 层按 2 分钟间隔重试", asy
   assert.equal(result.finalMessage, "已恢复提交");
   assert.equal(requestCount, 3);
   const requestRetryAt = requestAt as [number, number, number];
-  assert.deepEqual([requestRetryAt[1] - requestRetryAt[0], requestRetryAt[2] - requestRetryAt[1]], [120_000, 120_000]);
+  assert.deepEqual([requestRetryAt[1] - requestRetryAt[0], requestRetryAt[2] - requestRetryAt[1]], [0, 120_000]);
   assert.deepEqual(requestPathnames, [
     "/session/session-1/abort",
     "/session/session-1/message",
+    "/session/session-1/abort",
     "/session/session-1/message",
+    "/session/session-1/abort",
     "/session/session-1/message",
   ]);
   const stdoutRecords = stdout.trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
@@ -279,10 +282,10 @@ test("submitMessage 请求级失败由 request 层按 2 分钟间隔重试", asy
     stdoutRecords
       .filter((record) => record["event"] === "opencode.submit_message_retried")
       .map((record) => record["reason"]),
-    [],
+    ["OpenCode 请求失败: 500", "fetch failed"],
   );
   const records = readTaskEventRecords(userDataPath, taskId, "opencode.submit_message_retried");
-  assert.equal(records.length, 0);
+  assert.equal(records.length, 2);
   const [firstRequestFailure, secondRequestFailure] = readTaskEventRecords(userDataPath, taskId, "opencode.request_failed") as [
     Record<string, unknown>,
     Record<string, unknown>,
@@ -361,91 +364,6 @@ test("submitMessage 重试前会先调用 session abort 接口", async () => {
     "/session/session-1/message",
   ]);
   assert.deepEqual(submittedContents, ["请整理需求", "生成完整回复"]);
-});
-
-test("submitMessage 业务重试时 abort 请求会在 request 层重试直到成功", async () => {
-  const userDataPath = createTempDir();
-  const taskId = "task-submit-abort-failed";
-  initAppFileLogger(userDataPath);
-  bindCurrentTaskLog(taskId);
-  const { client } = createClient();
-  const requestPathnames: string[] = [];
-  const requestAt: number[] = [];
-  let abortCount = 0;
-  let messageCount = 0;
-  const result = await withMockedFetch((async (input: string | URL | Request) => {
-    const pathname = new URL(String(input)).pathname;
-    requestPathnames.push(pathname);
-    requestAt.push(Date.now());
-    if (pathname === "/session/session-1/abort") {
-      abortCount += 1;
-      if (abortCount === 1) {
-        return new Response("", { status: 200 });
-      }
-      if (abortCount === 2) {
-        return new Response("abort failed", { status: 500, statusText: "Internal Server Error" });
-      }
-      if (abortCount === 3) {
-        throw new Error("abort fetch failed");
-      }
-      return new Response("", { status: 200 });
-    }
-    messageCount += 1;
-    return messageCount === 1
-      ? new Response(JSON.stringify({
-          info: {
-            id: "msg-empty",
-            role: "assistant",
-            time: {
-              created: Date.parse("2026-05-07T00:00:00.000Z"),
-              completed: Date.parse("2026-05-07T00:00:01.000Z"),
-            },
-            sessionID: "session-1",
-            finish: "stop",
-          },
-          parts: [
-            { type: "step-start" },
-            { type: "step-finish", reason: "stop" },
-          ],
-        }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        })
-      : createOpenCodeMessageResponse({
-          role: "assistant",
-          id: "msg-2",
-          text: "已恢复提交",
-        });
-  }) as unknown as typeof fetch, () =>
-    withFastForwardedTimeouts(() => client.submitMessage("session-1", {
-        agent: "BA",
-        runtimeAgent: "BA-1",
-        content: "请整理需求",
-        allowedDecisionTriggers: [],
-      }), 120_000));
-
-  assert.equal(result.finalMessage, "已恢复提交");
-  assert.deepEqual(requestPathnames, [
-    "/session/session-1/abort",
-    "/session/session-1/message",
-    "/session/session-1/abort",
-    "/session/session-1/abort",
-    "/session/session-1/abort",
-    "/session/session-1/message",
-  ]);
-  const retryAt = requestAt as [number, number, number, number, number, number];
-  assert.deepEqual([retryAt[3] - retryAt[2], retryAt[4] - retryAt[3]], [120_000, 120_000]);
-  const [firstAbortFailure, secondAbortFailure] = readTaskEventRecords(userDataPath, taskId, "opencode.request_failed") as [
-    Record<string, unknown>,
-    Record<string, unknown>,
-  ];
-  assert.equal(firstAbortFailure["status"], 500);
-  assert.equal(firstAbortFailure["statusText"], "Internal Server Error");
-  assert.equal(firstAbortFailure["message"], "OpenCode 中止 session 失败: 500");
-  assert.equal("status" in secondAbortFailure, false);
-  assert.equal("statusText" in secondAbortFailure, false);
-  assert.equal(secondAbortFailure["message"], "abort fetch failed");
-  assert.equal(readTaskEventRecords(userDataPath, taskId, "opencode.submit_message_retried").length, 1);
 });
 
 test("request 会在 abort 请求异常后持续重试直到成功", async () => {
@@ -578,9 +496,10 @@ test("submitMessage 首次发送 5 分钟超时后会立刻重试", async () => 
   assert.deepEqual(requestPathnames, [
     "/session/session-1/abort",
     "/session/session-1/message",
+    "/session/session-1/abort",
     "/session/session-1/message",
   ]);
-  assert.equal(readTaskEventRecords(userDataPath, taskId, "opencode.submit_message_retried").length, 0);
+  assert.equal(readTaskEventRecords(userDataPath, taskId, "opencode.submit_message_retried").length, 1);
   assert.deepEqual(
     readTaskEventRecords(userDataPath, taskId, "opencode.request_failed")
       .map((record) => record["message"]),
@@ -595,21 +514,25 @@ test("submitMessage 正常完成时不打印 submitMessage 日志，且最终请
   bindCurrentTaskLog(taskId);
   const { client } = createClient();
   let capturedBody = "";
-  client.request = async (_pathname, options) => {
-    capturedBody = options.method === "POST" ? options.body : "";
+
+  const { stdout } = await captureStdout(() => withMockedFetch((async (...args: Parameters<typeof fetch>) => {
+    const pathname = new URL(String(args[0])).pathname;
+    if (pathname === "/session/session-1/abort") {
+      return new Response("", { status: 200 });
+    }
+    const options = args[1] as RequestInit;
+    capturedBody = options.body as string;
     return createOpenCodeMessageResponse({
       role: "assistant",
       id: "msg-1",
       text: "已完成",
     });
-  };
-
-  const { stdout } = await captureStdout(() => client.submitMessage("session-1", {
-    agent: "TaskReview",
-    runtimeAgent: "TaskReview",
-    content: "请继续判定",
-    allowedDecisionTriggers: [],
-  }));
+  }) as unknown as typeof fetch, () => client.submitMessage("session-1", {
+      agent: "TaskReview",
+      runtimeAgent: "TaskReview",
+      content: "请继续判定",
+      allowedDecisionTriggers: [],
+    })));
 
   assert.equal(stdout, "");
   assert.deepEqual(readTaskRecords(userDataPath, taskId), []);
@@ -624,7 +547,8 @@ test("submitMessage 正常完成时不打印 submitMessage 日志，且最终请
 test("submitMessage 正常发送前会先调用 session abort 接口", async () => {
   const { client } = createClient();
   const requestPathnames: string[] = [];
-  client.request = async (pathname) => {
+  const result = await withMockedFetch((async (input: string | URL | Request) => {
+    const pathname = new URL(String(input)).pathname;
     requestPathnames.push(pathname);
     return pathname === "/session/session-1/abort"
       ? new Response("", { status: 200 })
@@ -633,14 +557,12 @@ test("submitMessage 正常发送前会先调用 session abort 接口", async () 
           id: "msg-1",
           text: "已完成",
         });
-  };
-
-  const result = await client.submitMessage("session-1", {
+  }) as unknown as typeof fetch, () => client.submitMessage("session-1", {
     agent: "BA",
     runtimeAgent: "BA-1",
     content: "请整理需求",
     allowedDecisionTriggers: [],
-  });
+  }));
 
   assert.equal(result.finalMessage, "已完成");
   assert.deepEqual(requestPathnames, [
@@ -657,52 +579,51 @@ test("submitMessage 在空 assistant final 后会重新发消息", async () => {
   const { client } = createClient();
   const submittedContents: string[] = [];
   let postCount = 0;
-  client.request = async (pathname, options) => {
+  const result = await withMockedFetch((async (...args: Parameters<typeof fetch>) => {
+    const pathname = new URL(String(args[0])).pathname;
     if (pathname === "/session/session-1/abort") {
       return new Response("", { status: 200 });
     }
 
-    if (options.method === "POST") {
-      postCount += 1;
-      const body = JSON.parse(options.body) as { parts: [{ text: string }] };
-      assert.equal(body.parts.length, 1);
-      submittedContents.push(body.parts[0].text);
-      if (postCount === 1) {
-        return new Response(JSON.stringify({
-          info: {
-            id: "msg-empty",
-            role: "assistant",
-            time: {
-              created: Date.parse("2026-05-07T00:00:00.000Z"),
-              completed: Date.parse("2026-05-07T00:00:01.000Z"),
-            },
-            sessionID: "session-1",
-            finish: "stop",
+    const options = args[1] as RequestInit;
+    assert.equal(options.method, "POST");
+    postCount += 1;
+    const body = JSON.parse(options.body as string) as { parts: [{ text: string }] };
+    assert.equal(body.parts.length, 1);
+    submittedContents.push(body.parts[0].text);
+    if (postCount === 1) {
+      return new Response(JSON.stringify({
+        info: {
+          id: "msg-empty",
+          role: "assistant",
+          time: {
+            created: Date.parse("2026-05-07T00:00:00.000Z"),
+            completed: Date.parse("2026-05-07T00:00:01.000Z"),
           },
-          parts: [
-            { type: "step-start" },
-            { type: "step-finish", reason: "stop" },
-          ],
-        }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      return createOpenCodeMessageResponse({
-        id: `msg-${postCount}`,
-        role: "assistant",
-        text: "已恢复正式回复",
+          sessionID: "session-1",
+          finish: "stop",
+        },
+        parts: [
+          { type: "step-start" },
+          { type: "step-finish", reason: "stop" },
+        ],
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
       });
     }
-    throw new Error("不应该发起 GET final 请求");
-  };
-
-  const result = await withFastForwardedTimeouts(() => client.submitMessage("session-1", {
-    agent: "BA",
-    runtimeAgent: "BA-1",
-    content: "请整理需求",
-    allowedDecisionTriggers: [],
-  }));
+    return createOpenCodeMessageResponse({
+      id: `msg-${postCount}`,
+      role: "assistant",
+      text: "已恢复正式回复",
+    });
+  }) as unknown as typeof fetch, () =>
+    withFastForwardedTimeouts(() => client.submitMessage("session-1", {
+      agent: "BA",
+      runtimeAgent: "BA-1",
+      content: "请整理需求",
+      allowedDecisionTriggers: [],
+    })));
 
   assert.equal(result.finalMessage, "已恢复正式回复");
   assert.deepEqual(submittedContents, ["请整理需求", "生成完整回复"]);
@@ -719,31 +640,30 @@ test("submitMessage 在 final 缺少 trigger 后会重新发完整回复要求",
   const { client } = createClient();
   const submittedContents: string[] = [];
   let postCount = 0;
-  client.request = async (pathname, options) => {
+  const result = await withMockedFetch((async (...args: Parameters<typeof fetch>) => {
+    const pathname = new URL(String(args[0])).pathname;
     if (pathname === "/session/session-1/abort") {
       return new Response("", { status: 200 });
     }
 
-    if (options.method === "POST") {
-      postCount += 1;
-      const body = JSON.parse(options.body) as { parts: [{ text: string }] };
-      assert.equal(body.parts.length, 1);
-      submittedContents.push(body.parts[0].text);
-      return createOpenCodeMessageResponse({
-        id: `msg-${postCount}`,
-        role: "assistant",
-        text: postCount === 1 ? "<456> 非法判定" : "<continue>第三次恢复</continue>",
-      });
-    }
-    throw new Error("不应该发起 GET final 请求");
-  };
-
-  const result = await withFastForwardedTimeouts(() => client.submitMessage("session-1", {
-    agent: "TaskReview",
-    runtimeAgent: "TaskReview-2",
-    content: "请继续判定",
-    allowedDecisionTriggers: ["<continue>", "<complete>"],
-  }));
+    const options = args[1] as RequestInit;
+    assert.equal(options.method, "POST");
+    postCount += 1;
+    const body = JSON.parse(options.body as string) as { parts: [{ text: string }] };
+    assert.equal(body.parts.length, 1);
+    submittedContents.push(body.parts[0].text);
+    return createOpenCodeMessageResponse({
+      id: `msg-${postCount}`,
+      role: "assistant",
+      text: postCount === 1 ? "<456> 非法判定" : "<continue>第三次恢复</continue>",
+    });
+  }) as unknown as typeof fetch, () =>
+    withFastForwardedTimeouts(() => client.submitMessage("session-1", {
+      agent: "TaskReview",
+      runtimeAgent: "TaskReview-2",
+      content: "请继续判定",
+      allowedDecisionTriggers: ["<continue>", "<complete>"],
+    })));
 
   assert.equal(result.finalMessage, "<continue>第三次恢复</continue>");
   assert.deepEqual(submittedContents, [
@@ -764,7 +684,8 @@ test("submitMessage 在 OpenCode error 消息后会记录错误并重新发消�
   bindCurrentTaskLog(taskId);
   const { client } = createClient();
   let postCount = 0;
-  client.request = async (pathname) => {
+  const result = await withMockedFetch((async (input: string | URL | Request) => {
+    const pathname = new URL(String(input)).pathname;
     if (pathname === "/session/session-1/abort") {
       return new Response("", { status: 200 });
     }
@@ -794,14 +715,13 @@ test("submitMessage 在 OpenCode error 消息后会记录错误并重新发消�
       role: "assistant",
       text: "已恢复",
     });
-  };
-
-  const result = await withFastForwardedTimeouts(() => client.submitMessage("session-1", {
-    agent: "BA",
-    runtimeAgent: "BA-1",
-    content: "请整理需求",
-    allowedDecisionTriggers: [],
-  }));
+  }) as unknown as typeof fetch, () =>
+    withFastForwardedTimeouts(() => client.submitMessage("session-1", {
+      agent: "BA",
+      runtimeAgent: "BA-1",
+      content: "请整理需求",
+      allowedDecisionTriggers: [],
+    })));
 
   assert.equal(result.finalMessage, "已恢复");
   const [record] = readTaskEventRecords(userDataPath, taskId, "opencode.submit_message_retried") as [Record<string, unknown>];
