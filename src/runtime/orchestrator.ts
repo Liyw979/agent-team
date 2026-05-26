@@ -6,7 +6,6 @@ import { buildCliOpencodeAttachCommand } from "@shared/terminal-commands";
 import {
   type AgentFinalMessageRecord,
   type AgentRoutingKind,
-  type AgentRuntimeSnapshot,
   type AgentRecord,
   buildTopologyNodeRecords,
   collectTopologyTriggerShapes,
@@ -441,55 +440,6 @@ export class Orchestrator {
     await this.launchAgentTerminal(
       taskAgent.opencodeSessionId,
       taskAgent.opencodeAttachBaseUrl,
-    );
-  }
-
-  async getTaskRuntime(): Promise<AgentRuntimeSnapshot[]> {
-    const task = this.requireCurrentTask();
-    const overlayAgents = this.overlayTaskAgents(
-      task,
-      this.store.listTaskAgents(task.id),
-    );
-    return Promise.all(
-      overlayAgents.map(async (agent) => {
-        const baseSnapshot: AgentRuntimeSnapshot = {
-          agentId: agent.id,
-          sessionId: agent.opencodeSessionId,
-          status: agent.status,
-          runtimeStatus: agent.status,
-          messageCount: 0,
-          updatedAt: "",
-          headline: "",
-          activeToolNames: [],
-          activities: [],
-        };
-
-        if (!agent.opencodeSessionId) {
-          return baseSnapshot;
-        }
-
-        try {
-          const runtime = await this.opencodeClient.getSessionRuntime(
-            agent.opencodeSessionId,
-          );
-          return {
-            ...baseSnapshot,
-            messageCount: runtime.messageCount,
-            updatedAt: runtime.updatedAt,
-            headline: runtime.headline,
-            activeToolNames: runtime.activeToolNames,
-            activities: runtime.activities,
-          };
-        } catch {
-          return {
-            ...baseSnapshot,
-            headline:
-              agent.status === "running"
-                ? "运行中，正在等待 OpenCode 返回实时消息"
-                : "",
-          };
-        }
-      }),
     );
   }
 

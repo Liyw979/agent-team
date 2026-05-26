@@ -5,7 +5,6 @@ import os from "node:os";
 import path from "node:path";
 
 import { bindCurrentTaskLog, buildTaskLogFilePath, initAppFileLogger } from "./app-log";
-import type { OpenCodeSessionRuntime } from "./opencode-client";
 import { OpenCodeClient, type ServeHandle } from "./opencode-client";
 
 class TestOpenCodeClient extends OpenCodeClient {
@@ -55,7 +54,6 @@ function createClient(cwd = createTempDir()) {
     server: createDetachedServeHandle(43127),
   }) as OpenCodeClient & {
     request: (pathname: TestRequestPathname, options: TestRequestOptions) => TestRequestResult;
-    listSessionMessages: (sessionId: string, limit: number) => Promise<unknown[]>;
   };
   return {
     client,
@@ -85,15 +83,6 @@ async function withFastForwardedTimeouts<T>(
     Date.now = originalDateNow;
     globalThis.setTimeout = originalSetTimeout;
   }
-}
-
-function assertActivityAt<T>(
-  items: T[],
-  index: number,
-): T {
-  const item = items[index];
-  assert.ok(item);
-  return item as T;
 }
 
 async function captureStdout<T>(action: () => Promise<T>): Promise<{ stdout: string; result: T }> {
@@ -798,6 +787,38 @@ test("session message 请求注入 5 分钟 AbortSignal，确保首次发送卡�
   assert.notEqual(capturedSignal, fallbackSignal);
 });
 
+test("listSessionActivities 会保留工具参数中的 0 和 false", async () => {
+  const { client } = createClient();
+  client.request = async (pathname) => {
+    assert.equal(pathname, "/session/session-1/message?limit=100");
+    return new Response(JSON.stringify([{
+      id: "msg-tool",
+      role: "assistant",
+      createdAt: "2026-04-21T12:52:26.000Z",
+      completedAt: "2026-04-21T12:52:26.000Z",
+      parts: [{
+        type: "tool",
+        tool: "grep",
+        state: {
+          input: {
+            emptyObject: {},
+            emptyValue: null,
+            offset: 0,
+            recursive: false,
+            pattern: "TODO",
+          },
+        },
+      }],
+    }]), { status: 200 });
+  };
+
+  const activities = await client.listSessionActivities("session-1");
+
+  assert.equal(activities.length, 1);
+  assert.equal(activities[0]?.kind, "tool");
+  assert.equal(activities[0]?.detail, "参数: offset=0, recursive=false, pattern=TODO");
+});
+
 test("createSession 超时后不应重启 runtime，也不应自动重试", async () => {
   const { client } = createClient();
   const typed = client as OpenCodeClient & {
@@ -817,16 +838,6 @@ test("createSession 超时后不应重启 runtime，也不应自动重试", asyn
   assert.equal(requestCount, 1);
 });
 
-test("消息列表查询接口空响应体时直接抛错", async () => {
-  const { client } = createClient();
-  client.request = async () => new Response("", { status: 200 });
-
-  await assert.rejects(
-    client.listSessionMessages("session-1", 0),
-    /响应体为空/,
-  );
-});
-
 test("getAttachBaseUrl 只读取已经启动的 serve 地址", async () => {
   const client = new OpenCodeClient({
     server: createDetachedServeHandle(43128),
@@ -834,447 +845,4 @@ test("getAttachBaseUrl 只读取已经启动的 serve 地址", async () => {
   const baseUrl = await client.getAttachBaseUrl();
 
   assert.equal(baseUrl, "http://127.0.0.1:43128");
-});
-
-test("buildRuntimeSnapshot 会保留同一条消息内 thinking 和 tool 的原始顺序", () => {
-  const { client } = createClient();
-  const typed = client as OpenCodeClient & {
-    buildRuntimeSnapshot: (sessionId: string, messages: unknown[]) => {
-      activities: Array<{ kind: string; detail: string; label: string }>;
-    };
-  };
-
-  const snapshot = typed.buildRuntimeSnapshot("session-1", [
-    {
-      id: "msg-1",
-      role: "assistant",
-      createdAt: "2026-04-21T12:52:26.000Z",
-      completedAt: "2026-04-21T12:52:26.000Z",
-      parts: [
-        {
-          type: "reasoning",
-          text: "Determining project structure",
-        },
-        {
-          type: "tool-call",
-          tool: { id: "glob" },
-          input: {
-            pattern: "**/*",
-            path: "/Users/liyw/code/empty",
-          },
-        },
-      ],
-    },
-  ]);
-
-  assert.deepEqual(
-    snapshot.activities.map((activity) => ({
-      kind: activity.kind,
-      label: activity.label,
-      detail: activity.detail,
-    })),
-    [
-      {
-        kind: "thinking",
-        label: "Determining project structure",
-        detail: "Determining project structure",
-      },
-      {
-        kind: "tool",
-        label: "glob",
-        detail: "参数: pattern=**/*, path=/Users/liyw/code/empty",
-      },
-    ],
-  );
-});
-
-test("buildRuntimeSnapshot 会在同一条 OpenCode 工具消息超过 4 个 part 时保留 thinking", () => {
-  const { client } = createClient();
-  const typed = client as OpenCodeClient & {
-    buildRuntimeSnapshot: (sessionId: string, messages: unknown[]) => {
-      activities: Array<{ kind: string; detail: string; label: string }>;
-    };
-  };
-
-  const snapshot = typed.buildRuntimeSnapshot("session-1", [
-    {
-      info: {
-        id: "msg-tool-round",
-        role: "assistant",
-        time: {
-          created: 1776960271926,
-          completed: 1776960280541,
-        },
-      },
-      parts: [
-        { type: "step-start" },
-        {
-          type: "reasoning",
-          text: "**Prioritizing instructions**\n\nI need to inspect the repository before returning a finding.",
-        },
-        {
-          type: "tool",
-          tool: "glob",
-          state: {
-            input: { pattern: "**/*Http2*.java", path: "code/tomcat-vul" },
-          },
-        },
-        {
-          type: "tool",
-          tool: "glob",
-          state: {
-            input: { pattern: "**/*Authority*.java", path: "code/tomcat-vul" },
-          },
-        },
-        {
-          type: "tool",
-          tool: "glob",
-          state: {
-            input: { pattern: "**/*Host*.java", path: "code/tomcat-vul" },
-          },
-        },
-        { type: "step-finish", reason: "tool-calls" },
-      ],
-    },
-  ]);
-
-  assert.deepEqual(
-    snapshot.activities.map((activity) => ({
-      kind: activity.kind,
-      label: activity.label,
-      detail: activity.detail,
-    })),
-    [
-      {
-        kind: "thinking",
-        label: "**Prioritizing instructions** I need to inspect…",
-        detail: "**Prioritizing instructions**\n\nI need to inspect the repository before returning a finding.",
-      },
-      {
-        kind: "tool",
-        label: "glob",
-        detail: "参数: pattern=**/*Http2*.java, path=code/tomcat-vul",
-      },
-      {
-        kind: "tool",
-        label: "glob",
-        detail: "参数: pattern=**/*Authority*.java, path=code/tomcat-vul",
-      },
-      {
-        kind: "tool",
-        label: "glob",
-        detail: "参数: pattern=**/*Host*.java, path=code/tomcat-vul",
-      },
-    ],
-  );
-});
-
-test("buildRuntimeSnapshot 不会因为后续活动超过全局显示窗口而丢掉早期 OpenCode thinking", () => {
-  const { client } = createClient();
-  const typed = client as OpenCodeClient & {
-    buildRuntimeSnapshot: (sessionId: string, messages: unknown[]) => {
-      activities: Array<{ kind: string; detail: string; label: string }>;
-    };
-  };
-  const laterToolMessages = Array.from({ length: 25 }, (_, index) => ({
-    info: {
-      id: `msg-later-${index}`,
-      role: "assistant",
-      time: {
-        created: 1776960281000 + index,
-        completed: 1776960281000 + index,
-      },
-    },
-    parts: [
-      {
-        type: "tool",
-        tool: "grep",
-        state: {
-          input: { pattern: `later-${index}` },
-        },
-      },
-    ],
-  }));
-
-  const snapshot = typed.buildRuntimeSnapshot("session-1", [
-    {
-      info: {
-        id: "msg-first-thinking",
-        role: "assistant",
-        time: {
-          created: 1776960271926,
-          completed: 1776960280541,
-        },
-      },
-      parts: [
-        {
-          type: "reasoning",
-          text: "**Prioritizing instructions**\n\nI need to inspect the repository before returning a finding.",
-        },
-      ],
-    },
-    ...laterToolMessages,
-  ]);
-
-  assert.equal(
-    snapshot.activities.some((activity) => activity.detail.includes("Prioritizing instructions")),
-    true,
-  );
-});
-
-test("buildRuntimeSnapshot 在工具参数形似 JSON 但非法时回退为原始字符串摘要", () => {
-  const { client } = createClient();
-  const typed = client as OpenCodeClient & {
-    buildRuntimeSnapshot: (sessionId: string, messages: unknown[]) => {
-      activities: Array<{ kind: string; detail: string; label: string }>;
-    };
-  };
-
-  const snapshot = typed.buildRuntimeSnapshot("session-1", [
-    {
-      id: "msg-1",
-      role: "assistant",
-      createdAt: "2026-04-21T12:52:26.000Z",
-      completedAt: "2026-04-21T12:52:26.000Z",
-      parts: [
-        {
-          type: "tool-call",
-          tool: { id: "glob" },
-          input: "{bad}",
-        },
-      ],
-    },
-  ]);
-
-  assert.equal(snapshot.activities.length, 1);
-  const firstActivity = assertActivityAt(snapshot.activities, 0);
-  assert.equal(firstActivity.kind, "tool");
-  assert.equal(firstActivity.label, "glob");
-  assert.equal(firstActivity.detail, "参数: {bad}");
-  assert.equal(firstActivity.timestamp, "2026-04-21T12:52:26.000Z");
-});
-
-test("buildRuntimeSnapshot 在暂时只有 user 消息时返回空活动而不是抛错", () => {
-  const { client } = createClient();
-  const typed = client as OpenCodeClient & {
-    buildRuntimeSnapshot: (sessionId: string, messages: unknown[]) => OpenCodeSessionRuntime;
-  };
-
-  const snapshot = typed.buildRuntimeSnapshot("session-1", [
-    {
-      info: {
-        id: "msg-user-only",
-        role: "user",
-        time: {
-          created: 1776960271926,
-        },
-      },
-      parts: [
-        {
-          type: "text",
-          text: "[User] 开始分析",
-        },
-      ],
-    },
-  ]);
-
-  assert.equal(snapshot.sessionId, "session-1");
-  assert.equal(snapshot.messageCount, 1);
-  assert.equal(snapshot.updatedAt, "");
-  assert.equal(snapshot.headline, "");
-  assert.deepEqual(snapshot.activeToolNames, []);
-  assert.deepEqual(snapshot.activities, []);
-});
-
-test("buildRuntimeSnapshot 在工具调用暂时没有参数时返回 missing 活动而不是抛错", () => {
-  const { client } = createClient();
-  const typed = client as OpenCodeClient & {
-    buildRuntimeSnapshot: (sessionId: string, messages: unknown[]) => OpenCodeSessionRuntime;
-  };
-
-  const snapshot = typed.buildRuntimeSnapshot("session-1", [
-    {
-      info: {
-        id: "msg-tool-missing-input",
-        role: "assistant",
-        time: {
-          created: 1776960271926,
-          completed: 1776960271926,
-        },
-      },
-      parts: [
-        {
-          type: "tool",
-          tool: "grep",
-          state: {
-            status: "running",
-          },
-        },
-      ],
-    },
-  ]);
-
-  assert.equal(snapshot.activities.length, 1);
-  const activity = assertActivityAt(snapshot.activities, 0);
-  assert.equal(activity.kind, "tool");
-  assert.equal(activity.label, "grep");
-  assert.equal(activity.detail, "参数暂未提供");
-  assert.equal(activity.detailState, "missing");
-  assert.equal(activity.detailParseMode, "missing");
-  assert.equal(activity.detailPayloadKeyCount, 0);
-  assert.equal(activity.detailHasPlaceholderValue, false);
-});
-
-test("buildRuntimeSnapshot 会优先使用 tool state.input 作为更完整的参数来源", () => {
-  const { client } = createClient();
-  const typed = client as OpenCodeClient & {
-    buildRuntimeSnapshot: (sessionId: string, messages: unknown[]) => OpenCodeSessionRuntime;
-  };
-
-  const snapshot = typed.buildRuntimeSnapshot("session-1", [
-    {
-      id: "msg-1",
-      role: "assistant",
-      createdAt: "2026-04-21T12:52:26.000Z",
-      completedAt: "2026-04-21T12:52:27.000Z",
-      parts: [
-        {
-          type: "tool",
-          tool: "read",
-          input: "placeholder",
-          state: {
-            input: {
-              filePath: "/tmp/demo.txt",
-            },
-          },
-        },
-      ],
-    },
-  ]);
-
-  assert.equal(snapshot.activities.length, 1);
-  const firstActivity = assertActivityAt(snapshot.activities, 0);
-  assert.equal(firstActivity.kind, "tool");
-  assert.equal(firstActivity.detail, "参数: filePath=/tmp/demo.txt");
-  assert.equal(firstActivity.detailState, "complete");
-  assert.equal(firstActivity.detailParseMode, "structured");
-  assert.equal(firstActivity.detailPayloadKeyCount, 1);
-  assert.equal(firstActivity.detailHasPlaceholderValue, false);
-
-  const stateWinsSnapshot = typed.buildRuntimeSnapshot("session-1", [
-    {
-      id: "msg-state-wins-tool",
-      role: "assistant",
-      createdAt: "2026-04-21T12:52:27.500Z",
-      completedAt: "2026-04-21T12:52:27.500Z",
-      parts: [
-        {
-          type: "tool",
-          tool: "read",
-          input: {
-            filePath: "/tmp/short.txt",
-          },
-          state: {
-            input: {
-              filePath: "/tmp/demo.txt",
-              offset: 8,
-            },
-          },
-        },
-      ],
-    },
-  ]);
-  const stateWinsActivity = assertActivityAt(stateWinsSnapshot.activities, 0);
-  assert.equal(stateWinsActivity.detail, "参数: filePath=/tmp/demo.txt, offset=8");
-  assert.equal(stateWinsActivity.detailState, "complete");
-  assert.equal(stateWinsActivity.detailParseMode, "structured");
-  assert.equal(stateWinsActivity.detailPayloadKeyCount, 3);
-  assert.equal(stateWinsActivity.detailHasPlaceholderValue, false);
-
-  const metadataSnapshot = typed.buildRuntimeSnapshot("session-1", [
-    {
-      id: "msg-metadata-tool",
-      role: "assistant",
-      createdAt: "2026-04-21T12:52:28.000Z",
-      completedAt: "2026-04-21T12:52:28.000Z",
-      parts: [
-        {
-          type: "tool",
-          tool: "grep",
-          metadata: {
-            params: {
-              pattern: "TODO",
-            },
-          },
-        },
-      ],
-    },
-  ]);
-  const metadataActivity = assertActivityAt(metadataSnapshot.activities, 0);
-  assert.equal(metadataActivity.kind, "tool");
-  assert.equal(metadataActivity.detail, "参数: pattern=TODO");
-  assert.equal(metadataActivity.detailState, "complete");
-  assert.equal(metadataActivity.detailParseMode, "structured");
-  assert.equal(metadataActivity.detailPayloadKeyCount, 1);
-  assert.equal(metadataActivity.detailHasPlaceholderValue, false);
-});
-
-test("buildRuntimeSnapshot 会用 freshness 元数据区分 placeholder 与 structured 参数", () => {
-  const { client } = createClient();
-  const typed = client as OpenCodeClient & {
-    buildRuntimeSnapshot: (sessionId: string, messages: unknown[]) => OpenCodeSessionRuntime;
-  };
-  const timestamp = "2026-04-21T12:52:27.000Z";
-
-  const placeholderSnapshot = typed.buildRuntimeSnapshot("session-1", [
-    {
-      id: "msg-placeholder-tool",
-      role: "assistant",
-      createdAt: timestamp,
-      completedAt: timestamp,
-      parts: [
-        {
-          type: "tool",
-          tool: "read",
-          input: "placeholder",
-        },
-      ],
-    },
-  ]);
-  const structuredSnapshot = typed.buildRuntimeSnapshot("session-1", [
-    {
-      id: "msg-structured-tool",
-      role: "assistant",
-      createdAt: timestamp,
-      completedAt: timestamp,
-      parts: [
-        {
-          type: "tool",
-          tool: "read",
-          state: {
-            input: {
-              filePath: "/tmp/demo.txt",
-            },
-          },
-          input: "placeholder",
-        },
-      ],
-    },
-  ]);
-
-  const placeholderActivity = assertActivityAt(placeholderSnapshot.activities, 0);
-  const structuredActivity = assertActivityAt(structuredSnapshot.activities, 0);
-
-  assert.equal(placeholderActivity.detail, "参数: placeholder");
-  assert.equal(placeholderActivity.detailState, "complete");
-  assert.equal(placeholderActivity.detailParseMode, "plain_text");
-  assert.equal(placeholderActivity.detailPayloadKeyCount, 0);
-  assert.equal(placeholderActivity.detailHasPlaceholderValue, true);
-
-  assert.equal(structuredActivity.detail, "参数: filePath=/tmp/demo.txt");
-  assert.equal(structuredActivity.detailState, "complete");
-  assert.equal(structuredActivity.detailParseMode, "structured");
-  assert.equal(structuredActivity.detailPayloadKeyCount, 1);
-  assert.equal(structuredActivity.detailHasPlaceholderValue, false);
-
 });

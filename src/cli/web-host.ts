@@ -3,11 +3,15 @@ import http from "node:http";
 import path from "node:path";
 import { URL } from "node:url";
 import type {
+  AgentProgressMessageRecord,
   OpenAgentTerminalPayload,
+  TaskAgentRecord,
+  TaskSnapshot,
   SubmitTaskPayload,
   UiSnapshotPayload,
 } from "@shared/types";
 import type { Orchestrator } from "../runtime/orchestrator";
+import type { OpenCodeSessionActivity } from "../runtime/opencode-client";
 import { buildTaskLogFilePath } from "../runtime/app-log";
 import {
   UI_LOOPBACK_HOST,
@@ -114,7 +118,7 @@ async function buildUiSnapshotPayload(
     };
   }
 
-  const task = await orchestrator.getTaskSnapshot();
+  const task = await withLiveProgressMessages(orchestrator, await orchestrator.getTaskSnapshot());
   return {
     kind: "task",
     workspace,
@@ -124,6 +128,58 @@ async function buildUiSnapshotPayload(
     taskUrl: buildUiUrl({
       port: options.port,
     }),
+  };
+}
+
+async function withLiveProgressMessages(
+  orchestrator: Orchestrator,
+  snapshot: TaskSnapshot,
+): Promise<TaskSnapshot> {
+  const liveMessages = await listLiveProgressMessages(orchestrator, snapshot);
+  if (liveMessages.length === 0) {
+    return snapshot;
+  }
+  return {
+    ...snapshot,
+    messages: [...snapshot.messages, ...liveMessages].sort((left, right) =>
+      left.timestamp.localeCompare(right.timestamp)),
+  };
+}
+
+async function listLiveProgressMessages(
+  orchestrator: Orchestrator,
+  snapshot: TaskSnapshot,
+): Promise<AgentProgressMessageRecord[]> {
+  const grouped = await Promise.all(
+    snapshot.agents
+      .filter((agent) => agent.status === "running")
+      .map(async (agent) => {
+        const activities = await orchestrator.opencodeClient.listSessionActivities(agent.opencodeSessionId);
+        return activities.map((activity) =>
+          createLiveProgressMessage(snapshot.task.id, agent, activity));
+      }),
+  );
+  return grouped.flat();
+}
+
+function createLiveProgressMessage(
+  taskId: string,
+  agent: TaskAgentRecord,
+  activity: OpenCodeSessionActivity,
+): AgentProgressMessageRecord {
+  return {
+    id: `live:${agent.id}:${activity.sourceMessageId}:${activity.sourcePartIndex}`,
+    taskId,
+    content: activity.detail,
+    sender: agent.id,
+    timestamp: activity.timestamp,
+    kind: "agent-progress",
+    activityKind: activity.kind,
+    label: activity.label,
+    detail: activity.detail,
+    detailState: "not_applicable",
+    sessionId: agent.opencodeSessionId,
+    runCount: agent.runCount,
   };
 }
 
@@ -193,10 +249,6 @@ export async function startWebHost(
         return;
       }
 
-      if (request.method === "GET" && url.pathname === "/api/tasks/runtime") {
-        json(response, 200, await options.orchestrator.getTaskRuntime());
-        return;
-      }
 
       if (request.method === "POST" && url.pathname === "/api/tasks/submit") {
         const payload = parseSubmitTaskPayload(await readJsonBody(request));

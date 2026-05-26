@@ -46,55 +46,16 @@ export interface OpenCodeExecutionResult {
   rawMessage: OpenCodeNormalizedMessage;
 }
 
-export interface OpenCodeRuntimeActivity {
+export interface OpenCodeSessionActivity {
   sourceMessageId: string;
   sourcePartIndex: number;
   kind: "tool" | "message" | "thinking" | "step";
   label: string;
   detail: string;
-  detailState: "complete" | "missing" | "not_applicable";
-  detailPayloadKeyCount: number;
-  detailHasPlaceholderValue: boolean;
-  detailParseMode: "structured" | "plain_text" | "missing" | "not_applicable";
   timestamp: UtcIsoTimestamp;
 }
 
-export interface OpenCodeSessionRuntime {
-  sessionId: string;
-  messageCount: number;
-  updatedAt: string;
-  headline: string;
-  activeToolNames: string[];
-  activities: OpenCodeRuntimeActivity[];
-}
-
-interface OpenCodeToolCallDetail {
-  detail: string;
-  detailState: OpenCodeRuntimeActivity["detailState"];
-  detailPayloadKeyCount: number;
-  detailHasPlaceholderValue: boolean;
-  detailParseMode: OpenCodeRuntimeActivity["detailParseMode"];
-}
-
-const TOOL_CALL_DETAIL_KEYS = [
-  "input",
-  "args",
-  "arguments",
-  "payload",
-  "options",
-  "params",
-  "data",
-  "body",
-] as const;
-
-const TOOL_CALL_DETAIL_CONTAINERS = [
-  "state",
-  "call",
-  "tool",
-  "metadata",
-] as const;
-
-const MAX_RUNTIME_MESSAGES = 100;
+const MAX_SESSION_ACTIVITY_MESSAGES = 100;
 const SERVE_BASE_URL_TIMEOUT_MS = 10_000;
 const RETRYABLE_CLIENT_INTERVAL_MS = 120_000;
 
@@ -266,6 +227,20 @@ export class OpenCodeClient {
     return attempt(payload.content, 0);
   }
 
+  async listSessionActivities(sessionId: string): Promise<OpenCodeSessionActivity[]> {
+    const response = await this.request(`/session/${sessionId}/message?limit=${MAX_SESSION_ACTIVITY_MESSAGES}`, {
+      method: "GET",
+    });
+    if (!response.ok) {
+      throw new Error(`OpenCode 会话消息查询失败: ${response.status}`);
+    }
+    const parsed = await this.readJsonResponse(response);
+    if (!Array.isArray(parsed)) {
+      throw new Error("OpenCode 会话消息响应必须是数组");
+    }
+    return this.buildSessionActivities(sessionId, parsed);
+  }
+
   private async abortSession( sessionId: string ): Promise<void> {
     const response = await this.request(`/session/${sessionId}/abort`, {
       method: "POST",
@@ -331,21 +306,6 @@ export class OpenCodeClient {
       timestamp: message.timestamp,
       rawMessage: message,
     };
-  }
-
-  async getSessionRuntime( sessionId: string ): Promise<OpenCodeSessionRuntime> {
-    const list = await this.listSessionMessages(sessionId, MAX_RUNTIME_MESSAGES);
-    if (list.length === 0) {
-      return {
-        sessionId,
-        messageCount: 0,
-        updatedAt: "",
-        headline: "",
-        activeToolNames: [],
-        activities: [],
-      };
-    }
-    return this.buildRuntimeSnapshot(sessionId, list);
   }
 
   private logRetriedMessageResend(
@@ -763,26 +723,6 @@ export class OpenCodeClient {
     }
   }
 
-  async listSessionMessages(
-    sessionId: string,
-    limit: number,
-  ): Promise<unknown[]> {
-    const pathname = limit > 0
-      ? `/session/${sessionId}/message?limit=${limit}`
-      : `/session/${sessionId}/message`;
-    const response = await this.request(pathname, {
-      method: "GET",
-    });
-    if (!response.ok) {
-      throw new Error(`OpenCode 会话消息查询失败: ${response.status}`);
-    }
-    const parsed = await this.readJsonResponse(response);
-    if (!Array.isArray(parsed)) {
-      throw new Error("OpenCode 会话消息响应必须是数组");
-    }
-    return parsed;
-  }
-
   private async readJsonResponse(response: Response): Promise<unknown> {
     const raw = await response.text();
     const trimmed = raw.trim();
@@ -915,13 +855,9 @@ export class OpenCodeClient {
     return `OpenCode session ${sessionId} 返回了空的 assistant 结果: messageId=${message.id}, finish=${finish}, partTypes=${partSummary}`;
   }
 
-  buildRuntimeSnapshot(sessionId: string, messages: unknown[]): OpenCodeSessionRuntime {
-    const activities: OpenCodeRuntimeActivity[] = [];
-    const toolNames: string[] = [];
+  private buildSessionActivities(sessionId: string, messages: unknown[]): OpenCodeSessionActivity[] {
     const seen = new Set<string>();
-
-    for (let messageIndex = 0; messageIndex < messages.length; messageIndex += 1) {
-      const raw = messages[messageIndex];
+    return messages.flatMap((raw) => {
       const record = this.expectRecord(raw, `OpenCode session ${sessionId} 运行时消息`);
       const parts = Array.isArray(record["parts"])
         ? record["parts"].map((part, index) =>
@@ -933,155 +869,92 @@ export class OpenCodeClient {
         `OpenCode session ${sessionId} 运行时消息`,
       );
       if (normalized.sender === "user") {
-        continue;
+        return [];
       }
 
-      const extracted = this.extractRuntimeActivities(parts, normalized);
+      const activities = this.extractSessionActivities(parts, normalized);
+      const resolved = activities.length === 0 && normalized.content.trim()
+        ? [{
+            sourceMessageId: normalized.id,
+            sourcePartIndex: 0,
+            kind: "message" as const,
+            label: this.shortenText(normalized.content, 48),
+            detail: normalized.content.trim(),
+            timestamp: normalized.timestamp,
+          }]
+        : activities;
 
-      if (extracted.length === 0 && normalized.content.trim()) {
-        extracted.push({
-          sourceMessageId: normalized.id,
-          sourcePartIndex: 0,
-          kind: "message",
-          label: this.shortenText(normalized.content, 48),
-          detail: normalized.content.trim(),
-          detailState: "not_applicable",
-          detailPayloadKeyCount: 0,
-          detailHasPlaceholderValue: false,
-          detailParseMode: "not_applicable",
-          timestamp: normalized.timestamp,
-        });
-      }
-
-      for (const activity of extracted) {
+      return resolved.filter((activity) => {
         const signature = `${activity.kind}:${activity.label}:${activity.detail}:${activity.timestamp}`;
         if (seen.has(signature)) {
-          continue;
+          return false;
         }
         seen.add(signature);
-        activities.push(activity);
-        if (activity.kind === "tool") {
-          const toolName = activity.label.replace(/^tool:\s*/i, "").trim();
-          if (toolName && !toolNames.includes(toolName)) {
-            toolNames.push(toolName);
-          }
-        }
-      }
-    }
-
-    const latestActivity = activities.at(-1);
-    if (!latestActivity) {
-      return {
-        sessionId,
-        messageCount: messages.length,
-        updatedAt: "",
-        headline: "",
-        activeToolNames: [],
-        activities: [],
-      };
-    }
-    const recentToolNames = activities
-      .filter((activity) => activity.kind === "tool")
-      .map((activity) => activity.label.replace(/^tool:\s*/i, "").trim())
-      .filter((toolName, index, all) => Boolean(toolName) && all.indexOf(toolName) === index)
-      .slice(-2)
-      .reverse();
-
-    return {
-      sessionId,
-      messageCount: messages.length,
-      updatedAt: latestActivity.timestamp,
-      headline: latestActivity.detail,
-      activeToolNames: recentToolNames.length > 0 ? recentToolNames : toolNames.slice(-2).reverse(),
-      activities,
-    };
+        return true;
+      });
+    });
   }
 
-  private extractRuntimeActivities(
+  private extractSessionActivities(
     parts: Array<Record<string, unknown>>,
     message: OpenCodeNormalizedMessage,
-  ): OpenCodeRuntimeActivity[] {
-    const activities: OpenCodeRuntimeActivity[] = [];
-
-    for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
-      const part = parts[partIndex];
-      if (!part) {
-        continue;
-      }
+  ): OpenCodeSessionActivity[] {
+    return parts.flatMap((part, partIndex): OpenCodeSessionActivity[] => {
       const timestamp = message.timestamp;
-      const toolNames = this.collectToolNameCandidates(part);
-      if (toolNames[0]) {
-        const toolCallDetail = this.extractToolCallDetail(part);
-        activities.push({
+      const toolName = this.collectToolNameCandidates(part)[0];
+      if (toolName) {
+        const detail = this.resolveToolActivityDetail(part, toolName);
+        return [{
           sourceMessageId: message.id,
           sourcePartIndex: partIndex,
-          kind: "tool",
-          label: toolNames[0],
-          detail: toolCallDetail.detail,
-          detailState: toolCallDetail.detailState,
-          detailPayloadKeyCount: toolCallDetail.detailPayloadKeyCount,
-          detailHasPlaceholderValue: toolCallDetail.detailHasPlaceholderValue,
-          detailParseMode: toolCallDetail.detailParseMode,
+          kind: "tool" as const,
+          label: toolName,
+          detail,
           timestamp,
-        });
-        continue;
+        } satisfies OpenCodeSessionActivity];
       }
 
-      const reasoningDetails = this.collectReasoningDetails(part);
-      if (reasoningDetails[0]) {
-        activities.push({
+      const reasoningDetail = this.collectReasoningDetails(part)[0];
+      if (reasoningDetail) {
+        return [{
           sourceMessageId: message.id,
           sourcePartIndex: partIndex,
-          kind: "thinking",
-          label: this.shortenText(reasoningDetails[0], 48),
-          detail: reasoningDetails[0],
-          detailState: "not_applicable",
-          detailPayloadKeyCount: 0,
-          detailHasPlaceholderValue: false,
-          detailParseMode: "not_applicable",
+          kind: "thinking" as const,
+          label: this.shortenText(reasoningDetail, 48),
+          detail: reasoningDetail,
           timestamp,
-        });
-        continue;
+        } satisfies OpenCodeSessionActivity];
       }
 
       if (typeof part["type"] === "string" && part["type"] === "step-start" && typeof part["name"] === "string") {
         const stepName = part["name"].trim();
         if (stepName) {
-          const detailCandidates = this.collectPartDetailCandidates(part);
-          activities.push({
+          const detail = this.collectPartDetailCandidates(part)[0] || stepName;
+          return [{
             sourceMessageId: message.id,
             sourcePartIndex: partIndex,
-            kind: "step",
+            kind: "step" as const,
             label: stepName,
-            detail: detailCandidates[0] || stepName,
-            detailState: "not_applicable",
-            detailPayloadKeyCount: 0,
-            detailHasPlaceholderValue: false,
-            detailParseMode: "not_applicable",
+            detail,
             timestamp,
-          });
-          continue;
+          } satisfies OpenCodeSessionActivity];
         }
       }
 
-      const detailCandidates = this.collectPartDetailCandidates(part);
-      if (detailCandidates[0]) {
-        activities.push({
+      const detail = this.collectPartDetailCandidates(part)[0];
+      if (detail) {
+        return [{
           sourceMessageId: message.id,
           sourcePartIndex: partIndex,
-          kind: "message",
-          label: this.shortenText(detailCandidates[0], 48),
-          detail: detailCandidates[0],
-          detailState: "not_applicable",
-          detailPayloadKeyCount: 0,
-          detailHasPlaceholderValue: false,
-          detailParseMode: "not_applicable",
+          kind: "message" as const,
+          label: this.shortenText(detail, 48),
+          detail,
           timestamp,
-        });
+        } satisfies OpenCodeSessionActivity];
       }
-    }
 
-    return activities;
+      return [];
+    });
   }
 
   private collectToolNameCandidates(part: Record<string, unknown>): string[] {
@@ -1112,11 +985,6 @@ export class OpenCodeClient {
     this.appendTrimmedString(candidates, part["text"]);
     this.appendTrimmedString(candidates, part["title"]);
     this.appendTrimmedString(candidates, part["description"]);
-    this.appendStructuredDetailCandidates(candidates, part["input"]);
-    this.appendStructuredDetailCandidates(candidates, part["args"]);
-    this.appendStructuredDetailCandidates(candidates, part["arguments"]);
-    this.appendStructuredDetailCandidates(candidates, part["payload"]);
-    this.appendStructuredDetailCandidates(candidates, part["output"]);
     return candidates;
   }
 
@@ -1129,303 +997,50 @@ export class OpenCodeClient {
     return candidates;
   }
 
-  private extractToolCallDetail(part: Record<string, unknown>): OpenCodeToolCallDetail {
-    const structuredCandidates = [
-      ...this.collectStructuredToolCallDetails(part["state"], TOOL_CALL_DETAIL_KEYS),
-      ...this.collectStructuredToolCallDetails(part, TOOL_CALL_DETAIL_KEYS),
-      ...TOOL_CALL_DETAIL_CONTAINERS.slice(1).flatMap((key) =>
-        this.collectStructuredToolCallDetails(part[key], TOOL_CALL_DETAIL_KEYS)),
-    ];
-    if (structuredCandidates[0]) {
-      return this.createStructuredToolCallDetail(structuredCandidates[0]);
-    }
-
-    const plainTextCandidates = [
-      ...this.collectPlainTextToolCallDetails(part["state"], TOOL_CALL_DETAIL_KEYS),
-      ...this.collectPlainTextToolCallDetails(part, TOOL_CALL_DETAIL_KEYS),
-      ...TOOL_CALL_DETAIL_CONTAINERS.slice(1).flatMap((key) =>
-        this.collectPlainTextToolCallDetails(part[key], TOOL_CALL_DETAIL_KEYS)),
-    ];
-    if (plainTextCandidates[0]) {
-      return this.createPlainTextToolCallDetail(plainTextCandidates[0]);
-    }
-
-    return this.createMissingToolCallDetail();
+  private resolveToolActivityDetail(part: Record<string, unknown>, toolName: string): string {
+    const input = this.readToolActivityInput(part["state"]) || this.readToolActivityInput(part);
+    return input ? `参数: ${input}` : toolName;
   }
 
-  private createStructuredToolCallDetail(input: { detail: string; payloadKeyCount: number }): OpenCodeToolCallDetail {
-    return {
-      detail: `参数: ${input.detail}`,
-      detailState: "complete",
-      detailPayloadKeyCount: input.payloadKeyCount,
-      detailHasPlaceholderValue: false,
-      detailParseMode: "structured",
-    };
-  }
-
-  private createPlainTextToolCallDetail(detail: string): OpenCodeToolCallDetail {
-    return {
-      detail: `参数: ${detail}`,
-      detailState: "complete",
-      detailPayloadKeyCount: 0,
-      detailHasPlaceholderValue: this.isPlaceholderToolCallDetail(detail),
-      detailParseMode: "plain_text",
-    };
-  }
-
-  private createMissingToolCallDetail(): OpenCodeToolCallDetail {
-    return {
-      detail: "参数暂未提供",
-      detailState: "missing",
-      detailPayloadKeyCount: 0,
-      detailHasPlaceholderValue: false,
-      detailParseMode: "missing",
-    };
-  }
-
-  private collectStructuredToolCallDetails(
-    value: unknown,
-    keys: readonly string[],
-  ): Array<{ detail: string; payloadKeyCount: number }> {
+  private readToolActivityInput(value: unknown): string {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
-      return [];
-    }
-
-    const details: Array<{ detail: string; payloadKeyCount: number }> = [];
-    for (const key of keys) {
-      if (!(key in value)) {
-        continue;
-      }
-      this.appendStructuredToolCallCandidates(details, (value as Record<string, unknown>)[key]);
-    }
-    return details;
-  }
-
-  private collectPlainTextToolCallDetails(
-    value: unknown,
-    keys: readonly string[],
-  ): string[] {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      return [];
-    }
-
-    const details: string[] = [];
-    for (const key of keys) {
-      if (!(key in value)) {
-        continue;
-      }
-      this.appendPlainTextToolCallCandidates(details, (value as Record<string, unknown>)[key]);
-    }
-    return details;
-  }
-
-  private appendPlainTextToolCallCandidates(
-    target: string[],
-    value: unknown,
-  ) {
-    if (typeof value !== "string") {
-      return;
-    }
-    const trimmed = value.trim();
-    if (trimmed) {
-      target.push(this.shortenText(trimmed, 160));
-    }
-  }
-
-  private isPlaceholderToolCallDetail(detail: string): boolean {
-    return detail.trim().toLowerCase() === "placeholder";
-  }
-
-  private appendStructuredToolCallCandidates(
-    target: Array<{ detail: string; payloadKeyCount: number }>,
-    value: unknown,
-    depth = 0,
-  ) {
-    if ((!value && value !== 0 && value !== false) || depth > 4) {
-      return;
-    }
-
-    if (typeof value === "string") {
-      const trimmed = value.trim();
-      if (!trimmed) {
-        return;
-      }
-      if (
-        (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
-        (trimmed.startsWith("[") && trimmed.endsWith("]"))
-      ) {
-        try {
-          this.appendStructuredToolCallCandidates(target, JSON.parse(trimmed) as unknown, depth + 1);
-        } catch {
-        }
-        return;
-      }
-      if (depth > 0) {
-        target.push({
-          detail: this.shortenText(trimmed, 160),
-          payloadKeyCount: 0,
-        });
-      }
-      return;
-    }
-
-    if (typeof value === "number" || typeof value === "boolean") {
-      target.push({
-        detail: String(value),
-        payloadKeyCount: 1,
-      });
-      return;
-    }
-
-    if (Array.isArray(value)) {
-      const items: Array<{ detail: string; payloadKeyCount: number }> = [];
-      for (const item of value) {
-        this.appendStructuredToolCallCandidates(items, item, depth + 1);
-        if (items.length >= 6) {
-          break;
-        }
-      }
-      if (items[0]) {
-        target.push({
-          detail: this.shortenText(`[${items.slice(0, 6).map((item) => item.detail).join(", ")}]`, 180),
-          payloadKeyCount: items.reduce((count, item) => count + item.payloadKeyCount, 0),
-        });
-      }
-      return;
-    }
-
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      return;
+      return "";
     }
     const record = value as Record<string, unknown>;
-    const preferredEntries = Object.entries(record).flatMap(([key, item]) => {
-        if ((!item && item !== 0 && item !== false) || item === "") {
-          return [];
-        }
-        if (["output", "result", "response", "summary", "reasoning"].includes(key)) {
-          return [];
-        }
-        const summaries: Array<{ detail: string; payloadKeyCount: number }> = [];
-        this.appendStructuredToolCallCandidates(summaries, item, depth + 1);
-        return summaries[0]
-          ? [{
-            detail: `${key}=${summaries[0].detail}`,
-            payloadKeyCount: summaries[0].payloadKeyCount + 1,
-          }]
-          : [];
-      }).slice(0, 6);
-
-    if (preferredEntries[0]) {
-      target.push({
-        detail: this.shortenText(preferredEntries.map((entry) => entry.detail).join(", "), 220),
-        payloadKeyCount: preferredEntries.reduce((count, entry) => count + entry.payloadKeyCount, 0),
-      });
-      return;
-    }
-
-    for (const key of [
-      "input",
-      "args",
-      "arguments",
-      "payload",
-      "options",
-      "params",
-      "data",
-      "body",
-    ]) {
-      if (!(key in record)) {
-        continue;
-      }
-      const nested: Array<{ detail: string; payloadKeyCount: number }> = [];
-      this.appendStructuredToolCallCandidates(nested, record[key], depth + 1);
-      if (nested[0]) {
-        target.push(nested[0]);
-        return;
+    for (const key of ["input", "args", "arguments"]) {
+      const detail = this.summarizeToolActivityValue(record[key]);
+      if (detail) {
+        return detail;
       }
     }
+    return "";
   }
 
-  private appendStructuredDetailCandidates(target: string[], value: unknown, depth = 0) {
-    if ((!value && value !== 0 && value !== false) || depth > 3) {
-      return;
-    }
-
+  private summarizeToolActivityValue(value: unknown): string {
     if (typeof value === "string") {
-      this.appendTrimmedString(target, this.shortenText(value.trim(), 120));
-      return;
+      return this.shortenText(value, 160);
     }
-
     if (typeof value === "number" || typeof value === "boolean") {
-      target.push(String(value));
-      return;
+      return String(value);
     }
-
-    if (Array.isArray(value)) {
-      const items: string[] = [];
-      for (const item of value) {
-        this.appendStructuredDetailCandidates(items, item, depth + 1);
-        if (items.length >= 4) {
-          break;
-        }
-      }
-      if (items[0]) {
-        target.push(this.shortenText(`[${items.slice(0, 4).join(", ")}]`, 140));
-      }
-      return;
-    }
-
     if (!value || typeof value !== "object" || Array.isArray(value)) {
-      return;
+      return "";
     }
-    const record = value as Record<string, unknown>;
-    const direct = [
-      typeof record["command"] === "string" ? record["command"] : "",
-      typeof record["cmd"] === "string" ? record["cmd"] : "",
-      typeof record["path"] === "string" ? record["path"] : "",
-      typeof record["file"] === "string" ? record["file"] : "",
-      typeof record["pattern"] === "string" ? record["pattern"] : "",
-      typeof record["query"] === "string" ? record["query"] : "",
-      typeof record["message"] === "string" ? record["message"] : "",
-      typeof record["text"] === "string" ? record["text"] : "",
-      typeof record["url"] === "string" ? record["url"] : "",
-      typeof record["location"] === "string" ? record["location"] : "",
-      typeof record["agent"] === "string" ? record["agent"] : "",
-      typeof record["name"] === "string" ? record["name"] : "",
-    ]
-      .map((item) => item.trim())
-      .filter(Boolean);
-
-    if (direct[0]) {
-      target.push(this.shortenText(direct[0], 120));
-      return;
-    }
-
-    for (const key of ["input", "args", "arguments", "payload", "options", "params", "data"]) {
-      if (key in record) {
-        const nested: string[] = [];
-        this.appendStructuredDetailCandidates(nested, record[key], depth + 1);
-        if (nested[0]) {
-          target.push(nested[0]);
-          return;
-        }
-      }
-    }
-
-    const entries = Object.entries(record)
-      .filter(([, item]) => item !== "" && item !== false && item !== 0 && Boolean(item))
+    return Object.entries(value)
+      .filter(([, item]) => this.isDisplayableToolActivityValue(item))
       .slice(0, 4)
-      .map(([key, item]) => {
-        const summaries: string[] = [];
-        this.appendStructuredDetailCandidates(summaries, item, depth + 1);
-        return summaries[0]
-          ? `${key}=${summaries[0]}`
-          : this.shortenText(`${key}=${String(item)}`, 40);
-      })
-      .filter(Boolean);
+      .map(([key, item]) => `${key}=${this.shortenText(String(item), 80)}`)
+      .join(", ");
+  }
 
-    if (entries[0]) {
-      target.push(this.shortenText(entries.join(", "), 160));
+  private isDisplayableToolActivityValue(value: unknown): boolean {
+    if (value === "") {
+      return false;
     }
+    if (typeof value === "object") {
+      return Object.keys(Object(value)).length > 0;
+    }
+    return true;
   }
 
   private appendTrimmedString(target: string[], value: unknown) {
