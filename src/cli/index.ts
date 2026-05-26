@@ -10,6 +10,7 @@ import {
 import { Orchestrator } from "../runtime/orchestrator";
 import { OpenCodeClient } from "../runtime/opencode-client";
 import { buildInjectedConfigFromAgents } from "../runtime/project-agent-source";
+import { launchTerminalCommand } from "../runtime/terminal-launcher";
 import { resolveCliUserDataPath } from "../runtime/user-data-path";
 import { compileTeamDsl, matchesAppliedTeamDsl } from "../runtime/team-dsl";
 import { collectIncrementalChatTranscript, renderChatStreamEntries } from "./chat-stream-printer";
@@ -18,7 +19,7 @@ import {
   parseCliCommand,
   type ParsedCliCommand,
 } from "./cli-command";
-import { resolveCliDisposeOptions } from "./cli-dispose-policy";
+import { resolveCliDisposeOptions, type CliDisposeOptions } from "./cli-dispose-policy";
 import { resolveCliSignalPlan } from "./cli-signal-policy";
 import { ensureRuntimeAssets, isCompiledRuntime } from "./runtime-assets";
 import { resolveCliTaskStreamingPlan } from "./task-streaming-policy";
@@ -52,14 +53,6 @@ interface CliContext {
   userDataPath: string;
 }
 
-interface CliDisposeOptions {
-  awaitPendingTaskRuns: boolean;
-}
-
-interface ActiveUiHost {
-  close: () => Promise<void>;
-}
-
 type RunnableCliCommand = Extract<ParsedCliCommand, { kind: "task.headless" | "task.ui" }>;
 type RenderTaskMessagesOptions = {
   includeHistory: boolean;
@@ -72,7 +65,7 @@ type UiHostState =
     }
   | {
       kind: "active";
-      host: ActiveUiHost;
+      close: () => Promise<void>;
     };
 
 const WITHOUT_TASK_RUN_FAILURE_CONTEXT: CliRunFailureContext = {
@@ -118,7 +111,7 @@ function isSettledTaskStatus(status: TaskSnapshot["task"]["status"]) {
 }
 
 async function disposeCliContext(context: CliContext, options: CliDisposeOptions) {
-  const report = await context.orchestrator.dispose(options);
+  const report = await context.orchestrator.dispose(options.awaitPendingTaskRuns);
   const output = renderOpenCodeCleanupReport(report);
   if (output) {
     process.stdout.write(output);
@@ -146,6 +139,7 @@ async function createCliContext(input: {
       cwd,
       userDataPath,
       opencodeClient,
+      terminalLauncher: launchTerminalCommand,
     });
     await orchestrator.initialize();
     return {
@@ -309,7 +303,7 @@ async function ensureUiHost(
   webRoot: string,
   port: number,
   bindHosts: readonly UiLoopbackBindHost[],
-) : Promise<{ host: ActiveUiHost; port: number; url: string }> {
+): Promise<{ close: () => Promise<void>; port: number; url: string }> {
   const host = await startWebHost({
     orchestrator: context.orchestrator,
     port,
@@ -321,7 +315,7 @@ async function ensureUiHost(
     bindHosts: [...bindHosts],
   });
   return {
-    host,
+    close: host.close,
     port,
     url: buildUiUrl({
       port,
@@ -379,7 +373,7 @@ async function handleTaskUiCommand(
   context: CliContext,
   command: Extract<ParsedCliCommand, { kind: "task.ui" }>,
   compiledTopology: ReturnType<typeof compileTeamDsl>,
-): Promise<ActiveUiHost> {
+): Promise<() => Promise<void>> {
   const streamingPlan = resolveCliTaskStreamingPlan({
     showMessage: command.showMessage,
     isResume: false,
@@ -401,7 +395,7 @@ async function handleTaskUiCommand(
     logFilePath: buildTaskLogFilePath(context.userDataPath, snapshot.task.id),
   };
   printRunDiagnosticsWithTaskUrl(activeRunFailureContextForCrash.logFilePath, uiUrl);
-  const { host, url } = await ensureUiHost(
+  const { close, url } = await ensureUiHost(
     context,
     webRoot,
     uiPort,
@@ -415,7 +409,7 @@ async function handleTaskUiCommand(
       printMessages: streamingPlan.printMessages,
     });
   }
-  return host;
+  return close;
 }
 
 async function run() {
@@ -465,13 +459,16 @@ async function run() {
     void Promise.resolve()
       .then(async () => {
         if (activeUiHost.kind === "active") {
-          await activeUiHost.host.close().catch(() => {});
+          await activeUiHost.close().catch(() => {});
           activeUiHost = {
             kind: "inactive",
           };
         }
         await disposeCliContext(context, {
           awaitPendingTaskRuns: plan.awaitPendingTaskRuns,
+          forceProcessExit: false,
+          keepAliveUntilSignal: false,
+          shouldDisposeContext: true,
         });
       })
       .catch(() => {})
@@ -489,7 +486,7 @@ async function run() {
     } else if (command.kind === "task.ui") {
       activeUiHost = {
         kind: "active",
-        host: await handleTaskUiCommand(context, command, compiledTopology),
+        close: await handleTaskUiCommand(context, command, compiledTopology),
       };
       didPrintTaskDiagnosticsForCrash = true;
       observedSettledTaskState = true;
@@ -511,7 +508,7 @@ async function run() {
       });
       forceProcessExit = disposeOptions.forceProcessExit;
       if (activeUiHost.kind === "active") {
-        await activeUiHost.host.close().catch(() => {});
+        await activeUiHost.close().catch(() => {});
         activeUiHost = {
           kind: "inactive",
         };

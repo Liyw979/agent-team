@@ -22,7 +22,6 @@ import {
   resolveTriggerRoutingKindForSource,
   getWorkspaceNameFromPath,
   type MessageRecord,
-  type OpenAgentTerminalPayload,
   resolvePrimaryTopologyStartTarget,
   resolveTopologyAgentOrder,
   type GroupRule,
@@ -43,13 +42,9 @@ import { stripDecisionResponseMarkup } from "@shared/decision-response";
 import {
   parseDecision as parseDecisionPure,
   stripStructuredSignals as stripStructuredSignalsPure,
-  type AllowedDecisionTrigger,
   type ParsedDecision,
 } from "./decision-parser";
-import {
-  OpenCodeClient,
-  type OpenCodeShutdownReport,
-} from "./opencode-client";
+import { OpenCodeClient } from "./opencode-client";
 import { StoreService } from "./store";
 import { resolveAgentStatusFromRouting } from "./gating-rules";
 import {
@@ -84,7 +79,6 @@ import {
   resolveProjectAgents,
   validateProjectAgents,
 } from "./project-agent-source";
-import { launchTerminalCommand } from "./terminal-launcher";
 
 type GroupRuleInputBase = Omit<GroupRule, "report">;
 
@@ -105,10 +99,6 @@ type GroupRuleInput =
 
 type TopologyInputRecord = Omit<TopologyRecord, "groupRules"> & {
   groupRules?: GroupRuleInput[];
-};
-
-type UpdateTopologyInputPayload = {
-  topology: TopologyInputRecord;
 };
 
 function coerceGroupRuleInput(
@@ -150,15 +140,7 @@ interface OrchestratorOptions {
   cwd: string;
   userDataPath: string;
   opencodeClient: OpenCodeClient;
-  terminalLauncher?: (input: { command: string }) => Promise<void>;
-}
-
-interface DisposeOrchestratorOptions {
-  awaitPendingTaskRuns?: boolean;
-}
-
-interface ParsedSignal {
-  done: boolean;
+  terminalLauncher: (command: string) => Promise<void>;
 }
 
 interface EdgeForwardingConfig {
@@ -260,7 +242,7 @@ export class Orchestrator {
   });
   private readonly taskRuntimeOverlays = new Map<string, TaskRuntimeOverlay>();
   readonly pendingTaskRuns = new Set<Promise<void>>();
-  private readonly terminalLauncher: (input: { command: string }) => Promise<void>;
+  private readonly terminalLauncher: (command: string) => Promise<void>;
   private isDisposing = false;
 
   constructor(options: OrchestratorOptions) {
@@ -269,7 +251,7 @@ export class Orchestrator {
     acquireProcessWorkspaceCwd(this.cwd);
     this.store = new StoreService();
     this.opencodeClient = options.opencodeClient;
-    this.terminalLauncher = options.terminalLauncher ?? launchTerminalCommand;
+    this.terminalLauncher = options.terminalLauncher;
   }
 
   async initialize() {
@@ -277,15 +259,12 @@ export class Orchestrator {
   }
 
   async dispose(
-    options: DisposeOrchestratorOptions = {},
-  ): Promise<OpenCodeShutdownReport> {
+    awaitPendingTaskRuns = true,
+  ): Promise<number[]> {
     if (this.isDisposing) {
-      return {
-        killedPids: [],
-      };
+      return [];
     }
     this.isDisposing = true;
-    const awaitPendingTaskRuns = options.awaitPendingTaskRuns ?? true;
     if (awaitPendingTaskRuns && this.pendingTaskRuns.size > 0) {
       await Promise.allSettled([...this.pendingTaskRuns]);
     } else if (!awaitPendingTaskRuns) {
@@ -336,10 +315,10 @@ export class Orchestrator {
   }
 
   async saveTopology(
-    payload: UpdateTopologyInputPayload,
+    topology: TopologyInputRecord,
   ): Promise<WorkspaceSnapshot> {
     const agents = this.listWorkspaceAgents();
-    const normalized = this.normalizeTopology(agents, payload.topology);
+    const normalized = this.normalizeTopology(agents, topology);
     this.store.upsertTopology(normalized);
     return this.hydrateWorkspace();
   }
@@ -419,21 +398,21 @@ export class Orchestrator {
     });
   }
 
-  async openAgentTerminal(payload: OpenAgentTerminalPayload) {
+  async openAgentTerminal(agentId: string) {
     const task = this.requireCurrentTask();
     const snapshot = await this.ensureTaskInitialized(
       task,
       this.listWorkspaceAgents(),
     );
     const taskAgent = snapshot.agents.find(
-      (item) => item.id === payload.agentId,
+      (item) => item.id === agentId,
     );
     if (!taskAgent) {
-      throw new Error(`未找到 Agent ${payload.agentId} 对应的运行信息。`);
+      throw new Error(`未找到 Agent ${agentId} 对应的运行信息。`);
     }
     if (!taskAgent.opencodeSessionId) {
       throw new Error(
-        `Agent ${payload.agentId} 当前还没有可 attach 的 OpenCode session。`,
+        `Agent ${agentId} 当前还没有可 attach 的 OpenCode session。`,
       );
     }
     await this.launchAgentTerminal(
@@ -821,10 +800,8 @@ export class Orchestrator {
     }
   }
 
-  private parseSignal(content: string): ParsedSignal {
-    return {
-      done: /\bTASK_DONE\b/i.test(content),
-    };
+  private parseSignal(content: string): boolean {
+    return /\bTASK_DONE\b/i.test(content);
   }
 
   protected buildAgentExecutionPrompt(prompt: AgentExecutionPrompt): string {
@@ -867,13 +844,13 @@ export class Orchestrator {
     topology: Pick<TopologyRecord, "edges" | "flow">;
     runtimeAgentId: string;
     executableAgentId: string;
-  }): AllowedDecisionTrigger[] {
+  }): string[] {
     const sourceAgentIds = [
       ...new Set([input.runtimeAgentId, input.executableAgentId]),
     ];
-    const allowed: AllowedDecisionTrigger[] = [];
-    const push = (trigger: AllowedDecisionTrigger) => {
-      if (allowed.some((item) => item.trigger === trigger.trigger)) {
+    const allowed: string[] = [];
+    const push = (trigger: string) => {
+      if (allowed.includes(trigger)) {
         return;
       }
       allowed.push(trigger);
@@ -886,9 +863,7 @@ export class Orchestrator {
       if (!sourceAgentIds.includes(trigger.source)) {
         continue;
       }
-      push({
-        trigger: trigger.trigger,
-      });
+      push(trigger.trigger);
     }
 
     return allowed;
@@ -1067,7 +1042,7 @@ export class Orchestrator {
     topologyOverride?: TopologyRecord,
   ): string[] {
     const topology = topologyOverride ?? this.store.getTopology();
-    return resolveTopologyAgentOrder(agents, topology.nodes);
+    return resolveTopologyAgentOrder(agents.map((agent) => agent.id), topology.nodes);
   }
 
   private orderAgents(
@@ -1092,9 +1067,7 @@ export class Orchestrator {
       sessionAttachBaseUrl,
       opencodeSessionId,
     );
-    await this.terminalLauncher({
-      command: attachCommand,
-    });
+    await this.terminalLauncher(attachCommand);
   }
 
   private createTaskTitle(content: string): string {
@@ -1190,7 +1163,7 @@ export class Orchestrator {
   ): TopologyRecord {
     const current = this.store.getTopology();
     if (current.nodes.length === 0 && current.edges.length === 0) {
-      return createDefaultTopology(agents);
+      return createDefaultTopology(agents.map((agent) => agent.id));
     }
     return this.normalizeTopology(agents, current);
   }
@@ -1199,7 +1172,7 @@ export class Orchestrator {
     const current = this.store.getTopology();
     const next =
       current.nodes.length === 0 && current.edges.length === 0
-        ? createDefaultTopology(agents)
+        ? createDefaultTopology(agents.map((agent) => agent.id))
         : this.normalizeTopology(agents, current);
 
     this.store.upsertTopology(next);
@@ -1261,7 +1234,7 @@ export class Orchestrator {
         maxTriggerRounds: normalizeMaxTriggerRounds(edge.maxTriggerRounds),
       }));
     const orderedAgentNodes = resolveTopologyAgentOrder(
-      agents.map((agent) => ({ id: agent.id })),
+      agents.map((agent) => agent.id),
       topology.nodes.filter((item) => validNames.has(item)),
     );
     const nodes = [
@@ -1614,7 +1587,7 @@ export class Orchestrator {
     forwardedAgentMessage: string,
     topology: TopologyRecord,
     decisionAgent: boolean,
-    allowedDecisionTriggers: AllowedDecisionTrigger[],
+    allowedDecisionTriggers: string[],
     senderDisplayName: string,
   ): Promise<GraphAgentResult> {
     this.store.updateTaskAgentRun(task.id, runtimeAgentId, "running");
@@ -1668,7 +1641,7 @@ export class Orchestrator {
         agent: executableAgentId,
         runtimeAgent: runtimeAgentId,
         content: dispatchedContent,
-        allowedDecisionTriggers: allowedDecisionTriggers.map((item) => item.trigger),
+        allowedDecisionTriggers,
       });
 
       const parsedDecision = parseDecisionPure(
@@ -1685,7 +1658,7 @@ export class Orchestrator {
       const agentContextContent = this.resolveAgentContextContent(
         parsedDecision,
         response.finalMessage,
-        allowedDecisionTriggers.map((item) => item.trigger),
+        allowedDecisionTriggers,
       );
       const displayContent = this.createDisplayContent(parsedDecision);
       if (!displayContent && !(decisionAgent && parsedDecision.kind === "valid")) {
@@ -1738,7 +1711,7 @@ export class Orchestrator {
         this.updateTaskStatusIfActive(task.id, "running");
       }
 
-      const signal = this.parseSignal(response.finalMessage);
+      const signalDone = this.parseSignal(response.finalMessage);
       const baseGraphAgentResult = {
         agentId: runtimeAgentId,
         messageId: taskMessage.id,
@@ -1748,7 +1721,7 @@ export class Orchestrator {
         agentContextContent,
         forwardedAgentMessage,
         opinion: parsedDecision.opinion,
-        signalDone: signal.done,
+        signalDone,
       };
       if (resolvedDecision === "triggered" && parsedDecision.kind === "valid") {
         const triggeredResult: GraphAgentResult = {

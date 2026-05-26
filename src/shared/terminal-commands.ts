@@ -1,7 +1,3 @@
-interface BuildCliOpencodeAttachCommandOptions {
-  platform?: NodeJS.Platform;
-}
-
 function quotePortableShellArg(
   value: string,
   platform: NodeJS.Platform = process.platform,
@@ -18,9 +14,8 @@ function quotePortableShellArg(
 export function buildCliOpencodeAttachCommand(
   attachBaseUrl: string,
   sessionId: string,
-  options?: BuildCliOpencodeAttachCommandOptions,
+  platform: NodeJS.Platform = process.platform,
 ): string {
-  const platform = options?.platform ?? process.platform;
   return [
     "opencode",
     "attach",

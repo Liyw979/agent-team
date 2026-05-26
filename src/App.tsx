@@ -189,9 +189,7 @@ function App() {
 
     setAgentTerminalActionError("");
     try {
-      await openAgentTerminal({
-        agentId,
-      });
+      await openAgentTerminal(agentId);
     } catch (error) {
       setIsSystemPromptDrawerOpen(true);
       setAgentTerminalActionError(

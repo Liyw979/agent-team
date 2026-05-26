@@ -25,15 +25,16 @@ type DownstreamMode = TriggerConfig | "group";
 
 type DownstreamMap = Record<string, Record<string, DownstreamMode>>;
 
-interface GroupTemplateInput {
-  reportTo: string;
-}
-
-interface CreateTopologyInput {
-  extraNodes?: string[];
-  downstream: DownstreamMap;
-  group?: Record<string, GroupTemplateInput>;
-}
+type CreateTopologyInput =
+  | {
+      extraNodes?: string[];
+      downstream: DownstreamMap;
+    }
+  | {
+      extraNodes?: string[];
+      downstream: DownstreamMap;
+      group: Record<string, string>;
+    };
 
 function pushUnique(values: string[], value: string): void {
   if (!values.includes(value)) {
@@ -43,7 +44,7 @@ function pushUnique(values: string[], value: string): void {
 
 function collectNodes(input: CreateTopologyInput): string[] {
   const nodes = [...(input.extraNodes ?? [])];
-  const groups = input.group ?? {};
+  const groups = "group" in input ? input.group : {};
 
   for (const [source, targets] of Object.entries(input.downstream)) {
     pushUnique(nodes, source);
@@ -57,8 +58,8 @@ function collectNodes(input: CreateTopologyInput): string[] {
 
   for (const [target, config] of Object.entries(groups)) {
     pushUnique(nodes, target);
-    if (config.reportTo) {
-      pushUnique(nodes, config.reportTo);
+    if (config) {
+      pushUnique(nodes, config);
     }
   }
 
@@ -161,7 +162,7 @@ function buildGroupRules(input: CreateTopologyInput): GroupRule[] {
   }
 
   return groupTargets.map((target) => {
-    const config = input.group?.[target];
+    const config = "group" in input ? input.group[target] : undefined;
     const sourceTemplateName = findGroupSource(input.downstream, target);
     if (!config) {
       throw new Error(`测试 DSL 要求 group 节点 ${target} 必须显式声明 reportTo。`);
@@ -179,7 +180,7 @@ function buildGroupRules(input: CreateTopologyInput): GroupRule[] {
       edges: [],
       report: {
         sourceRole: "entry",
-        templateName: config.reportTo,
+        templateName: config,
         trigger: DEFAULT_TOPOLOGY_TRIGGER,
         messageMode: "last",
         maxTriggerRounds: REQUIRED_MAX_TRIGGER_ROUNDS,

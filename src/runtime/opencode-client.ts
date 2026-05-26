@@ -8,7 +8,7 @@ import {
   type ResolveOpenCodeRequestTimeoutInput,
 } from "./opencode-request-timeout";
 import { resolveWindowsCmdPath } from "./windows-shell";
-import type { OpenCodeInjectedConfig } from "./project-agent-source";
+import type { OpenCodeInjectedAgentConfig } from "./project-agent-source";
 import { toUtcIsoTimestamp, type UtcIsoTimestamp } from "@shared/types";
 
 export interface ServeHandle {
@@ -71,10 +71,6 @@ type RequestOptions =
 class RetryableSubmitMessageError extends Error {}
 
 class RetryableExecutionResultError extends Error {}
-export interface OpenCodeShutdownReport {
-  killedPids: number[];
-}
-
 export class OpenCodeClient {
   readonly host = "127.0.0.1";
   private readonly runningServe: ServeHandle;
@@ -194,7 +190,7 @@ export class OpenCodeClient {
           const parsedDecision = parseDecision(
             result.finalMessage,
             true,
-            payload.allowedDecisionTriggers.map((trigger) => ({ trigger })),
+            payload.allowedDecisionTriggers,
           );
           if (parsedDecision.kind !== "valid") {
             appendAppLog("warn", "opencode.submit_message_missing_trigger", {
@@ -329,24 +325,22 @@ export class OpenCodeClient {
     });
   }
 
-  async shutdown(): Promise<OpenCodeShutdownReport> {
-    let report: OpenCodeShutdownReport = {
-      killedPids: [],
-    };
+  async shutdown(): Promise<number[]> {
+    let killedPids: number[] = [];
     try {
-      report = await this.terminateServeHandle();
+      killedPids = await this.terminateServeHandle();
     } catch {
       // ignore shutdown errors
     } finally {
       this.clearSessionState();
     }
-    return report;
+    return killedPids;
   }
 
   private clearSessionState() {
   }
 
-  private async terminateServeHandle(): Promise<OpenCodeShutdownReport> {
+  private async terminateServeHandle(): Promise<number[]> {
     const server = this.runningServe;
     const killedPids = this.findListeningPids(server.port)
       .filter((pid) => this.isOpenCodeServeProcess(pid));
@@ -361,9 +355,7 @@ export class OpenCodeClient {
       killedPids.push(pid);
     }
 
-    return {
-      killedPids: [...new Set(killedPids)],
-    };
+    return [...new Set(killedPids)];
   }
 
   private static async killChildProcessTree(child: ChildProcessWithoutNullStreams): Promise<void> {
@@ -490,7 +482,7 @@ export class OpenCodeClient {
     });
   }
 
-  static async startServer(cwd: string, config: OpenCodeInjectedConfig): Promise<ServeHandle> {
+  static async startServer(cwd: string, agent: Record<string, OpenCodeInjectedAgentConfig>): Promise<ServeHandle> {
     // OpenCode serve must still inherit the real workspace directory as its process cwd.
     const serverEnv = { ...process.env };
     // Isolate the embedded runtime from parent OpenCode config injection.
@@ -501,8 +493,8 @@ export class OpenCodeClient {
     delete serverEnv["OPENCODE_CLIENT"];
     serverEnv["OPENCODE_CLIENT"] = "agent-team-orchestrator";
     serverEnv["OPENCODE_DISABLE_PROJECT_CONFIG"] = "true";
-    if (Object.keys(config.agent).length > 0) {
-      serverEnv["OPENCODE_CONFIG_CONTENT"] = JSON.stringify(config);
+    if (Object.keys(agent).length > 0) {
+      serverEnv["OPENCODE_CONFIG_CONTENT"] = JSON.stringify({ agent });
     }
     const launchArgs = ["serve"];
     const spawnSpec = process.platform === "win32"

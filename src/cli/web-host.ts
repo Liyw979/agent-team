@@ -4,7 +4,6 @@ import path from "node:path";
 import { URL } from "node:url";
 import type {
   AgentProgressMessageRecord,
-  OpenAgentTerminalPayload,
   TaskAgentRecord,
   TaskSnapshot,
   SubmitTaskPayload,
@@ -89,7 +88,7 @@ function parseSubmitTaskPayload(body: unknown): SubmitTaskPayload {
   };
 }
 
-function parseOpenAgentTerminalPayload(body: unknown): OpenAgentTerminalPayload {
+function parseOpenAgentTerminalPayload(body: unknown): string {
   if (!isRecord(body) || !Object.hasOwn(body, "agentId")) {
     throw new Error("非法请求：agentId 必须是非空字符串");
   }
@@ -97,9 +96,7 @@ function parseOpenAgentTerminalPayload(body: unknown): OpenAgentTerminalPayload 
   if (typeof agentId !== "string" || agentId.trim() === "") {
     throw new Error("非法请求：agentId 必须是非空字符串");
   }
-  return {
-    agentId,
-  };
+  return agentId;
 }
 
 async function buildUiSnapshotPayload(

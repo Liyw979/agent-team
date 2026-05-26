@@ -36,10 +36,6 @@ export type OpenCodeInjectedAgentConfig =
       permission: OpenCodePermissionConfig;
     };
 
-export interface OpenCodeInjectedConfig {
-  agent: Record<string, OpenCodeInjectedAgentConfig>;
-}
-
 function buildReadonlyAgentPermissionConfig(): OpenCodePermissionConfig {
   return {
     write: "deny",
@@ -86,7 +82,7 @@ export function extractDslAgentsFromTopology(
   }));
 }
 
-export function buildInjectedConfigFromAgents(agents: AgentRecord[]): OpenCodeInjectedConfig {
+export function buildInjectedConfigFromAgents(agents: AgentRecord[]): Record<string, OpenCodeInjectedAgentConfig> {
   const injectedAgents = Object.fromEntries(
     agents.flatMap((agent) => {
       if (agent.id.trim().toLowerCase() === "build") {
@@ -109,5 +105,5 @@ export function buildInjectedConfigFromAgents(agents: AgentRecord[]): OpenCodeIn
     }),
   );
 
-  return { agent: injectedAgents };
+  return injectedAgents;
 }

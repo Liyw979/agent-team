@@ -1,10 +1,6 @@
 import { spawn } from "node:child_process";
 import { resolveWindowsCmdPath } from "./windows-shell";
 
-interface TerminalLaunchInput {
-  command: string;
-}
-
 interface NormalizedTerminalLaunchInput {
   command: string;
   platform: NodeJS.Platform;
@@ -70,11 +66,9 @@ function buildWindowsPowerShellStartArgs(input: {
   ];
 }
 
-function normalizeTerminalLaunchInput(
-  input: TerminalLaunchInput,
-): NormalizedTerminalLaunchInput {
+function normalizeTerminalLaunchInput(command: string): NormalizedTerminalLaunchInput {
   return {
-    command: input.command,
+    command,
     platform: process.platform,
     env: process.env,
   };
@@ -146,8 +140,8 @@ export function buildTerminalLaunchSpec(
     };
 }
 
-export async function launchTerminalCommand(input: TerminalLaunchInput): Promise<void> {
-  const normalized = normalizeTerminalLaunchInput(input);
+export async function launchTerminalCommand(command: string): Promise<void> {
+  const normalized = normalizeTerminalLaunchInput(command);
   const spec = buildTerminalLaunchSpec(normalized);
   const spawnOptions = {
     detached: true,

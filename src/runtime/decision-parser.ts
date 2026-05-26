@@ -1,10 +1,6 @@
 import { DEFAULT_TOPOLOGY_TRIGGER } from "@shared/types";
 import { extractTrailingDecisionSignalBlock, stripDecisionResponseMarkup } from "@shared/decision-response";
 
-export interface AllowedDecisionTrigger {
-  trigger: string;
-}
-
 type ParsedDecisionBase = {
   cleanContent: string;
   opinion: string;
@@ -41,18 +37,14 @@ export function normalizeDecisionDisplayContent(
 export function parseDecision(
   content: string,
   decisionAgent: boolean,
-  allowedTriggers?: readonly AllowedDecisionTrigger[],
+  allowedTriggers: readonly string[] = [],
 ): ParsedDecision {
-  const effectiveAllowedTriggers = allowedTriggers && allowedTriggers.length > 0
-    ? allowedTriggers
-    : [];
-  const allowedTriggerLiterals = effectiveAllowedTriggers.map((item) => item.trigger);
-  const signalMatch = extractTrailingDecisionSignalBlock(content, allowedTriggerLiterals);
+  const signalMatch = extractTrailingDecisionSignalBlock(content, allowedTriggers);
   if (signalMatch.kind === "found") {
     return {
       cleanContent: normalizeDecisionDisplayContent(
         content,
-        allowedTriggerLiterals,
+        allowedTriggers,
       ),
       kind: "valid",
       trigger: signalMatch.trigger,
@@ -75,8 +67,8 @@ export function parseDecision(
     cleanContent,
     opinion: cleanContent,
     kind: "invalid",
-    validationError: allowedTriggerLiterals.length > 0
-      ? `当前 Agent 必须返回以下 trigger 之一：${allowedTriggerLiterals.join(" / ")}`
+    validationError: allowedTriggers.length > 0
+      ? `当前 Agent 必须返回以下 trigger 之一：${allowedTriggers.join(" / ")}`
       : "当前 Agent 未配置任何可用 trigger",
   };
 }

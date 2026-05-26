@@ -11,7 +11,6 @@ import {
   isDecisionAgentInTopology,
   normalizeMaxTriggerRounds,
   normalizeTopologyEdgeTrigger,
-  type TopologyAgentSeed,
   type TopologyRecord,
   usesOpenCodeBuiltinPrompt,
 } from "./types";
@@ -48,11 +47,7 @@ function withAgentNodeRecords(
 }
 
 test("默认拓扑只生成首节点到次节点的 transfer 边", () => {
-  const agents: TopologyAgentSeed[] = [
-    { id: "BA" },
-    { id: "Build" },
-    { id: "TaskReview" },
-  ];
+  const agents = ["BA", "Build", "TaskReview"];
 
   const topology = createDefaultTopology(agents);
 
@@ -82,10 +77,7 @@ test("默认拓扑只生成首节点到次节点的 transfer 边", () => {
 });
 
 test("默认拓扑在缺少 Build 时不会偷偷把首个 Agent 当起点", () => {
-  const agents: TopologyAgentSeed[] = [
-    { id: "BA" },
-    { id: "TaskReview" },
-  ];
+  const agents = ["BA", "TaskReview"];
 
   const topology = createDefaultTopology(agents);
 

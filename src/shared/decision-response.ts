@@ -31,17 +31,9 @@ interface FoundDecisionSignalBlock {
   trigger: string;
 }
 
-interface MissingDecisionSignalBlock {
-  kind: "missing";
-}
-
 interface FoundDecisionAnchorResult {
   kind: "found";
   anchor: DecisionAnchorMatch;
-}
-
-interface MissingDecisionAnchorResult {
-  kind: "missing";
 }
 
 interface FoundDecisionStartTokenResult {
@@ -49,25 +41,21 @@ interface FoundDecisionStartTokenResult {
   token: DecisionSignalToken;
 }
 
-interface MissingDecisionStartTokenResult {
-  kind: "missing";
-}
-
-const MISSING_DECISION_SIGNAL_BLOCK: MissingDecisionSignalBlock = {
+const MISSING_DECISION_SIGNAL_BLOCK = {
   kind: "missing",
-};
+} as const;
 
-const MISSING_DECISION_ANCHOR_RESULT: MissingDecisionAnchorResult = {
+const MISSING_DECISION_ANCHOR_RESULT = {
   kind: "missing",
-};
+} as const;
 
-const MISSING_DECISION_START_TOKEN_RESULT: MissingDecisionStartTokenResult = {
+const MISSING_DECISION_START_TOKEN_RESULT = {
   kind: "missing",
-};
+} as const;
 
 export type DecisionSignalBlockResult =
   | FoundDecisionSignalBlock
-  | MissingDecisionSignalBlock;
+  | typeof MISSING_DECISION_SIGNAL_BLOCK;
 
 function normalizeDecisionSignalTokens(
   allowedTriggers: readonly string[] = EMPTY_ALLOWED_TRIGGERS,
@@ -141,7 +129,7 @@ function collectDecisionSignalStructure(
   content: string,
   tokens: readonly DecisionSignalToken[],
 ): {
-  anchorResult: FoundDecisionAnchorResult | MissingDecisionAnchorResult;
+  anchorResult: FoundDecisionAnchorResult | typeof MISSING_DECISION_ANCHOR_RESULT;
   markerRanges: DecisionMarkerRange[];
 } {
   const markerRanges: DecisionMarkerRange[] = [];
@@ -159,7 +147,7 @@ function collectDecisionSignalStructure(
     );
   }
 
-  let lastMatchResult: FoundDecisionAnchorResult | MissingDecisionAnchorResult =
+  let lastMatchResult: FoundDecisionAnchorResult | typeof MISSING_DECISION_ANCHOR_RESULT =
     MISSING_DECISION_ANCHOR_RESULT;
   for (const match of wrappedMatches) {
     if (lastMatchResult.kind === "missing" || match.index >= lastMatchResult.anchor.index) {
@@ -283,7 +271,7 @@ function findDecisionStartTokenAt(
   content: string,
   index: number,
   tokens: readonly DecisionSignalToken[],
-): FoundDecisionStartTokenResult | MissingDecisionStartTokenResult {
+): FoundDecisionStartTokenResult | typeof MISSING_DECISION_START_TOKEN_RESULT {
   for (const token of tokens) {
     if (content.startsWith(token.start, index)) {
       return {

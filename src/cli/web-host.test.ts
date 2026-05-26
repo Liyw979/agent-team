@@ -407,7 +407,7 @@ test("startWebHost 的 /api/ui-snapshot 会注入非持久化 OpenCode 过程消
 
 test("startWebHost 的 /api/tasks/open-agent-terminal 只透传 agentId", async () => {
   const port = await reservePort();
-  const capturedPayloads: Array<{ agentId: string }> = [];
+  const capturedAgentIds: string[] = [];
   const host = await startWebHost({
     orchestrator: {
       submitTask: async () => {
@@ -416,8 +416,8 @@ test("startWebHost 的 /api/tasks/open-agent-terminal 只透传 agentId", async 
       getWorkspaceSnapshot: async () => {
         throw new Error("unexpected getWorkspaceSnapshot");
       },
-      openAgentTerminal: async (payload: { agentId: string }) => {
-        capturedPayloads.push(payload);
+      openAgentTerminal: async (agentId: string) => {
+        capturedAgentIds.push(agentId);
       },
     } as never,
     port,
@@ -439,7 +439,7 @@ test("startWebHost 的 /api/tasks/open-agent-terminal 只透传 agentId", async 
     });
 
     assert.equal(response.status, 200);
-    assert.deepEqual(capturedPayloads, [{ agentId: "Build" }]);
+    assert.deepEqual(capturedAgentIds, ["Build"]);
   } finally {
     await host.close();
   }

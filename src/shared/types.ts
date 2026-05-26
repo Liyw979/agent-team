@@ -74,10 +74,6 @@ export interface AgentRecord {
   isWritable: boolean;
 }
 
-export interface TopologyAgentSeed {
-  id: string;
-}
-
 export type TopologyNodeKind = "agent" | "group";
 
 type GroupMemberRole = "pro" | "con" | "summary" | string;
@@ -587,10 +583,6 @@ export interface SubmitTaskPayload {
   mentionAgentId?: string;
 }
 
-export interface OpenAgentTerminalPayload {
-  agentId: string;
-}
-
 export function normalizeTopologyEdgeTrigger(value: unknown): TopologyTrigger {
   if (typeof value !== "string") {
     throw new Error(`非法拓扑 trigger：${String(value)}`);
@@ -687,11 +679,9 @@ export function isDecisionAgentInTopology(
 }
 
 export function resolveBuildAgentId(
-  agents: ReadonlyArray<Pick<TopologyAgentSeed, "id"> | string>,
+  agentIds: readonly string[],
 ): AgentIdResolution {
-  const agentId = agents
-    .map((agent) => (typeof agent === "string" ? agent : agent.id))
-    .find((agentId) => usesOpenCodeBuiltinPrompt(agentId));
+  const agentId = agentIds.find((candidate) => usesOpenCodeBuiltinPrompt(candidate));
   return typeof agentId === "string"
     ? { kind: "found", agentId }
     : { kind: "missing" };
@@ -709,11 +699,10 @@ export function resolvePrimaryTopologyStartTarget(
 }
 
 export function resolveTopologyAgentOrder(
-  agents: Array<Pick<TopologyAgentSeed, "id">>,
+  agentIds: readonly string[],
   preferredOrderIds: ReadonlyArray<string> = [],
 ): string[] {
-  const availableAgentIds = agents.map((agent) => agent.id);
-  const availableAgentSet = new Set(availableAgentIds);
+  const availableAgentSet = new Set(agentIds);
   const order: string[] = [];
   const push = (name: string) => {
     if (!availableAgentSet.has(name) || order.includes(name)) {
@@ -726,15 +715,15 @@ export function resolveTopologyAgentOrder(
     push(name);
   }
 
-  if (order.length === availableAgentIds.length) {
+  if (order.length === agentIds.length) {
     return order;
   }
 
-  const startAgent = resolveBuildAgentId(agents);
+  const startAgent = resolveBuildAgentId(agentIds);
   if (startAgent.kind === "found") {
     push(startAgent.agentId);
   }
-  for (const agentId of availableAgentIds) {
+  for (const agentId of agentIds) {
     push(agentId);
   }
 
@@ -742,13 +731,13 @@ export function resolveTopologyAgentOrder(
 }
 
 export function createDefaultTopology(
-  agents: TopologyAgentSeed[],
+  agentIds: readonly string[],
 ): TopologyRecord {
-  const nodes = resolveTopologyAgentOrder(agents);
+  const nodes = resolveTopologyAgentOrder(agentIds);
   const names = new Set(nodes);
   const edges: TopologyEdge[] = [];
 
-  const startAgent = resolveBuildAgentId(agents);
+  const startAgent = resolveBuildAgentId(agentIds);
 
   const push = (
     source: string,
@@ -768,9 +757,7 @@ export function createDefaultTopology(
   };
 
   if (startAgent.kind === "found") {
-    const nextAgentIds = agents
-      .map((agent) => agent.id)
-      .filter((agentId) => agentId !== startAgent.agentId);
+    const nextAgentIds = agentIds.filter((agentId) => agentId !== startAgent.agentId);
     const nextAgentId = nextAgentIds.find((agentId) => names.has(agentId));
     if (typeof nextAgentId === "string") {
       push(startAgent.agentId, nextAgentId, DEFAULT_TOPOLOGY_TRIGGER);

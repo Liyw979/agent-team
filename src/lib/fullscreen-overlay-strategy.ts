@@ -1,18 +1,14 @@
 type FullscreenOverlayAncestorCssEffect = "backdrop-filter";
 
-interface FullscreenOverlayStrategyInput {
-  ancestorCssEffects: FullscreenOverlayAncestorCssEffect[];
-}
-
 interface FullscreenOverlayStrategy {
   mountTarget: "body-portal" | "local-tree";
   shouldFillViewport: boolean;
 }
 
 export function resolveFullscreenOverlayStrategy(
-  input: FullscreenOverlayStrategyInput,
+  ancestorCssEffects: readonly FullscreenOverlayAncestorCssEffect[],
 ): FullscreenOverlayStrategy {
-  if (input.ancestorCssEffects.includes("backdrop-filter")) {
+  if (ancestorCssEffects.includes("backdrop-filter")) {
     return {
       mountTarget: "body-portal",
       shouldFillViewport: true,

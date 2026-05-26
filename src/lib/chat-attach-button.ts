@@ -6,10 +6,6 @@ import {
 
 type ChatTaskAgentEntry = Pick<TaskSnapshot["agents"][number], "id" | "opencodeSessionId">;
 
-type HiddenChatAttachButtonState = {
-  visible: false;
-};
-
 type VisibleChatAttachButtonState = {
   visible: true;
   agentId: string;
@@ -19,7 +15,7 @@ type VisibleChatAttachButtonState = {
 };
 
 type ChatAttachButtonState =
-  | HiddenChatAttachButtonState
+  | false
   | VisibleChatAttachButtonState;
 
 export function resolveChatMessageAttachButtonState(input: {
@@ -27,9 +23,7 @@ export function resolveChatMessageAttachButtonState(input: {
   taskAgents: ReadonlyArray<ChatTaskAgentEntry>;
 }): ChatAttachButtonState {
   if (input.sender === "user" || input.sender === "system") {
-    return {
-      visible: false,
-    };
+    return false;
   }
 
   const taskAgent = input.taskAgents.find((entry) => entry.id === input.sender);

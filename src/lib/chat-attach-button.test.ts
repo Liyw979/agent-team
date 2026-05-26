@@ -43,17 +43,13 @@ test("resolveChatMessageAttachButtonState 会在 session 缺失时保留禁用�
 });
 
 test("resolveChatMessageAttachButtonState 不会给 user 或 system 消息渲染 attach", () => {
-  assert.deepEqual(resolveChatMessageAttachButtonState({
+  assert.equal(resolveChatMessageAttachButtonState({
     sender: "user",
     taskAgents: [],
-  }), {
-    visible: false,
-  });
+  }), false);
 
-  assert.deepEqual(resolveChatMessageAttachButtonState({
+  assert.equal(resolveChatMessageAttachButtonState({
     sender: "system",
     taskAgents: [],
-  }), {
-    visible: false,
-  });
+  }), false);
 });

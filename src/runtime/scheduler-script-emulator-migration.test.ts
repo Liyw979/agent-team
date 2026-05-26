@@ -947,9 +947,7 @@ test("script 模板支持 group 实例短名 sender 和 @target", async () => {
       Build: { TaskReview: "group" },
     },
     group: {
-      TaskReview: {
-        reportTo: "Judge",
-      },
+      TaskReview: "Judge",
     },
   });
 

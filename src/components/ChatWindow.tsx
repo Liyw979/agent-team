@@ -252,7 +252,7 @@ function MessageBubble({
           >
             {new Date(message.timestamp).toLocaleString()}
           </span>
-          {attachButtonState.visible ? (
+          {attachButtonState !== false ? (
             <button
               type="button"
               aria-label={`打开 ${attachButtonState.agentId} 的 attach 终端`}
@@ -379,7 +379,7 @@ function RunningExecutionBubble({
               <path d="M10.8 2.7H13v2.2" />
             </svg>
           </span>
-          {attachButtonState.visible ? (
+          {attachButtonState !== false ? (
             <button
               type="button"
               aria-label={`打开 ${attachButtonState.agentId} 的 attach 终端`}

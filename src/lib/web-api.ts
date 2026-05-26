@@ -1,5 +1,4 @@
 import type {
-  OpenAgentTerminalPayload,
   SubmitTaskPayload,
   TaskSnapshot,
   UiSnapshotPayload,
@@ -28,12 +27,12 @@ export function submitTask(payload: SubmitTaskPayload) {
   });
 }
 
-export async function openAgentTerminal(payload: OpenAgentTerminalPayload) {
+export async function openAgentTerminal(agentId: string) {
   await fetchJson<{ ok: true }>("/api/tasks/open-agent-terminal", {
     method: "POST",
     headers: {
       "content-type": "application/json",
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ agentId }),
   });
 }

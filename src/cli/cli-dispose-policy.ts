@@ -5,7 +5,7 @@ interface ResolveCliDisposeOptionsInput {
   observedSettledTaskState: boolean;
 }
 
-interface CliDisposeOptions {
+export interface CliDisposeOptions {
   awaitPendingTaskRuns: boolean;
   forceProcessExit: boolean;
   keepAliveUntilSignal: boolean;

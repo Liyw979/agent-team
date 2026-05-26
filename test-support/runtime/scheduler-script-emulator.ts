@@ -14,7 +14,7 @@ import {
   type GraphRoutingDecision,
 } from "@/runtime/gating-router";
 import { createEmptyGraphTaskState } from "@/runtime/gating-state";
-import { parseDecision, type AllowedDecisionTrigger } from "@/runtime/decision-parser";
+import { parseDecision } from "@/runtime/decision-parser";
 import { buildEffectiveTopology } from "@/runtime/runtime-topology-graph";
 import { isExecutionDecisionAgent } from "@/runtime/decision-agent-context";
 import {
@@ -1524,21 +1524,19 @@ function resolveCandidateDecisionTriggers(
 function resolveAllowedDecisionTriggersForScript(
   state: ReturnType<typeof createEmptyGraphTaskState>,
   senderId: string,
-): AllowedDecisionTrigger[] {
+): string[] {
   const topology = buildEffectiveTopology(state);
   return collectTopologyTriggerShapes({
     edges: topology.edges,
     endIncoming: topology.flow.end.incoming,
   })
     .filter((item) => item.source === senderId)
-    .map((item) => ({
-      trigger: item.trigger,
-    }));
+    .map((item) => item.trigger);
 }
 
 function resolveExplicitDecisionTriggerFromLine(
   content: string,
-  allowedTriggers: readonly AllowedDecisionTrigger[],
+  allowedTriggers: readonly string[],
 ): ExplicitDecisionTrigger {
   const parsed = parseDecision(content, true, allowedTriggers);
   if (parsed.kind === "invalid") {
