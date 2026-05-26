@@ -1,8 +1,10 @@
+// 历史要求：执行期决策 Agent 判断直接使用共享拓扑能力，不保留薄包装方法，不引入多个拓扑兼容设想。
 import assert from "node:assert/strict";
 
 import {
   FLOW_END_NODE_ID,
   collectTopologyTriggerShapes,
+  isDecisionAgentInTopology,
   type TopologyRecord,
 } from "@shared/types";
 
@@ -16,7 +18,6 @@ import {
 import { createEmptyGraphTaskState } from "@/runtime/gating-state";
 import { parseDecision } from "@/runtime/decision-parser";
 import { buildEffectiveTopology } from "@/runtime/runtime-topology-graph";
-import { isExecutionDecisionAgent } from "@/runtime/decision-agent-context";
 import {
   extractLeadingMention,
   formatSchedulerScriptMessageLine,
@@ -1019,13 +1020,10 @@ function applyMessageLineAndMatchDecision(input: {
   state: ReturnType<typeof createEmptyGraphTaskState>;
   decision: GraphRoutingDecision;
 } & ScriptRoutingMeta {
-  const executableAgentId = input.senderId;
-  const decisionAgent = isExecutionDecisionAgent({
-    state: { kind: "available", value: input.state },
-    topology: input.topology,
-    runtimeAgentId: input.senderId,
-    executableAgentId,
-  });
+  const decisionAgent = isDecisionAgentInTopology(
+    buildEffectiveTopology(input.state),
+    input.senderId,
+  );
   const allowedDecisionTriggers = decisionAgent
     ? resolveAllowedDecisionTriggersForScript(input.state, input.senderId)
     : [];

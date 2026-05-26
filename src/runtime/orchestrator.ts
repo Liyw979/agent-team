@@ -1,3 +1,4 @@
+// 历史要求：执行期决策 Agent 判断直接使用共享拓扑能力，不保留薄包装方法，不引入多个拓扑兼容设想。
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { withOptionalString } from "@shared/object-utils";
@@ -21,6 +22,7 @@ import {
   normalizeTopologyEdgeTrigger,
   resolveTriggerRoutingKindForSource,
   getWorkspaceNameFromPath,
+  isDecisionAgentInTopology,
   type MessageRecord,
   resolvePrimaryTopologyStartTarget,
   resolveTopologyAgentOrder,
@@ -72,7 +74,6 @@ import {
   getRuntimeTemplateName,
 } from "./runtime-topology-graph";
 import type { CompiledTeamDsl } from "./team-dsl";
-import { isExecutionDecisionAgent } from "./decision-agent-context";
 import { resolveTaskAgentIdsToPrewarm } from "./task-session-prewarm";
 import { bindCurrentTaskLog } from "./app-log";
 import {
@@ -673,12 +674,7 @@ export class Orchestrator {
       prompt,
       "",
       topology,
-      isExecutionDecisionAgent({
-        state: { kind: "absent" },
-        topology,
-        runtimeAgentId: agentId,
-        executableAgentId: agentId,
-      }),
+      isDecisionAgentInTopology(topology, agentId),
       [],
       agentId,
     );
@@ -1488,13 +1484,11 @@ export class Orchestrator {
         job.agentId,
       );
       const topology = buildEffectiveTopology(state);
-      const storedTopology = this.store.getTopology();
-      const decisionAgent = isExecutionDecisionAgent({
-        state: { kind: "available", value: state },
-        topology: storedTopology,
-        runtimeAgentId: job.agentId,
-        executableAgentId,
-      });
+      const decisionAgent = isDecisionAgentInTopology(topology, job.agentId)
+        || (
+          job.agentId !== executableAgentId
+          && isDecisionAgentInTopology(topology, executableAgentId)
+        );
       let prompt: AgentExecutionPrompt;
       let forwardedAgentMessage = "";
       if (job.kind === "raw") {

@@ -1,9 +1,11 @@
+// 历史要求：执行期决策 Agent 判断直接使用共享拓扑能力，不保留薄包装方法，不引入多个拓扑兼容设想。
 import assert from "node:assert/strict";
 import { test } from "bun:test";
 
 import {
   buildTopologyNodeRecords,
   createTopologyFlowRecord,
+  isDecisionAgentInTopology,
   type TopologyRecord,
 } from "@shared/types";
 
@@ -13,7 +15,6 @@ import {
   type GraphAgentResult,
 } from "./gating-router";
 import { createEmptyGraphTaskState } from "./gating-state";
-import { isExecutionDecisionAgent } from "./decision-agent-context";
 
 type TestGraphAgentResult =
   | Omit<Extract<GraphAgentResult, { status: "failed" }>, "messageId" | "forwardedAgentMessage">
@@ -159,7 +160,7 @@ function driveJudgeReviseLimit(
   });
 }
 
-test("isExecutionDecisionAgent 会识别带非 default 出边的节点", () => {
+test("isDecisionAgentInTopology 会识别带非 default 出边的节点", () => {
   const topology = withNodeRecords({
     nodes: ["Build", "Judge", "Summary"],
     edges: [
@@ -169,12 +170,7 @@ test("isExecutionDecisionAgent 会识别带非 default 出边的节点", () => {
   });
 
   assert.equal(
-    isExecutionDecisionAgent({
-      state: { kind: "absent" },
-      topology,
-      runtimeAgentId: "Judge",
-      executableAgentId: "Judge",
-    }),
+    isDecisionAgentInTopology(topology, "Judge"),
     true,
   );
 });
