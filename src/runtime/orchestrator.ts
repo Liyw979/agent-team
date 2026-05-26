@@ -162,7 +162,6 @@ interface OrchestratorOptions {
   cwd: string;
   userDataPath: string;
   opencodeClient: OpenCodeClient;
-  autoOpenTaskSession?: boolean;
   runtimeRefreshDebounceMs?: number;
   terminalLauncher?: (input: { command: string }) => Promise<void>;
 }
