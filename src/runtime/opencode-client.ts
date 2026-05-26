@@ -136,7 +136,6 @@ export class OpenCodeClient {
         if (payload.allowedDecisionTriggers.length > 0) {
           const parsedDecision = parseDecision(
             result.finalMessage,
-            true,
             payload.allowedDecisionTriggers,
           );
           if (parsedDecision.kind !== "valid") {

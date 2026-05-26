@@ -4046,7 +4046,7 @@ test("agent 运行中不会把 OpenCode runtime 过程消息持久化到 task me
 test("判定 Agent 未返回合法标签时必须判为 invalid", () => {
   const parsedDecision = parseDecisionPure(
     "这是普通判定正文，标签写错了。\n\n<chalenge>请继续补充实现依据。</chalenge>",
-    true,
+    [],
   );
 
   assert.deepEqual(parsedDecision, {

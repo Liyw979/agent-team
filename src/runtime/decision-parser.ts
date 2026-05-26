@@ -17,6 +17,8 @@ export type ParsedDecision =
       validationError: string;
     });
 
+type ValidParsedDecision = Extract<ParsedDecision, { kind: "valid" }>;
+
 export function stripStructuredSignals(content: string): string {
   return content
     .split(/\r?\n/)
@@ -36,8 +38,7 @@ export function normalizeDecisionDisplayContent(
 
 export function parseDecision(
   content: string,
-  decisionAgent: boolean,
-  allowedTriggers: readonly string[] = [],
+  allowedTriggers: readonly string[],
 ): ParsedDecision {
   const signalMatch = extractTrailingDecisionSignalBlock(content, allowedTriggers);
   if (signalMatch.kind === "found") {
@@ -54,15 +55,6 @@ export function parseDecision(
   }
 
   const cleanContent = stripStructuredSignals(content);
-  if (!decisionAgent) {
-    return {
-      cleanContent,
-      kind: "valid",
-      trigger: DEFAULT_TOPOLOGY_TRIGGER,
-      opinion: "",
-    };
-  }
-
   return {
     cleanContent,
     opinion: cleanContent,
@@ -70,5 +62,14 @@ export function parseDecision(
     validationError: allowedTriggers.length > 0
       ? `当前 Agent 必须返回以下 trigger 之一：${allowedTriggers.join(" / ")}`
       : "当前 Agent 未配置任何可用 trigger",
+  };
+}
+
+export function parseDefaultAgentResult(content: string): ValidParsedDecision {
+  return {
+    cleanContent: stripStructuredSignals(content),
+    kind: "valid",
+    trigger: DEFAULT_TOPOLOGY_TRIGGER,
+    opinion: "",
   };
 }

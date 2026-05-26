@@ -41,6 +41,7 @@ import {
 import { stripDecisionResponseMarkup } from "@shared/decision-response";
 import {
   parseDecision as parseDecisionPure,
+  parseDefaultAgentResult as parseDefaultAgentResultPure,
   stripStructuredSignals as stripStructuredSignalsPure,
   type ParsedDecision,
 } from "./decision-parser";
@@ -1644,11 +1645,9 @@ export class Orchestrator {
         allowedDecisionTriggers,
       });
 
-      const parsedDecision = parseDecisionPure(
-        response.finalMessage,
-        decisionAgent,
-        allowedDecisionTriggers,
-      );
+      const parsedDecision = decisionAgent
+        ? parseDecisionPure(response.finalMessage, allowedDecisionTriggers)
+        : parseDefaultAgentResultPure(response.finalMessage);
       const resolvedDecision = this.resolveParsedDecisionValue({
         parsedDecision,
         decisionAgent,

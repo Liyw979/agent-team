@@ -1538,7 +1538,7 @@ function resolveExplicitDecisionTriggerFromLine(
   content: string,
   allowedTriggers: readonly string[],
 ): ExplicitDecisionTrigger {
-  const parsed = parseDecision(content, true, allowedTriggers);
+  const parsed = parseDecision(content, allowedTriggers);
   if (parsed.kind === "invalid") {
     return { kind: "invalid" };
   }
