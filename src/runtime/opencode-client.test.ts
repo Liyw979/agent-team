@@ -7,7 +7,6 @@ import path from "node:path";
 import { bindCurrentTaskLog, buildTaskLogFilePath, initAppFileLogger } from "./app-log";
 import type { OpenCodeSessionRuntime } from "./opencode-client";
 import { OpenCodeClient, type ServeHandle } from "./opencode-client";
-import { buildRuntimeActivityFreshness, isRuntimeActivityFreshnessNewer } from "./runtime-activity-freshness";
 
 class TestOpenCodeClient extends OpenCodeClient {
   declare request: OpenCodeClient["request"];
@@ -1278,11 +1277,4 @@ test("buildRuntimeSnapshot 会用 freshness 元数据区分 placeholder 与 stru
   assert.equal(structuredActivity.detailPayloadKeyCount, 1);
   assert.equal(structuredActivity.detailHasPlaceholderValue, false);
 
-  assert.equal(
-    isRuntimeActivityFreshnessNewer(
-      buildRuntimeActivityFreshness(placeholderActivity),
-      buildRuntimeActivityFreshness(structuredActivity),
-    ),
-    true,
-  );
 });

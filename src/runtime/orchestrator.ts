@@ -4,8 +4,6 @@ import { withOptionalString } from "@shared/object-utils";
 import { resolveTaskSubmissionTarget } from "@shared/task-submission";
 import { buildCliOpencodeAttachCommand } from "@shared/terminal-commands";
 import {
-  type AgentProgressActivityKind,
-  type AgentProgressMessageRecord,
   type AgentFinalMessageRecord,
   type AgentRoutingKind,
   type AgentRuntimeSnapshot,
@@ -51,16 +49,9 @@ import {
 } from "./decision-parser";
 import {
   OpenCodeClient,
-  type OpenCodeExecutionResult,
-  type OpenCodeRuntimeActivity,
   type OpenCodeShutdownReport,
 } from "./opencode-client";
 import { StoreService } from "./store";
-import {
-  buildRuntimeActivityFreshness,
-  isRuntimeActivityFreshnessNewer,
-  type RuntimeActivityFreshness,
-} from "./runtime-activity-freshness";
 import { resolveAgentStatusFromRouting } from "./gating-rules";
 import {
   buildDownstreamForwardedContextFromMessages,
@@ -95,8 +86,6 @@ import {
   validateProjectAgents,
 } from "./project-agent-source";
 import { launchTerminalCommand } from "./terminal-launcher";
-
-const RUNTIME_PROGRESS_SYNC_INTERVAL_MS = 200;
 
 type GroupRuleInputBase = Omit<GroupRule, "report">;
 
@@ -163,7 +152,6 @@ interface OrchestratorOptions {
   userDataPath: string;
   opencodeClient: OpenCodeClient;
   autoOpenTaskSession?: boolean;
-  runtimeRefreshDebounceMs?: number;
   terminalLauncher?: (input: { command: string }) => Promise<void>;
 }
 
@@ -198,17 +186,7 @@ interface TaskRuntimeOverlay {
   taskId: string;
   attachBaseUrl: string;
   agentSessions: Map<string, string>;
-  activityFreshnessByMessageId: Map<string, RuntimeActivityFreshness>;
 }
-
-type ScheduledTimerState =
-  | {
-      kind: "idle";
-    }
-  | {
-      kind: "scheduled";
-      timer: ReturnType<typeof setTimeout>;
-    };
 
 type AgentExecutionPrompt =
   | {
@@ -283,12 +261,7 @@ export class Orchestrator {
     },
   });
   private readonly taskRuntimeOverlays = new Map<string, TaskRuntimeOverlay>();
-  private readonly activeRuntimeExecutionSessions = new Set<string>();
-  private readonly runtimePollingSyncSessions = new Set<string>();
-  private runtimePollingState: ScheduledTimerState = { kind: "idle" };
-  private runtimeSyncState: ScheduledTimerState = { kind: "idle" };
   readonly pendingTaskRuns = new Set<Promise<void>>();
-  private readonly runtimeRefreshDebounceMs: number;
   private readonly terminalLauncher: (input: { command: string }) => Promise<void>;
   private isDisposing = false;
 
@@ -298,7 +271,6 @@ export class Orchestrator {
     acquireProcessWorkspaceCwd(this.cwd);
     this.store = new StoreService();
     this.opencodeClient = options.opencodeClient;
-    this.runtimeRefreshDebounceMs = options.runtimeRefreshDebounceMs ?? 120;
     this.terminalLauncher = options.terminalLauncher ?? launchTerminalCommand;
   }
 
@@ -315,8 +287,6 @@ export class Orchestrator {
       };
     }
     this.isDisposing = true;
-    this.stopRuntimeSync();
-    this.stopRuntimePolling();
     const awaitPendingTaskRuns = options.awaitPendingTaskRuns ?? true;
     if (awaitPendingTaskRuns && this.pendingTaskRuns.size > 0) {
       await Promise.allSettled([...this.pendingTaskRuns]);
@@ -393,8 +363,6 @@ export class Orchestrator {
     const task = this.requireCurrentTask();
     await this.runtime.deleteTask(task.id);
     this.taskRuntimeOverlays.delete(task.id);
-    this.stopRuntimeSync();
-    this.stopRuntimePolling();
     this.store.deleteTask(task.id);
     return this.hydrateWorkspace();
   }
@@ -1040,7 +1008,6 @@ export class Orchestrator {
       taskId,
       attachBaseUrl: "",
       agentSessions: new Map(),
-      activityFreshnessByMessageId: new Map(),
     };
     this.taskRuntimeOverlays.set(taskId, created);
     return created;
@@ -1134,9 +1101,6 @@ export class Orchestrator {
     const currentTask = this.store.getTask(task.id);
     await this.ensureTaskServer(currentTask.id);
     await this.ensureTaskAgentSessions(currentTask);
-    if (this.hasTaskRuntimeSessions(currentTask.id)) {
-      this.ensureRuntimePolling();
-    }
 
     const refreshedTask = this.store.getTask(task.id);
     if (!refreshedTask.initializedAt) {
@@ -1190,11 +1154,6 @@ export class Orchestrator {
       .map((item) => item.trim())
       .find(Boolean);
     return (firstLine ?? "未命名任务").slice(0, 80);
-  }
-
-  private hasTaskRuntimeSessions(taskId: string): boolean {
-    const overlay = this.taskRuntimeOverlays.get(taskId);
-    return overlay !== undefined && [...overlay.agentSessions.values()].some((sessionId) => sessionId.trim().length > 0);
   }
 
   private findAgent(
@@ -1756,16 +1715,11 @@ export class Orchestrator {
       }
 
       const dispatchedContent = this.buildAgentExecutionPrompt(prompt);
-      const responsePromise = this.opencodeClient.submitMessage(agentSessionId, {
+      const response = await this.opencodeClient.submitMessage(agentSessionId, {
         agent: executableAgentId,
         runtimeAgent: runtimeAgentId,
         content: dispatchedContent,
         allowedDecisionTriggers: allowedDecisionTriggers.map((item) => item.trigger),
-      });
-      const response = await this.awaitExecutionWithProgressSync({
-        execution: responsePromise,
-        taskId: task.id,
-        agentIds: [runtimeAgentId],
       });
 
       const parsedDecision = parseDecisionPure(
@@ -2022,88 +1976,6 @@ export class Orchestrator {
     return id;
   }
 
-  private scheduleRuntimeSync() {
-    const task = this.requireCurrentTask();
-    const taskId = task.id;
-    const overlay = this.taskRuntimeOverlays.get(taskId);
-    if (!overlay) {
-      return;
-    }
-
-    this.stopRuntimeSync();
-
-    const timer = setTimeout(() => {
-      this.runtimeSyncState = { kind: "idle" };
-      const overlayAfterDelay = this.taskRuntimeOverlays.get(taskId);
-      if (!overlayAfterDelay) {
-        throw new Error(`Task ${taskId} 缺少运行态 overlay，无法同步过程消息`);
-      }
-      void this.syncRuntimePollingActivities(taskId, overlayAfterDelay).catch(() => undefined);
-    }, this.runtimeRefreshDebounceMs);
-    this.runtimeSyncState = { kind: "scheduled", timer };
-  }
-
-  private stopRuntimeSync() {
-    if (this.runtimeSyncState.kind === "scheduled") {
-      clearTimeout(this.runtimeSyncState.timer);
-    }
-    this.runtimeSyncState = { kind: "idle" };
-  }
-
-  private async syncRuntimePollingActivities(
-    taskId: string,
-    overlay: TaskRuntimeOverlay,
-  ) {
-    const entries = [...overlay.agentSessions.entries()].filter(([, sessionId]) =>
-      sessionId.trim().length > 0
-      && !this.activeRuntimeExecutionSessions.has(sessionId)
-      && !this.runtimePollingSyncSessions.has(sessionId)
-    );
-    if (entries.length === 0) {
-      return;
-    }
-    const agentIds = entries.map(([agentId]) => agentId);
-    const sessionIds = entries.map(([, sessionId]) => sessionId);
-    sessionIds.forEach((sessionId) => this.runtimePollingSyncSessions.add(sessionId));
-    try {
-      await this.syncVisibleRuntimeActivities({
-        taskId,
-        agentIds,
-      });
-    } finally {
-      sessionIds.forEach((sessionId) => this.runtimePollingSyncSessions.delete(sessionId));
-    }
-  }
-
-  private stopRuntimePolling() {
-    if (this.runtimePollingState.kind === "scheduled") {
-      clearTimeout(this.runtimePollingState.timer);
-    }
-    this.runtimePollingState = { kind: "idle" };
-  }
-
-  private hasRuntimeSessions(): boolean {
-    return [...this.taskRuntimeOverlays.values()].some((overlay) =>
-      [...overlay.agentSessions.values()].some((sessionId) => sessionId.trim().length > 0)
-    );
-  }
-
-  private ensureRuntimePolling() {
-    if (this.isDisposing || this.runtimePollingState.kind === "scheduled" || !this.hasRuntimeSessions()) {
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      this.runtimePollingState = { kind: "idle" };
-      if (this.isDisposing || !this.hasRuntimeSessions()) {
-        return;
-      }
-      this.scheduleRuntimeSync();
-      this.ensureRuntimePolling();
-    }, this.runtimeRefreshDebounceMs);
-    this.runtimePollingState = { kind: "scheduled", timer };
-  }
-
   private getTaskAgentRunCount(
     taskId: string,
     agentId: string,
@@ -2115,196 +1987,4 @@ export class Orchestrator {
     );
   }
 
-  private createAgentProgressMessage(input: {
-    taskId: string;
-    agentId: string;
-    sessionId: string;
-    runCount: number;
-    activity: OpenCodeRuntimeActivity;
-  }): AgentProgressMessageRecord {
-    const detail = input.activity.detail.trim() || input.activity.label.trim();
-    return {
-      id: `${input.taskId}:${input.agentId}:${input.runCount}:${input.activity.sourceMessageId}:${input.activity.sourcePartIndex}`,
-      taskId: input.taskId,
-      content: detail,
-      sender: input.agentId,
-      timestamp: toUtcIsoTimestamp(input.activity.timestamp),
-      kind: "agent-progress" as const,
-      activityKind: input.activity.kind satisfies AgentProgressActivityKind,
-      label: input.activity.label,
-      detail,
-      detailState: input.activity.detailState,
-      sessionId: input.sessionId,
-      runCount: input.runCount,
-    };
-  }
-
-  private listPersistedAgentProgressMessages(input: {
-    taskId: string;
-    agentId: string;
-    sessionId: string;
-    runCount: number;
-  }): AgentProgressMessageRecord[] {
-    return this.store
-      .listMessages(input.taskId)
-      .filter(
-        (message): message is AgentProgressMessageRecord =>
-          message.kind === "agent-progress"
-          && message.sender === input.agentId
-          && message.sessionId === input.sessionId
-          && message.runCount === input.runCount,
-      );
-  }
-
-  private shouldRefreshAgentProgressDetail(
-    taskId: string,
-    existing: AgentProgressMessageRecord,
-    nextFreshness: RuntimeActivityFreshness,
-  ) {
-    const overlay = this.taskRuntimeOverlays.get(taskId);
-    if (!overlay) {
-      throw new Error(`Task ${taskId} 缺少运行态 overlay，无法判断过程消息是否应更新`);
-    }
-    const existingFreshness = overlay.activityFreshnessByMessageId.get(existing.id);
-    if (!existingFreshness) {
-      return false;
-    }
-    return isRuntimeActivityFreshnessNewer(existingFreshness, nextFreshness);
-  }
-
-  private async syncVisibleRuntimeActivities(input: {
-    taskId: string;
-    agentIds: string[];
-  }) {
-    const overlay = this.taskRuntimeOverlays.get(input.taskId);
-    if (!overlay) {
-      throw new Error(`Task ${input.taskId} 缺少运行态 overlay，无法同步过程消息`);
-    }
-
-    const emittedMessages: MessageRecord[] = [];
-    const targetAgentIds = new Set(input.agentIds);
-    for (const [agentId, sessionId] of overlay.agentSessions.entries()) {
-      if (!targetAgentIds.has(agentId)) {
-        continue;
-      }
-      const runtime = await this.opencodeClient.getSessionRuntime(
-        sessionId,
-      );
-
-      const runCount = this.getTaskAgentRunCount(
-        input.taskId,
-        agentId,
-      );
-      const existingProgressMessages = this.listPersistedAgentProgressMessages({
-        taskId: input.taskId,
-        agentId,
-        sessionId,
-        runCount,
-      });
-      const existingProgressMessageById = new Map(
-        existingProgressMessages.map((message) => [
-          message.id,
-          message,
-        ]),
-      );
-      const nextActivities = runtime.activities
-        .filter((activity) => {
-          const nextFreshness = buildRuntimeActivityFreshness(activity);
-          const candidateMessage = this.createAgentProgressMessage({
-            taskId: input.taskId,
-            agentId,
-            sessionId,
-            runCount,
-            activity,
-          });
-          const existingMessage = existingProgressMessageById.get(
-            candidateMessage.id,
-          );
-          if (!existingMessage) {
-            return true;
-          }
-          return this.shouldRefreshAgentProgressDetail(
-            input.taskId,
-            existingMessage,
-            nextFreshness,
-          );
-        });
-
-      for (const activity of nextActivities) {
-        const message = this.createAgentProgressMessage({
-          taskId: input.taskId,
-          agentId,
-          sessionId,
-          runCount,
-          activity,
-        });
-        overlay.activityFreshnessByMessageId.set(
-          message.id,
-          buildRuntimeActivityFreshness(activity),
-        );
-        emittedMessages.push(message);
-      }
-    }
-
-    if (emittedMessages.length === 0) {
-      return;
-    }
-
-    for (const message of emittedMessages) {
-      this.store.insertMessage(message);
-    }
-  }
-
-  private async awaitExecutionWithProgressSync(input: {
-    execution: Promise<OpenCodeExecutionResult>;
-    taskId: string;
-    agentIds: string[];
-  }): Promise<OpenCodeExecutionResult> {
-    const overlay = this.taskRuntimeOverlays.get(input.taskId);
-    if (!overlay) {
-      throw new Error(`Task ${input.taskId} 缺少运行态 overlay，无法同步过程消息`);
-    }
-    const executionSessionIds = input.agentIds.flatMap((agentId) => {
-      const sessionId = overlay.agentSessions.get(agentId) ?? "";
-      return sessionId.trim().length > 0 ? [sessionId] : [];
-    });
-    const settled = {
-      done: false,
-    };
-    const trackedExecution = input.execution.finally(() => {
-      settled.done = true;
-    });
-    executionSessionIds.forEach((sessionId) => this.activeRuntimeExecutionSessions.add(sessionId));
-
-    try {
-      while (!settled.done) {
-        await this.syncVisibleRuntimeActivities({
-          taskId: input.taskId,
-          agentIds: input.agentIds,
-        });
-        if (settled.done) {
-          break;
-        }
-        const waitResult = await Promise.race([
-          trackedExecution.then(() => "settled" as const),
-          new Promise<"tick">((resolve) => {
-            setTimeout(() => {
-              resolve("tick");
-            }, RUNTIME_PROGRESS_SYNC_INTERVAL_MS);
-          }),
-        ]);
-        if (waitResult === "settled") {
-          break;
-        }
-      }
-
-      await this.syncVisibleRuntimeActivities({
-        taskId: input.taskId,
-        agentIds: input.agentIds,
-      });
-      return trackedExecution;
-    } finally {
-      executionSessionIds.forEach((sessionId) => this.activeRuntimeExecutionSessions.delete(sessionId));
-    }
-  }
 }
