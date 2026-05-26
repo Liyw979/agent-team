@@ -4050,8 +4050,7 @@ test("判定 Agent 未返回合法标签时必须判为 invalid", () => {
   );
 
   assert.deepEqual(parsedDecision, {
-    cleanContent: "这是普通判定正文，标签写错了。\n\n<chalenge>请继续补充实现依据。</chalenge>",
-    opinion: "这是普通判定正文，标签写错了。\n\n<chalenge>请继续补充实现依据。</chalenge>",
+    contentWithoutTrigger: "这是普通判定正文，标签写错了。\n\n<chalenge>请继续补充实现依据。</chalenge>",
     kind: "invalid",
     validationError: "当前 Agent 未配置任何可用 trigger",
   });

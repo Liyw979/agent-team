@@ -480,7 +480,6 @@ test("scheduler script emulator 纯函数在 finished 状态下不会再为下�
           agentStatus: "completed" as const,
           agentContextContent: "TaskReview",
           forwardedAgentMessage: "",
-          opinion: "",
           signalDone: false,
         },
         state: createEmptyGraphTaskState({
@@ -503,7 +502,6 @@ test("scheduler script emulator 纯函数在 finished 状态下不会再为下�
           agentStatus: "completed" as const,
           agentContextContent: "TaskReview",
           forwardedAgentMessage: "",
-          opinion: "",
           signalDone: false,
         },
         state: createEmptyGraphTaskState({
