@@ -114,6 +114,7 @@ export class OpenCodeClient {
       retryCount: number,
     ): Promise<OpenCodeExecutionResult> => {
       try {
+        await this.abortSessionOnce(sessionId);
         const response = await this.request(`/session/${sessionId}/message`, {
           method: "POST",
           body: JSON.stringify({
@@ -149,7 +150,6 @@ export class OpenCodeClient {
         }
         const retryReason = error.message;
         const nextContent = "生成完整回复";
-        await this.abortSessionOnce(sessionId);
         this.logRetriedMessageResend(sessionId, opencodeAgent, runtimeAgent, retryReason, retryCount, nextContent);
         if (retryCount > 0) {
           await new Promise((resolve) => setTimeout(resolve, RETRYABLE_CLIENT_INTERVAL_MS));
