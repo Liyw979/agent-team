@@ -137,7 +137,6 @@ interface GraphAgentResultBase {
   agentStatus: AgentStatus;
   agentContextContent: string;
   forwardedAgentMessage: string;
-  opinion: string;
   signalDone: boolean;
 }
 

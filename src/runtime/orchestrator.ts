@@ -831,8 +831,7 @@ export class Orchestrator {
     allowedTriggers?: readonly string[],
   ): string {
     const candidates = [
-      parsedDecision.cleanContent.trim(),
-      parsedDecision.opinion.trim(),
+      parsedDecision.contentWithoutTrigger.trim(),
       stripStructuredSignalsPure(
         stripDecisionResponseMarkup(rawFinalMessage, allowedTriggers),
       ).trim(),
@@ -878,19 +877,14 @@ export class Orchestrator {
   }
 
   protected createDisplayContent(parsedDecision: ParsedDecision): string {
-    const cleanContent = parsedDecision.cleanContent.trim();
+    const contentWithoutTrigger = parsedDecision.contentWithoutTrigger.trim();
     if (parsedDecision.kind === "invalid") {
-      return [cleanContent, parsedDecision.validationError]
+      return [contentWithoutTrigger, parsedDecision.validationError]
         .filter(Boolean)
         .join("\n\n");
     }
-    if (cleanContent) {
-      return cleanContent;
-    }
-
-    const opinion = parsedDecision.opinion.trim();
-    if (opinion) {
-      return opinion;
+    if (contentWithoutTrigger) {
+      return contentWithoutTrigger;
     }
 
     return "";
@@ -1616,7 +1610,6 @@ export class Orchestrator {
         agentStatus: "failed",
         agentContextContent: "",
         forwardedAgentMessage: "",
-        opinion: "",
         signalDone: false,
         errorMessage: `Task ${task.id} 缺少 Agent ${runtimeAgentId}`,
       };
@@ -1672,7 +1665,7 @@ export class Orchestrator {
         kind: "agent-final",
         runCount: currentAgent.runCount,
         status: "completed",
-        responseNote: parsedDecision.opinion ?? "",
+        responseNote: displayContent,
         rawResponse: response.finalMessage,
         senderDisplayName,
       };
@@ -1719,7 +1712,6 @@ export class Orchestrator {
         agentStatus,
         agentContextContent,
         forwardedAgentMessage,
-        opinion: parsedDecision.opinion,
         signalDone,
       };
       if (resolvedDecision === "triggered" && parsedDecision.kind === "valid") {
@@ -1768,7 +1760,6 @@ export class Orchestrator {
         agentStatus: "failed",
         agentContextContent: "",
         forwardedAgentMessage: "",
-        opinion: "",
         signalDone: false,
         errorMessage: error instanceof Error ? error.message : String(error),
       };

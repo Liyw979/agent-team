@@ -1,21 +1,18 @@
 import { DEFAULT_TOPOLOGY_TRIGGER } from "@shared/types";
 import { extractTrailingDecisionSignalBlock, stripDecisionResponseMarkup } from "@shared/decision-response";
 
-type ParsedDecisionBase = {
-  cleanContent: string;
-  opinion: string;
-};
-
 export type ParsedDecision =
-  | (ParsedDecisionBase & {
+  | {
+      contentWithoutTrigger: string;
       kind: "valid";
       trigger: string;
       rawDecisionBlock?: string;
-    })
-  | (ParsedDecisionBase & {
+    }
+  | {
+      contentWithoutTrigger: string;
       kind: "invalid";
       validationError: string;
-    });
+    };
 
 type ValidParsedDecision = Extract<ParsedDecision, { kind: "valid" }>;
 
@@ -43,21 +40,19 @@ export function parseDecision(
   const signalMatch = extractTrailingDecisionSignalBlock(content, allowedTriggers);
   if (signalMatch.kind === "found") {
     return {
-      cleanContent: normalizeDecisionDisplayContent(
+      contentWithoutTrigger: normalizeDecisionDisplayContent(
         content,
         allowedTriggers,
       ),
       kind: "valid",
       trigger: signalMatch.trigger,
-      opinion: stripStructuredSignals(signalMatch.response),
       rawDecisionBlock: signalMatch.rawBlock,
     };
   }
 
-  const cleanContent = stripStructuredSignals(content);
+  const contentWithoutTrigger = stripStructuredSignals(content);
   return {
-    cleanContent,
-    opinion: cleanContent,
+    contentWithoutTrigger,
     kind: "invalid",
     validationError: allowedTriggers.length > 0
       ? `当前 Agent 必须返回以下 trigger 之一：${allowedTriggers.join(" / ")}`
@@ -67,9 +62,8 @@ export function parseDecision(
 
 export function parseDefaultAgentResult(content: string): ValidParsedDecision {
   return {
-    cleanContent: stripStructuredSignals(content),
+    contentWithoutTrigger: stripStructuredSignals(content),
     kind: "valid",
     trigger: DEFAULT_TOPOLOGY_TRIGGER,
-    opinion: "",
   };
 }

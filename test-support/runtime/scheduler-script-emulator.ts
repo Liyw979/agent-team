@@ -1066,7 +1066,6 @@ function applyMessageLineAndMatchDecision(input: {
           agentStatus: "completed",
           agentContextContent: input.line.body,
           forwardedAgentMessage: "",
-          opinion: "",
           signalDone: false,
         }
       : {
@@ -1078,7 +1077,6 @@ function applyMessageLineAndMatchDecision(input: {
           agentStatus: "completed",
           agentContextContent: input.line.body,
           forwardedAgentMessage: "",
-          opinion: "",
           signalDone: false,
         };
     const reduced = applyAgentResultToGraphState(input.state, result);
