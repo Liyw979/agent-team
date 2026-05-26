@@ -1,3 +1,4 @@
+// 用户要求：submit message 的每次重试前必须先调用 abort，避免旧 OpenCode session 运行状态导致再次提交卡死。
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { parseDecision } from "./decision-parser";
 import { toOpenCodeAgentId } from "./opencode-agent-id";
@@ -115,7 +116,7 @@ export class OpenCodeClient {
     ): Promise<OpenCodeExecutionResult> => {
       try {
         await this.abortSessionOnce(sessionId);
-        const response = await this.request(`/session/${sessionId}/message`, {
+        const response = await this.requestOnce(`/session/${sessionId}/message`, {
           method: "POST",
           body: JSON.stringify({
             agent: opencodeAgent,
@@ -126,7 +127,9 @@ export class OpenCodeClient {
               },
             ],
           }),
-        }, "OpenCode 请求失败");
+        }, "OpenCode 请求失败").catch((error) => {
+          throw new RetryableExecutionResultError(error instanceof Error ? error.message : String(error));
+        });
         const message = await this.readJsonResponse(response)
           .then((raw) => this.parseMessageEnvelope(raw, opencodeAgent, "OpenCode 提交消息响应"))
           .catch(() => {
@@ -555,6 +558,19 @@ export class OpenCodeClient {
     options: RequestOptions,
     errorPrefix = "OpenCode 请求失败",
   ): Promise<Response> {
+    try {
+      return await this.requestOnce(pathname, options, errorPrefix);
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, RETRYABLE_CLIENT_INTERVAL_MS));
+      return this.request(pathname, options, errorPrefix);
+    }
+  }
+
+  private async requestOnce(
+    pathname: string,
+    options: RequestOptions,
+    errorPrefix = "OpenCode 请求失败",
+  ): Promise<Response> {
     const headers: Record<string, string> = {};
     if (options.method === "POST" && options.body.length > 0) {
       headers["content-type"] = "application/json";
@@ -577,8 +593,7 @@ export class OpenCodeClient {
         url,
         message: error instanceof Error ? error.message : String(error),
       });
-      await new Promise((resolve) => setTimeout(resolve, RETRYABLE_CLIENT_INTERVAL_MS));
-      return this.request(pathname, options, errorPrefix);
+      throw error;
     });
     if (response.ok) {
       return response;
@@ -589,8 +604,7 @@ export class OpenCodeClient {
       statusText: response.statusText,
       message,
     });
-    await new Promise((resolve) => setTimeout(resolve, RETRYABLE_CLIENT_INTERVAL_MS));
-    return this.request(pathname, options, errorPrefix);
+    throw new Error(message);
   }
 
   private async fetchWithTimeout(
