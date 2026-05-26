@@ -146,7 +146,6 @@ async function createCliContext(input: {
       cwd,
       userDataPath,
       opencodeClient,
-      autoOpenTaskSession: false,
     });
     await orchestrator.initialize();
     return {
