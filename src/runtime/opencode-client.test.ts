@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { bindCurrentTaskLog, buildTaskLogFilePath, initAppFileLogger } from "./app-log";
-import { OpenCodeClient, type ServeHandle } from "./opencode-client";
+import { OpenCodeClient, type OpenCodeSessionActivity, type ServeHandle } from "./opencode-client";
 
 class TestOpenCodeClient extends OpenCodeClient {
   declare request: OpenCodeClient["request"];
@@ -104,11 +104,21 @@ async function captureStdout<T>(action: () => Promise<T>): Promise<{ stdout: str
   }
 }
 
+async function withMockedFetch<T>(
+  mockedFetch: typeof fetch,
+  action: () => Promise<T>,
+): Promise<T> {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = mockedFetch;
+  try {
+    return await action();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
 function readTaskEventRecords(userDataPath: string, taskId: string, event: string): Record<string, unknown>[] {
-  return fs.readFileSync(buildTaskLogFilePath(userDataPath, taskId), "utf8")
-    .trim()
-    .split("\n")
-    .map((line) => JSON.parse(line) as Record<string, unknown>)
+  return readTaskRecords(userDataPath, taskId)
     .filter((record) => record["event"] === event);
 }
 
@@ -147,29 +157,21 @@ function createOpenCodeMessageResponse(input: {
 }
 
 test("request 会跟随当前 serverHandle 的实际端口", async () => {
-  await withFastForwardedTimeouts(async () => {
-    const { client } = createClient();
-    const typed = client as OpenCodeClient & {
-      request: (pathname: TestRequestPathname, options: TestRequestOptions) => TestRequestResult;
-    };
-
-    const originalFetch = globalThis.fetch;
-    let requestedUrl = "";
-    globalThis.fetch = (async (input: string | URL | Request) => {
-      requestedUrl = String(input);
-      return new Response("", { status: 200 });
-    }) as unknown as typeof fetch;
-
-    try {
+  const { client } = createClient();
+  const typed = client as OpenCodeClient & {
+    request: (pathname: TestRequestPathname, options: TestRequestOptions) => TestRequestResult;
+  };
+  let requestedUrl = "";
+  await withMockedFetch((async (input: string | URL | Request) => {
+    requestedUrl = String(input);
+    return new Response("", { status: 200 });
+  }) as unknown as typeof fetch, () =>
+    withFastForwardedTimeouts(async () => {
       await typed.request("/session", {
         method: "GET",
       });
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-
-    assert.equal(requestedUrl, "http://127.0.0.1:43127/session");
-  }, 1);
+    }, 1));
+  assert.equal(requestedUrl, "http://127.0.0.1:43127/session");
 });
 
 test("request 失败时会写入 task 级失败日志", async () => {
@@ -180,89 +182,52 @@ test("request 失败时会写入 task 级失败日志", async () => {
   const typed = client as OpenCodeClient & {
     request: (pathname: TestRequestPathname, options: TestRequestOptions) => TestRequestResult;
   };
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () => {
-    throw new Error("boom task-request-failed");
-  }) as unknown as typeof fetch;
-
-  try {
-    await assert.rejects(
-      typed.request("/session", {
+  let requestCount = 0;
+  const response = await withMockedFetch((async () => {
+    requestCount += 1;
+    if (requestCount === 1) {
+      throw new Error("boom task-request-failed");
+    }
+    return new Response("", { status: 200 });
+  }) as unknown as typeof fetch, () =>
+    withFastForwardedTimeouts(() => typed.request("/session", {
         method: "GET",
-      }),
-      /boom task-request-failed/,
-    );
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+      }), 120_000));
+  assert.equal(response.status, 200);
 
-  const logFilePath = buildTaskLogFilePath(userDataPath, "task-request-failed");
-  const records = fs.readFileSync(logFilePath, "utf8").trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+  const records = readTaskRecords(userDataPath, "task-request-failed");
   assert.equal(records.length, 1);
   const latestRecord = records[0]!;
   assert.equal(latestRecord["event"], "opencode.request_failed");
   assert.equal(latestRecord["taskId"], "task-request-failed");
 });
 
-test("submitMessage 在空响应体或空对象响应时会在原地重试直到拿到有效消息实体", async () => {
+test("submitMessage 在响应体缺少有效消息实体时直接失败", async () => {
   const userDataPath = createTempDir();
   const taskId = "task-submit-empty-response";
   initAppFileLogger(userDataPath);
   bindCurrentTaskLog(taskId);
   const { client } = createClient();
   let requestCount = 0;
-  client.request = async (pathname) => {
-    if (pathname === "/session/session-1/abort") {
-      return new Response("", { status: 200 });
-    }
-
+  await withMockedFetch((async () => {
     requestCount += 1;
-    return requestCount === 1
-      ? new Response("", { status: 200 })
-      : requestCount === 2
-        ? new Response(JSON.stringify({ info: {}, }), {
-            status: 200,
-            headers: { "content-type": "application/json" },
-          })
-      : createOpenCodeMessageResponse({
-          role: "assistant",
-          id: "msg-1",
-          text: "已发送",
-        });
-  };
-  const { result, stdout } = await captureStdout(() =>
-    withFastForwardedTimeouts(() => client.submitMessage("session-1", {
-      agent: "BA",
-      runtimeAgent: "BA-1",
-      content: "请整理需求",
-      allowedDecisionTriggers: [],
-    })),
-  );
-  assert.equal(result.finalMessage, "已发送");
-  assert.equal(requestCount, 3);
-  const stdoutRecords = stdout.trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
-  assert.deepEqual(
-    stdoutRecords
-      .filter((record) => record["event"] === "opencode.submit_message_retried")
-      .map((record) => record["reason"]),
-    ["OpenCode 提交消息响应缺少有效的消息实体", "OpenCode 提交消息响应缺少有效的消息实体"],
-  );
-  const records = readTaskEventRecords(userDataPath, taskId, "opencode.submit_message_retried");
-  assert.equal(records.length, 2);
-  const [firstRetryRecord, secondRetryRecord] = records;
-  assert.ok(firstRetryRecord);
-  assert.ok(secondRetryRecord);
-  assert.equal(firstRetryRecord["level"], "warn");
-  assert.equal(firstRetryRecord["agent"], "BA");
-  assert.equal(firstRetryRecord["runtimeAgent"], "BA-1");
-  assert.equal(firstRetryRecord["retryCount"], 0);
-  assert.equal(firstRetryRecord["nextRetryCount"], 1);
-  assert.equal(firstRetryRecord["nextContent"], "生成完整回复");
-  assert.equal(firstRetryRecord["reason"], "OpenCode 提交消息响应缺少有效的消息实体");
-  assert.equal(secondRetryRecord["reason"], "OpenCode 提交消息响应缺少有效的消息实体");
+    return new Response("", { status: 200 });
+  }) as unknown as typeof fetch, async () =>
+    assert.rejects(
+      withFastForwardedTimeouts(() => client.submitMessage("session-1", {
+        agent: "BA",
+        runtimeAgent: "BA-1",
+        content: "请整理需求",
+        allowedDecisionTriggers: [],
+      })),
+      /OpenCode 提交消息响应缺少有效的消息实体/,
+    ));
+  assert.equal(requestCount, 1);
+  assert.equal(readTaskEventRecords(userDataPath, taskId, "opencode.submit_message_retried").length, 0);
+  assert.deepEqual(readTaskRecords(userDataPath, taskId), []);
 });
 
-test("submitMessage 失败后会先立刻重试一次，再按 2 分钟间隔继续重试", async () => {
+test("submitMessage 请求级失败由 request 层按 2 分钟间隔重试", async () => {
   const userDataPath = createTempDir();
   const taskId = "task-submit-request-failed";
   initAppFileLogger(userDataPath);
@@ -270,11 +235,11 @@ test("submitMessage 失败后会先立刻重试一次，再按 2 分钟间隔继
   const { client } = createClient();
   let requestCount = 0;
   const requestAt: number[] = [];
-  client.request = async (pathname) => {
-    if (pathname === "/session/session-1/abort") {
-      return new Response("", { status: 200 });
-    }
-
+  const requestPathnames: string[] = [];
+  const { result, stdout } = await captureStdout(() => withMockedFetch((async (input: string | URL | Request) => {
+    const url = String(input);
+    const pathname = new URL(url).pathname;
+    requestPathnames.push(pathname);
     requestCount += 1;
     requestAt.push(Date.now());
     if (requestCount === 1) {
@@ -288,79 +253,101 @@ test("submitMessage 失败后会先立刻重试一次，再按 2 分钟间隔继
       id: "msg-2",
       text: "已恢复提交",
     });
-  };
-  const { result, stdout } = await captureStdout(() =>
+  }) as unknown as typeof fetch, () =>
     withFastForwardedTimeouts(() => client.submitMessage("session-1", {
-      agent: "BA",
-      runtimeAgent: "BA-1",
-      content: "请整理需求",
-      allowedDecisionTriggers: [],
-    }), 120_000),
-  );
+        agent: "BA",
+        runtimeAgent: "BA-1",
+        content: "请整理需求",
+        allowedDecisionTriggers: [],
+      }), 120_000)));
 
   assert.equal(result.finalMessage, "已恢复提交");
   assert.equal(requestCount, 3);
   const requestRetryAt = requestAt as [number, number, number];
-  assert.deepEqual([requestRetryAt[1] - requestRetryAt[0], requestRetryAt[2] - requestRetryAt[1]], [0, 120_000]);
+  assert.deepEqual([requestRetryAt[1] - requestRetryAt[0], requestRetryAt[2] - requestRetryAt[1]], [120_000, 120_000]);
+  assert.deepEqual(requestPathnames, [
+    "/session/session-1/message",
+    "/session/session-1/message",
+    "/session/session-1/message",
+  ]);
   const stdoutRecords = stdout.trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
   assert.deepEqual(
     stdoutRecords
       .filter((record) => record["event"] === "opencode.submit_message_retried")
       .map((record) => record["reason"]),
-    ["OpenCode 请求失败: 500", "Error: fetch failed"],
+    [],
   );
   const records = readTaskEventRecords(userDataPath, taskId, "opencode.submit_message_retried");
-  assert.equal(records.length, 2);
-  assert.deepEqual(records.map((record) => record["reason"]), ["OpenCode 请求失败: 500", "Error: fetch failed"]);
-  assert.deepEqual(records.map((record) => record["runtimeAgent"]), ["BA-1", "BA-1"]);
-  assert.deepEqual(records.map((record) => record["retryCount"]), [0, 1]);
-  assert.deepEqual(
-    readTaskEventRecords(userDataPath, taskId, "opencode.submit_message_failed")
-      .map((record) => [record["status"], record["runtimeAgent"], record["retryCount"]]),
-    [[500, "BA-1", 0]],
-  );
-  assert.deepEqual(
-    readTaskEventRecords(userDataPath, taskId, "opencode.submit_message_request_error")
-      .map((record) => [record["message"], record["runtimeAgent"], record["retryCount"]]),
-    [["Error: fetch failed", "BA-1", 1]],
-  );
+  assert.equal(records.length, 0);
+  const [firstRequestFailure, secondRequestFailure] = readTaskEventRecords(userDataPath, taskId, "opencode.request_failed") as [
+    Record<string, unknown>,
+    Record<string, unknown>,
+  ];
+  assert.equal(firstRequestFailure["status"], 500);
+  assert.equal(firstRequestFailure["message"], "OpenCode 请求失败: 500");
+  assert.equal("status" in secondRequestFailure, false);
+  assert.equal(secondRequestFailure["message"], "fetch failed");
 });
 
 test("submitMessage 重试前会先调用 session abort 接口", async () => {
+  const userDataPath = createTempDir();
+  initAppFileLogger(userDataPath);
+  bindCurrentTaskLog("task-submit-abort-before-retry");
   const { client } = createClient();
   const requestPathnames: string[] = [];
   const submittedContents: string[] = [];
   let messageRequestCount = 0;
-
-  client.request = async (pathname, options) => {
+  const result = await withMockedFetch((async (...args: Parameters<typeof fetch>) => {
+    const url = args[0] instanceof Request ? args[0].url : String(args[0]);
+    const pathname = new URL(url).pathname;
+    const options = args[1];
     requestPathnames.push(pathname);
     if (pathname === "/session/session-1/abort") {
-      assert.equal(options.method, "POST");
-      assert.equal(options.body, "");
+      if (!options || options.method !== "POST") {
+        throw new Error("submitMessage abort 请求必须是 POST");
+      }
+      assert.equal("body" in options, false);
       return new Response("", { status: 200 });
     }
 
     messageRequestCount += 1;
-    if (options.method !== "POST") {
+    if (!options || options.method !== "POST" || typeof options.body !== "string") {
       throw new Error("submitMessage 不应发起非 POST 请求");
     }
     const body = JSON.parse(options.body) as { parts: [{ text: string }] };
     submittedContents.push(body.parts[0].text);
     return messageRequestCount === 1
-      ? new Response("server error", { status: 500 })
+      ? new Response(JSON.stringify({
+          info: {
+            id: "msg-empty",
+            role: "assistant",
+            time: {
+              created: Date.parse("2026-05-07T00:00:00.000Z"),
+              completed: Date.parse("2026-05-07T00:00:01.000Z"),
+            },
+            sessionID: "session-1",
+            finish: "stop",
+          },
+          parts: [
+            { type: "step-start" },
+            { type: "step-finish", reason: "stop" },
+          ],
+        }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
       : createOpenCodeMessageResponse({
           role: "assistant",
           id: "msg-2",
           text: "已恢复提交",
         });
-  };
-
-  const result = await withFastForwardedTimeouts(() => client.submitMessage("session-1", {
-    agent: "BA",
-    runtimeAgent: "BA-1",
-    content: "请整理需求",
-    allowedDecisionTriggers: [],
-  }));
+  }) as unknown as typeof fetch, () =>
+    withFastForwardedTimeouts(() => client.submitMessage("session-1", {
+        agent: "BA",
+        runtimeAgent: "BA-1",
+        content: "请整理需求",
+        allowedDecisionTriggers: [],
+      })));
 
   assert.equal(result.finalMessage, "已恢复提交");
   assert.deepEqual(requestPathnames, [
@@ -371,79 +358,170 @@ test("submitMessage 重试前会先调用 session abort 接口", async () => {
   assert.deepEqual(submittedContents, ["请整理需求", "生成完整回复"]);
 });
 
-test("submitMessage abort 失败时不会继续重试 message", async () => {
+test("submitMessage 业务重试时 abort 请求会在 request 层重试直到成功", async () => {
   const userDataPath = createTempDir();
   const taskId = "task-submit-abort-failed";
   initAppFileLogger(userDataPath);
   bindCurrentTaskLog(taskId);
   const { client } = createClient();
   const requestPathnames: string[] = [];
-
-  client.request = async (pathname) => {
+  const requestAt: number[] = [];
+  let abortCount = 0;
+  let messageCount = 0;
+  const result = await withMockedFetch((async (input: string | URL | Request) => {
+    const pathname = new URL(String(input)).pathname;
     requestPathnames.push(pathname);
-    return pathname === "/session/session-1/abort"
-      ? new Response("abort failed", { status: 500, statusText: "Internal Server Error" })
-      : new Response("server error", { status: 500 });
-  };
-
-  await assert.rejects(
+    requestAt.push(Date.now());
+    if (pathname === "/session/session-1/abort") {
+      abortCount += 1;
+      if (abortCount === 1) {
+        return new Response("abort failed", { status: 500, statusText: "Internal Server Error" });
+      }
+      if (abortCount === 2) {
+        throw new Error("abort fetch failed");
+      }
+      return new Response("", { status: 200 });
+    }
+    messageCount += 1;
+    return messageCount === 1
+      ? new Response(JSON.stringify({
+          info: {
+            id: "msg-empty",
+            role: "assistant",
+            time: {
+              created: Date.parse("2026-05-07T00:00:00.000Z"),
+              completed: Date.parse("2026-05-07T00:00:01.000Z"),
+            },
+            sessionID: "session-1",
+            finish: "stop",
+          },
+          parts: [
+            { type: "step-start" },
+            { type: "step-finish", reason: "stop" },
+          ],
+        }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      : createOpenCodeMessageResponse({
+          role: "assistant",
+          id: "msg-2",
+          text: "已恢复提交",
+        });
+  }) as unknown as typeof fetch, () =>
     withFastForwardedTimeouts(() => client.submitMessage("session-1", {
-      agent: "BA",
-      runtimeAgent: "BA-1",
-      content: "请整理需求",
-      allowedDecisionTriggers: [],
-    })),
-    /OpenCode 中止 session 失败: 500/,
-  );
+        agent: "BA",
+        runtimeAgent: "BA-1",
+        content: "请整理需求",
+        allowedDecisionTriggers: [],
+      }), 120_000));
 
+  assert.equal(result.finalMessage, "已恢复提交");
   assert.deepEqual(requestPathnames, [
     "/session/session-1/message",
     "/session/session-1/abort",
+    "/session/session-1/abort",
+    "/session/session-1/abort",
+    "/session/session-1/message",
   ]);
-  assert.deepEqual(
-    readTaskEventRecords(userDataPath, taskId, "opencode.abort_session_failed")
-      .map((record) => [record["sessionId"], record["status"], record["statusText"]]),
-    [["session-1", 500, "Internal Server Error"]],
-  );
-  assert.equal(readTaskEventRecords(userDataPath, taskId, "opencode.submit_message_retried").length, 0);
+  const retryAt = requestAt as [number, number, number, number, number];
+  assert.deepEqual([retryAt[2] - retryAt[1], retryAt[3] - retryAt[2]], [120_000, 120_000]);
+  const [firstAbortFailure, secondAbortFailure] = readTaskEventRecords(userDataPath, taskId, "opencode.request_failed") as [
+    Record<string, unknown>,
+    Record<string, unknown>,
+  ];
+  assert.equal(firstAbortFailure["status"], 500);
+  assert.equal(firstAbortFailure["statusText"], "Internal Server Error");
+  assert.equal(firstAbortFailure["message"], "OpenCode 中止 session 失败: 500");
+  assert.equal("status" in secondAbortFailure, false);
+  assert.equal("statusText" in secondAbortFailure, false);
+  assert.equal(secondAbortFailure["message"], "abort fetch failed");
+  assert.equal(readTaskEventRecords(userDataPath, taskId, "opencode.submit_message_retried").length, 1);
 });
 
-test("submitMessage abort 请求异常时会记录失败并停止重试", async () => {
+test("request 会在 abort 请求异常后持续重试直到成功", async () => {
+  const { client } = createClient();
+  const typed = client as OpenCodeClient & {
+    request: (pathname: TestRequestPathname, options: TestRequestOptions) => TestRequestResult;
+  };
+  const requestedUrls: string[] = [];
+  const requestAt: number[] = [];
+  let abortCount = 0;
+  await withMockedFetch((async (input: string | URL | Request) => {
+    const url = String(input);
+    requestedUrls.push(url);
+    requestAt.push(Date.now());
+    abortCount += 1;
+    if (abortCount === 1) {
+      throw new Error("abort fetch failed");
+    }
+    return new Response("", { status: 200 });
+  }) as unknown as typeof fetch, () =>
+    withFastForwardedTimeouts(() => typed.request("/session/session-1/abort", {
+      method: "POST",
+      body: "",
+    }, "OpenCode 中止 session 失败"), 120_000));
+
+  assert.deepEqual(requestedUrls, [
+    "http://127.0.0.1:43127/session/session-1/abort",
+    "http://127.0.0.1:43127/session/session-1/abort",
+  ]);
+  const retryAt = requestAt as [number, number];
+  assert.deepEqual([retryAt[1] - retryAt[0]], [120_000]);
+});
+
+test("request 会在 createSession 请求超时后持续重试直到拿到成功响应", async () => {
   const userDataPath = createTempDir();
-  const taskId = "task-submit-abort-error";
+  const taskId = "task-create-session-retry-target";
   initAppFileLogger(userDataPath);
   bindCurrentTaskLog(taskId);
   const { client } = createClient();
-  const requestPathnames: string[] = [];
-
-  client.request = async (pathname) => {
-    requestPathnames.push(pathname);
-    if (pathname === "/session/session-1/abort") {
-      throw new Error("abort fetch failed");
-    }
-    return new Response("server error", { status: 500 });
+  const typed = client as OpenCodeClient & {
+    request: (pathname: TestRequestPathname, options: TestRequestOptions) => TestRequestResult;
   };
+  let requestCount = 0;
+  const requestAt: number[] = [];
+  const response = await withMockedFetch((async () => {
+    requestCount += 1;
+    requestAt.push(Date.now());
+    if (requestCount === 1) {
+      throw new Error("OpenCode 请求超时: POST http://127.0.0.1:43127/session 超过 12000ms");
+    }
+    return new Response(JSON.stringify({ id: "session-recovered" }), { status: 200 });
+  }) as unknown as typeof fetch, () =>
+    withFastForwardedTimeouts(() => typed.request("/session", {
+        method: "POST",
+        body: JSON.stringify({ title: "demo" }),
+      }, "OpenCode 创建 session 失败"), 120_000));
+  assert.equal(response.status, 200);
 
-  await assert.rejects(
-    withFastForwardedTimeouts(() => client.submitMessage("session-1", {
-      agent: "BA",
-      runtimeAgent: "BA-1",
-      content: "请整理需求",
-      allowedDecisionTriggers: [],
-    })),
-    /abort fetch failed/,
-  );
+  assert.equal(requestCount, 2);
+  const retryAt = requestAt as [number, number];
+  assert.deepEqual([retryAt[1] - retryAt[0]], [120_000]);
+});
 
-  assert.deepEqual(requestPathnames, [
-    "/session/session-1/message",
-    "/session/session-1/abort",
-  ]);
+test("createSession 在响应格式无效时直接失败", async () => {
+  const userDataPath = createTempDir();
+  const taskId = "task-create-session-invalid-response";
+  initAppFileLogger(userDataPath);
+  bindCurrentTaskLog(taskId);
+  const { client } = createClient();
+  let requestCount = 0;
+  await withMockedFetch((async () => {
+    requestCount += 1;
+    return new Response("", { status: 200 });
+  }) as unknown as typeof fetch, () =>
+    assert.rejects(
+      client.createSession("demo"),
+      /OpenCode 创建 session 响应缺少有效的 session id/,
+    ));
+
+  assert.equal(requestCount, 1);
   assert.deepEqual(
-    readTaskEventRecords(userDataPath, taskId, "opencode.abort_session_failed")
-      .map((record) => [record["sessionId"], record["message"]]),
-    [["session-1", "abort fetch failed"]],
+    readTaskEventRecords(userDataPath, taskId, "opencode.create_session_invalid_response")
+      .map((record) => [record["title"], record["status"]]),
+    [["demo", 200]],
   );
-  assert.equal(readTaskEventRecords(userDataPath, taskId, "opencode.submit_message_retried").length, 0);
 });
 
 test("submitMessage 首次发送 5 分钟超时后会立刻重试", async () => {
@@ -453,8 +531,7 @@ test("submitMessage 首次发送 5 分钟超时后会立刻重试", async () => 
   bindCurrentTaskLog(taskId);
   const { client } = createClient();
   const requestPathnames: string[] = [];
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+  const result = await withMockedFetch((async (...args: Parameters<typeof fetch>) => {
     const url = args[0] instanceof Request ? args[0].url : String(args[0]);
     const pathname = new URL(url).pathname;
     requestPathnames.push(pathname);
@@ -475,30 +552,25 @@ test("submitMessage 首次发送 5 分钟超时后会立刻重试", async () => 
       id: "msg-2",
       text: "已恢复提交",
     });
-  }) as unknown as typeof fetch;
-
-  try {
-    const result = await withFastForwardedTimeouts(() => client.submitMessage("session-1", {
+  }) as unknown as typeof fetch, () =>
+    withFastForwardedTimeouts(() => client.submitMessage("session-1", {
       agent: "BA",
       runtimeAgent: "BA-1",
       content: "请整理需求",
       allowedDecisionTriggers: [],
-    }), 300_000);
+    }), 300_000));
 
-    assert.equal(result.finalMessage, "已恢复提交");
-    assert.deepEqual(requestPathnames, [
-      "/session/session-1/message",
-      "/session/session-1/abort",
-      "/session/session-1/message",
-    ]);
-    assert.deepEqual(
-      readTaskEventRecords(userDataPath, taskId, "opencode.submit_message_retried")
-        .map((record) => [record["runtimeAgent"], record["retryCount"], record["nextRetryCount"]]),
-      [["BA-1", 0, 1]],
-    );
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  assert.equal(result.finalMessage, "已恢复提交");
+  assert.deepEqual(requestPathnames, [
+    "/session/session-1/message",
+    "/session/session-1/message",
+  ]);
+  assert.equal(readTaskEventRecords(userDataPath, taskId, "opencode.submit_message_retried").length, 0);
+  assert.deepEqual(
+    readTaskEventRecords(userDataPath, taskId, "opencode.request_failed")
+      .map((record) => record["message"]),
+    ["OpenCode 请求超时: POST http://127.0.0.1:43127/session/session-1/message 超过 300000ms"],
+  );
 });
 
 test("submitMessage 正常完成时不打印 submitMessage 日志，且最终请求体不注入 system 字段", async () => {
@@ -591,9 +663,9 @@ test("submitMessage 在空 assistant final 后会重新发消息", async () => {
 
   assert.equal(result.finalMessage, "已恢复正式回复");
   assert.deepEqual(submittedContents, ["请整理需求", "生成完整回复"]);
-  const records = readTaskEventRecords(userDataPath, taskId, "opencode.execution_empty_final");
-  assert.equal(records.length, 1);
-  assert.equal(records[0]?.["messageId"], "msg-empty");
+  const [record] = readTaskEventRecords(userDataPath, taskId, "opencode.submit_message_retried") as [Record<string, unknown>];
+  assert.equal(record["retryCount"], 0);
+  assert.equal(record["reason"], "OpenCode 返回了空的 assistant 结果");
 });
 
 test("submitMessage 在 final 缺少 trigger 后会重新发完整回复要求", async () => {
@@ -635,13 +707,11 @@ test("submitMessage 在 final 缺少 trigger 后会重新发完整回复要求",
     "请继续判定",
     "生成完整回复",
   ]);
-  const records = readTaskEventRecords(userDataPath, taskId, "opencode.submit_message_missing_trigger");
-  assert.equal(records.length, 1);
-  assert.equal(records[0]?.["agent"], "TaskReview");
-  assert.equal(records[0]?.["runtimeAgent"], "TaskReview-2");
-  assert.equal(records[0]?.["retryCount"], 0);
-  assert.equal(records[0]?.["messageId"], "msg-1");
-  assert.deepEqual(records[0]?.["allowedDecisionTriggers"], ["<continue>", "<complete>"]);
+  const [record] = readTaskEventRecords(userDataPath, taskId, "opencode.submit_message_retried") as [Record<string, unknown>];
+  assert.equal(record["agent"], "TaskReview");
+  assert.equal(record["runtimeAgent"], "TaskReview-2");
+  assert.equal(record["retryCount"], 0);
+  assert.equal(record["reason"], "OpenCode 未返回需要的 trigger");
 });
 
 test("submitMessage 在 OpenCode error 消息后会记录错误并重新发消息", async () => {
@@ -691,68 +761,8 @@ test("submitMessage 在 OpenCode error 消息后会记录错误并重新发消�
   }));
 
   assert.equal(result.finalMessage, "已恢复");
-  const records = readTaskEventRecords(userDataPath, taskId, "opencode.execution_error_message");
-  assert.equal(records.length, 1);
-  assert.equal(records[0]?.["messageId"], "msg-error");
-  assert.equal(records[0]?.["reason"], "模型执行失败");
-});
-
-test("createSession throws when the response is missing a session id", async () => {
-  const { client } = createClient();
-  client.request = async () => new Response("", { status: 200 });
-
-  await assert.rejects(
-    client.createSession("demo"),
-    /session id/,
-  );
-});
-
-test("createSession logs invalid responses into the task log file", async () => {
-  const userDataPath = createTempDir();
-  const taskId = "task-123";
-  initAppFileLogger(userDataPath);
-  bindCurrentTaskLog(taskId);
-
-  const client = new OpenCodeClient({
-    server: createDetachedServeHandle(43127),
-  }) as OpenCodeClient & {
-    request: (pathname: TestRequestPathname, options: TestRequestOptions) => TestRequestResult;
-  };
-  client.request = async () => new Response("", { status: 200 });
-
-  await assert.rejects(
-    client.createSession("demo"),
-    /session id/,
-  );
-
-  const lines = fs.readFileSync(buildTaskLogFilePath(userDataPath, taskId), "utf8").trim().split("\n");
-  const record = JSON.parse(lines.at(-1) || "{}") as Record<string, unknown>;
-  assert.equal(record["event"], "opencode.create_session_invalid_response");
-  assert.equal(record["taskId"], taskId);
-});
-
-test("createSession 在响应体不是合法 JSON 时仍走 invalid response 分支并记录日志", async () => {
-  const userDataPath = createTempDir();
-  const taskId = "task-malformed";
-  initAppFileLogger(userDataPath);
-  bindCurrentTaskLog(taskId);
-
-  const client = new OpenCodeClient({
-    server: createDetachedServeHandle(43127),
-  }) as OpenCodeClient & {
-    request: (pathname: TestRequestPathname, options: TestRequestOptions) => TestRequestResult;
-  };
-  client.request = async () => new Response("oops", { status: 200 });
-
-  await assert.rejects(
-    client.createSession("demo"),
-    /session id/,
-  );
-
-  const lines = fs.readFileSync(buildTaskLogFilePath(userDataPath, taskId), "utf8").trim().split("\n");
-  const record = JSON.parse(lines.at(-1) || "{}") as Record<string, unknown>;
-  assert.equal(record["event"], "opencode.create_session_invalid_response");
-  assert.equal(record["taskId"], taskId);
+  const [record] = readTaskEventRecords(userDataPath, taskId, "opencode.submit_message_retried") as [Record<string, unknown>];
+  assert.equal(record["reason"], "OpenCode 最终消息包含错误");
 });
 
 test("session message 请求注入 5 分钟 AbortSignal，确保首次发送卡住后进入重试", async () => {
@@ -761,10 +771,9 @@ test("session message 请求注入 5 分钟 AbortSignal，确保首次发送卡�
     request: (pathname: TestRequestPathname, options: TestRequestOptions) => TestRequestResult;
   };
 
-  const originalFetch = globalThis.fetch;
   const fallbackSignal = new AbortController().signal;
   let capturedSignal: AbortSignal = fallbackSignal;
-  globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+  await withMockedFetch((async (...args: Parameters<typeof fetch>) => {
     const requestInit = args[1];
     capturedSignal = typeof requestInit === "object"
       && requestInit
@@ -773,16 +782,12 @@ test("session message 请求注入 5 分钟 AbortSignal，确保首次发送卡�
       ? requestInit.signal
       : fallbackSignal;
     return new Response("", { status: 200 });
-  }) as unknown as typeof fetch;
-
-  try {
+  }) as unknown as typeof fetch, async () => {
     await typed.request("/session/session-1/message", {
       method: "POST",
       body: JSON.stringify({ parts: [] }),
     });
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  });
 
   assert.notEqual(capturedSignal, fallbackSignal);
 });
@@ -815,27 +820,61 @@ test("listSessionActivities 会保留工具参数中的 0 和 false", async () =
   const activities = await client.listSessionActivities("session-1");
 
   assert.equal(activities.length, 1);
-  assert.equal(activities[0]?.kind, "tool");
-  assert.equal(activities[0]?.detail, "参数: offset=0, recursive=false, pattern=TODO");
+  const [activity] = activities as [OpenCodeSessionActivity];
+  assert.equal(activity.kind, "tool");
+  assert.equal(activity.detail, "参数: offset=0, recursive=false, pattern=TODO");
 });
 
-test("createSession 超时后不应重启 runtime，也不应自动重试", async () => {
+test("listSessionActivities 会重试直到拿到消息数组", async () => {
   const { client } = createClient();
-  const typed = client as OpenCodeClient & {
-    request: (pathname: TestRequestPathname, options: TestRequestOptions) => TestRequestResult;
-  };
-
   let requestCount = 0;
-  typed.request = async () => {
+  const requestAt: number[] = [];
+  const activities = await withMockedFetch((async () => {
     requestCount += 1;
-    throw new Error("OpenCode 请求超时: POST http://127.0.0.1:43127/session 超过 12000ms");
-  };
+    requestAt.push(Date.now());
+    if (requestCount === 1) {
+      throw new Error("OpenCode 请求超时: GET http://127.0.0.1:43127/session/session-1/message?limit=100 超过 12000ms");
+    }
+    return new Response(JSON.stringify([{
+      id: "msg-tool-retry",
+      role: "assistant",
+      createdAt: "2026-04-21T12:52:26.000Z",
+      completedAt: "2026-04-21T12:52:26.000Z",
+      parts: [{
+        type: "tool",
+        tool: "grep",
+        state: {
+          input: {
+            pattern: "TODO",
+          },
+        },
+      }],
+    }]), { status: 200 });
+  }) as unknown as typeof fetch, () =>
+    withFastForwardedTimeouts(() => client.listSessionActivities("session-1"), 120_000));
 
-  await assert.rejects(
-    client.createSession("demo"),
-    /请求超时/,
-  );
-  assert.equal(requestCount, 1);
+  assert.equal(activities.length, 1);
+  const [activity] = activities as [OpenCodeSessionActivity];
+  assert.equal(activity.kind, "tool");
+  assert.equal(requestCount, 2);
+  const retryAt = requestAt as [number, number];
+  assert.deepEqual([retryAt[1] - retryAt[0]], [120_000]);
+});
+
+test("createSession 超时后不重启 runtime，并持续重试直到拿到 session id", async () => {
+  const { client } = createClient();
+  let requestCount = 0;
+  const sessionId = await withMockedFetch((async () => {
+    requestCount += 1;
+    if (requestCount === 1) {
+      throw new Error("OpenCode 请求超时: POST http://127.0.0.1:43127/session 超过 12000ms");
+    }
+    return new Response(JSON.stringify({ id: "session-after-timeout" }), { status: 200 });
+  }) as unknown as typeof fetch, () =>
+    withFastForwardedTimeouts(() => client.createSession("demo"), 120_000));
+
+  assert.equal(sessionId, "session-after-timeout");
+  assert.equal(requestCount, 2);
 });
 
 test("getAttachBaseUrl 只读取已经启动的 serve 地址", async () => {

@@ -68,8 +68,6 @@ type RequestOptions =
       body: string;
     };
 
-class RetryableSubmitMessageError extends Error {}
-
 class RetryableExecutionResultError extends Error {}
 export class OpenCodeClient {
   readonly host = "127.0.0.1";
@@ -85,16 +83,7 @@ export class OpenCodeClient {
     const response = await this.request("/session", {
       method: "POST",
       body: JSON.stringify({ title }),
-    });
-
-    if (!response.ok) {
-      appendAppLog("error", "opencode.create_session_failed", {
-        title,
-        status: response.status,
-        statusText: response.statusText,
-      });
-      throw new Error(`OpenCode 创建 session 失败: ${response.status}`);
-    }
+    }, "OpenCode 创建 session 失败");
 
     try {
       const data = this.expectRecord(
@@ -136,56 +125,13 @@ export class OpenCodeClient {
               },
             ],
           }),
-        }).catch((error) => {
-          const message = String(error);
-          appendAppLog("error", "opencode.submit_message_request_error", {
-            sessionId,
-            agent: opencodeAgent,
-            runtimeAgent,
-            retryCount,
-            message,
-          });
-          throw new RetryableSubmitMessageError(message);
-        });
-
-        if (!response.ok) {
-          appendAppLog("error", "opencode.submit_message_failed", {
-            sessionId,
-            agent: opencodeAgent,
-            runtimeAgent,
-            retryCount,
-            status: response.status,
-            statusText: response.statusText,
-          });
-          throw new RetryableSubmitMessageError(`OpenCode 请求失败: ${response.status}`);
-        }
-
-        const parsedMessage = await this.readJsonResponse(response)
+        }, "OpenCode 请求失败");
+        const message = await this.readJsonResponse(response)
           .then((raw) => this.parseMessageEnvelope(raw, opencodeAgent, "OpenCode 提交消息响应"))
-          .then((message) => ({
-            kind: "valid" as const,
-            message,
-          }))
-          .catch(() => ({
-            kind: "invalid" as const,
-          }));
-        if (parsedMessage.kind === "invalid") {
-          appendAppLog("error", "opencode.submit_message_invalid_response", {
-            sessionId,
-            agent: opencodeAgent,
-            runtimeAgent,
-            retryCount,
-            status: response.status,
-            statusText: response.statusText,
+          .catch(() => {
+            throw new Error("OpenCode 提交消息响应缺少有效的消息实体");
           });
-          throw new RetryableSubmitMessageError("OpenCode 提交消息响应缺少有效的消息实体");
-        }
-
-        const result = this.buildExecutionResult(sessionId, parsedMessage.message, {
-          agent: opencodeAgent,
-          runtimeAgent,
-          retryCount,
-        });
+        const result = this.buildExecutionResult(sessionId, message);
         if (payload.allowedDecisionTriggers.length > 0) {
           const parsedDecision = parseDecision(
             result.finalMessage,
@@ -193,25 +139,17 @@ export class OpenCodeClient {
             payload.allowedDecisionTriggers,
           );
           if (parsedDecision.kind !== "valid") {
-            appendAppLog("warn", "opencode.submit_message_missing_trigger", {
-              sessionId,
-              agent: opencodeAgent,
-              runtimeAgent,
-              retryCount,
-              messageId: result.messageId,
-              allowedDecisionTriggers: payload.allowedDecisionTriggers,
-            });
-            throw new RetryableSubmitMessageError(`OpenCode 未返回需要的 trigger: ${payload.allowedDecisionTriggers.join(" / ")}`);
+            throw new RetryableExecutionResultError("OpenCode 未返回需要的 trigger");
           }
         }
         return result;
       } catch (error) {
-        if (!(error instanceof RetryableSubmitMessageError) && !(error instanceof RetryableExecutionResultError)) {
+        if (!(error instanceof RetryableExecutionResultError)) {
           throw error;
         }
         const retryReason = error.message;
         const nextContent = "生成完整回复";
-        await this.abortSession(sessionId);
+        await this.abortSessionOnce(sessionId);
         this.logRetriedMessageResend(sessionId, opencodeAgent, runtimeAgent, retryReason, retryCount, nextContent);
         if (retryCount > 0) {
           await new Promise((resolve) => setTimeout(resolve, RETRYABLE_CLIENT_INTERVAL_MS));
@@ -222,14 +160,10 @@ export class OpenCodeClient {
 
     return attempt(payload.content, 0);
   }
-
   async listSessionActivities(sessionId: string): Promise<OpenCodeSessionActivity[]> {
     const response = await this.request(`/session/${sessionId}/message?limit=${MAX_SESSION_ACTIVITY_MESSAGES}`, {
       method: "GET",
-    });
-    if (!response.ok) {
-      throw new Error(`OpenCode 会话消息查询失败: ${response.status}`);
-    }
+    }, "OpenCode 会话消息查询失败");
     const parsed = await this.readJsonResponse(response);
     if (!Array.isArray(parsed)) {
       throw new Error("OpenCode 会话消息响应必须是数组");
@@ -237,63 +171,25 @@ export class OpenCodeClient {
     return this.buildSessionActivities(sessionId, parsed);
   }
 
-  private async abortSession( sessionId: string ): Promise<void> {
-    const response = await this.request(`/session/${sessionId}/abort`, {
+  private async abortSessionOnce(sessionId: string): Promise<void> {
+    await this.request(`/session/${sessionId}/abort`, {
       method: "POST",
       body: "",
-    }).catch((error) => {
-      appendAppLog("error", "opencode.abort_session_failed", {
-        sessionId,
-        message: error instanceof Error ? error.message : String(error),
-      });
-      throw error;
-    });
-    if (response.ok) {
-      return;
-    }
-
-    appendAppLog("error", "opencode.abort_session_failed", {
-      sessionId,
-      status: response.status,
-      statusText: response.statusText,
-    });
-    throw new Error(`OpenCode 中止 session 失败: ${response.status}`);
+    }, "OpenCode 中止 session 失败");
   }
 
   private buildExecutionResult(
     sessionId: string,
     message: OpenCodeNormalizedMessage,
-    logContext: {
-      agent: string;
-      runtimeAgent: string;
-      retryCount: number;
-    },
   ): OpenCodeExecutionResult {
     const finalMessage = this.messageHasError(message.raw)
       ? this.readMessageError(message.raw, `OpenCode session ${sessionId} 最终消息`)
       : message.content;
     if (!finalMessage.trim()) {
-      const reason = this.buildEmptyAssistantResultError(sessionId, message);
-      appendAppLog("warn", "opencode.execution_empty_final", {
-        sessionId,
-        agent: logContext.agent,
-        runtimeAgent: logContext.runtimeAgent,
-        retryCount: logContext.retryCount,
-        messageId: message.id,
-        reason,
-      });
-      throw new RetryableExecutionResultError(reason);
+      throw new RetryableExecutionResultError("OpenCode 返回了空的 assistant 结果");
     }
     if (this.messageHasError(message.raw)) {
-      appendAppLog("error", "opencode.execution_error_message", {
-        sessionId,
-        agent: logContext.agent,
-        runtimeAgent: logContext.runtimeAgent,
-        retryCount: logContext.retryCount,
-        messageId: message.id,
-        reason: finalMessage,
-      });
-      throw new RetryableExecutionResultError(finalMessage);
+      throw new RetryableExecutionResultError("OpenCode 最终消息包含错误");
     }
 
     return {
@@ -311,7 +207,7 @@ export class OpenCodeClient {
     reason: string,
     retryCount: number,
     nextContent: string,
-  ) {
+    ) {
     const message = `Agent ${runtimeAgent}: ${reason}异常，将重新发送消息`;
     appendAppLog("warn", "opencode.submit_message_retried", {
       sessionId,
@@ -658,6 +554,7 @@ export class OpenCodeClient {
   protected async request(
     pathname: string,
     options: RequestOptions,
+    errorPrefix = "OpenCode 请求失败",
   ): Promise<Response> {
     const headers: Record<string, string> = {};
     if (options.method === "POST" && options.body.length > 0) {
@@ -672,19 +569,29 @@ export class OpenCodeClient {
     if (options.method === "POST" && options.body.length > 0) {
       requestInit.body = options.body;
     }
-    try {
-      return await this.fetchWithTimeout(url, requestInit, {
+    const response = await this.fetchWithTimeout(url, requestInit, {
         pathname,
         method: options.method,
-      });
-    } catch (error) {
+      }).catch(async (error) => {
       appendAppLog("error", "opencode.request_failed", {
         method: options.method,
         url,
         message: error instanceof Error ? error.message : String(error),
       });
-      throw error;
+      await new Promise((resolve) => setTimeout(resolve, RETRYABLE_CLIENT_INTERVAL_MS));
+      return this.request(pathname, options, errorPrefix);
+    });
+    if (response.ok) {
+      return response;
     }
+    const message = `${errorPrefix}: ${response.status}`;
+    appendAppLog("error", "opencode.request_failed", {
+      status: response.status,
+      statusText: response.statusText,
+      message,
+    });
+    await new Promise((resolve) => setTimeout(resolve, RETRYABLE_CLIENT_INTERVAL_MS));
+    return this.request(pathname, options, errorPrefix);
   }
 
   private async fetchWithTimeout(
@@ -823,28 +730,6 @@ export class OpenCodeClient {
         : this.readRequiredTrimmedString(envelope["text"], `${context}.text`);
     }
     return "";
-  }
-
-  private buildEmptyAssistantResultError(
-    sessionId: string,
-    message: OpenCodeNormalizedMessage,
-  ): string {
-    const record = this.expectRecord(message.raw, `OpenCode session ${sessionId} assistant 消息`);
-    const info = "info" in record
-      ? this.expectRecord(record["info"], `OpenCode session ${sessionId} assistant 消息.info`)
-      : record;
-    const parts = Array.isArray(record["parts"])
-      ? record["parts"].map((part, index) =>
-          this.expectRecord(part, `OpenCode session ${sessionId} assistant 消息.parts[${index}]`))
-      : [];
-    const finish = typeof info["finish"] === "string" && info["finish"].trim()
-      ? info["finish"].trim()
-      : "unknown";
-    const partTypes = parts
-      .map((part) => (typeof part["type"] === "string" ? part["type"].trim() : ""))
-      .filter(Boolean);
-    const partSummary = partTypes.length > 0 ? partTypes.join(",") : "none";
-    return `OpenCode session ${sessionId} 返回了空的 assistant 结果: messageId=${message.id}, finish=${finish}, partTypes=${partSummary}`;
   }
 
   private buildSessionActivities(sessionId: string, messages: unknown[]): OpenCodeSessionActivity[] {
