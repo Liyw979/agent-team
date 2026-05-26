@@ -1,6 +1,7 @@
 // 2026-05-26: 用户要求将非 session message 长请求的默认短超时从 12 秒调整为 30 秒。
 // 用户要求：submit message 的每次重试前必须先调用 abort，避免旧 OpenCode session 运行状态导致再次提交卡死。
 // 2026-05-26: 用户要求每次发送 OpenCode 请求都必须记录到当前 Task log 文件。
+// 2026-05-26: 用户要求网络日志只写入文件，不输出到控制台。
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -294,6 +295,8 @@ test("submitMessage 请求级失败由 submit 重试接管且每次重试前先 
     "/session/session-1/message",
   ]);
   const stdoutRecords = stdout.trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+  assert.equal(stdoutRecords.some((record) => record["event"] === "opencode.request_sent"), false);
+  assert.equal(stdoutRecords.some((record) => record["event"] === "opencode.request_failed"), false);
   assert.deepEqual(
     stdoutRecords
       .filter((record) => record["event"] === "opencode.submit_message_retried")
@@ -530,7 +533,7 @@ test("submitMessage 首次发送 5 分钟超时后会立刻重试", async () => 
   );
 });
 
-test("submitMessage 正常完成时不打印 submitMessage 日志，且最终请求体不注入 system 字段", async () => {
+test("submitMessage 正常完成时不打印网络日志，且最终请求体不注入 system 字段", async () => {
   const userDataPath = createTempDir();
   const taskId = "task-submit-success";
   initAppFileLogger(userDataPath);
@@ -557,11 +560,7 @@ test("submitMessage 正常完成时不打印 submitMessage 日志，且最终请
       allowedDecisionTriggers: [],
     })));
 
-  const stdoutRecords = stdout.trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
-  assert.deepEqual(stdoutRecords.map((record) => record["event"]), [
-    "opencode.request_sent",
-    "opencode.request_sent",
-  ]);
+  assert.equal(stdout, "");
   assert.deepEqual(readTaskRecords(userDataPath, taskId).map((record) => record["event"]), [
     "opencode.request_sent",
     "opencode.request_sent",

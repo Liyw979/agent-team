@@ -2,8 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { toUtcIsoTimestamp } from "@shared/types";
 
+// 2026-05-26: 用户要求网络日志只写入文件，不输出到控制台。
 let appLogRootPath = "";
 let currentTaskLogId = "";
+
+type AppLogOutput = "file-and-stdout" | "file-only";
 
 export function buildTaskLogFilePath(userDataPath: string, taskId: string) {
   return path.join(userDataPath, "logs", "tasks", `${taskId}.log`);
@@ -28,6 +31,7 @@ export function appendAppLog(
   level: "info" | "warn" | "error",
   event: string,
   payload: Record<string, unknown>,
+  output: AppLogOutput = "file-and-stdout",
 ) {
   if (!appLogRootPath) {
     throw new Error("应用日志目录尚未初始化");
@@ -48,5 +52,7 @@ export function appendAppLog(
   fs.mkdirSync(path.dirname(appLogFilePath), { recursive: true });
   const line = `${JSON.stringify(record)}\n`;
   fs.appendFileSync(appLogFilePath, line, "utf8");
-  process.stdout.write(line);
+  if (output === "file-and-stdout") {
+    process.stdout.write(line);
+  }
 }
