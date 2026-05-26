@@ -1,3 +1,4 @@
+// 2026-05-26: 用户要求将非 session message 长请求的默认短超时从 12 秒调整为 30 秒。
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -494,7 +495,7 @@ test("request 会在 createSession 请求超时后持续重试直到拿到成功
     requestCount += 1;
     requestAt.push(Date.now());
     if (requestCount === 1) {
-      throw new Error("OpenCode 请求超时: POST http://127.0.0.1:43127/session 超过 12000ms");
+      throw new Error("OpenCode 请求超时: POST http://127.0.0.1:43127/session 超过 30000ms");
     }
     return new Response(JSON.stringify({ id: "session-recovered" }), { status: 200 });
   }) as unknown as typeof fetch, () =>
@@ -876,7 +877,7 @@ test("listSessionActivities 会重试直到拿到消息数组", async () => {
     requestCount += 1;
     requestAt.push(Date.now());
     if (requestCount === 1) {
-      throw new Error("OpenCode 请求超时: GET http://127.0.0.1:43127/session/session-1/message?limit=100 超过 12000ms");
+      throw new Error("OpenCode 请求超时: GET http://127.0.0.1:43127/session/session-1/message?limit=100 超过 30000ms");
     }
     return new Response(JSON.stringify([{
       id: "msg-tool-retry",
@@ -910,7 +911,7 @@ test("createSession 超时后不重启 runtime，并持续重试直到拿到 ses
   const sessionId = await withMockedFetch((async () => {
     requestCount += 1;
     if (requestCount === 1) {
-      throw new Error("OpenCode 请求超时: POST http://127.0.0.1:43127/session 超过 12000ms");
+      throw new Error("OpenCode 请求超时: POST http://127.0.0.1:43127/session 超过 30000ms");
     }
     return new Response(JSON.stringify({ id: "session-after-timeout" }), { status: 200 });
   }) as unknown as typeof fetch, () =>

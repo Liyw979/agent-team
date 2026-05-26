@@ -1,4 +1,5 @@
-const SESSION_CREATE_TIMEOUT_MS = 12_000;
+// 2026-05-26: 用户要求将非 session message 长请求的默认短超时从 12 秒调整为 30 秒。
+const SESSION_CREATE_TIMEOUT_MS = 30_000;
 const SESSION_MESSAGE_TIMEOUT_MS = 300_000;
 
 export interface ResolveOpenCodeRequestTimeoutInput {
