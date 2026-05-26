@@ -6,7 +6,6 @@ import {
   buildInjectedConfigFromAgents,
   extractDslAgentsFromTopology,
   resolveProjectAgents,
-  validateProjectAgents,
 } from "./project-agent-source";
 
 test("resolveProjectAgents 在存在 DSL agents 时直接返回 DSL prompt", () => {
@@ -29,10 +28,6 @@ test("resolveProjectAgents 在不存在 DSL agents 时不再回退到用户自�
   });
 
   assert.deepEqual(resolved, []);
-});
-
-test("validateProjectAgents 允许多个可写 Agent", () => {
-  assert.doesNotThrow(() => validateProjectAgents());
 });
 
 test("extractDslAgentsFromTopology 不会把未显式配置 writable 的 Build 视为默认可写", () => {

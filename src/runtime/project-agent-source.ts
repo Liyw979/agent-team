@@ -1,3 +1,8 @@
+/**
+ * 要求记录：
+ * 1. 拓扑中的 writable 完全由 YAML 显式声明决定，允许多个 Agent 同时可写。
+ * 2. 设计与修改时先读取本注释，保持最小改动范围，避免回退到隐式默认或兼容性补丁。
+ */
 import {
   type AgentRecord,
   getTopologyNodeRecords,
@@ -13,10 +18,6 @@ export function resolveProjectAgents(input: {
     return input.dslAgents.map((agent) => ({ ...agent }));
   }
   return [];
-}
-
-export function validateProjectAgents(): void {
-  // 拓扑中的 writable 现在完全由 YAML 显式声明，允许多个 Agent 同时可写。
 }
 
 type OpenCodePermissionValue =

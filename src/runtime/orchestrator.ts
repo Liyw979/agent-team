@@ -78,7 +78,6 @@ import { bindCurrentTaskLog } from "./app-log";
 import {
   extractDslAgentsFromTopology,
   resolveProjectAgents,
-  validateProjectAgents,
 } from "./project-agent-source";
 
 type GroupRuleInputBase = Omit<GroupRule, "report">;
@@ -347,7 +346,6 @@ export class Orchestrator {
 
   async submitTask(payload: SubmitTaskPayload): Promise<TaskSnapshot> {
     const agents = this.listWorkspaceAgents();
-    validateProjectAgents();
     this.syncTopology(agents);
     const topology = this.store.getTopology();
     const defaultTarget = resolvePrimaryTopologyStartTarget(topology);
@@ -390,7 +388,6 @@ export class Orchestrator {
 
   async initializeTask(): Promise<TaskSnapshot> {
     const agents = this.listWorkspaceAgents();
-    validateProjectAgents();
     this.syncTopology(agents);
 
     return this.createTask(agents, {
