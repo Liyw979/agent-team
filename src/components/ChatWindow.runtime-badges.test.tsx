@@ -308,6 +308,7 @@ function createWorkspaceAndTask(): {
         status: "completed",
         routingKind: "default",
         rawResponse: "发现第 1 个可疑点：这里需要进入对抗讨论。",
+        senderDisplayName: "线索发现",
       },
     ],
     topology,
@@ -351,6 +352,7 @@ test("ChatWindow 只根据消息流展示运行中面板与最终消息", async 
         status: "error",
         routingKind: "invalid",
         rawResponse: "QA 校验失败",
+        senderDisplayName: "QA",
       },
     ],
   };

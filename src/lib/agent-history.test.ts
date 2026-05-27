@@ -44,6 +44,7 @@ function createAgentFinalMessage(
     runCount: input.runCount ?? 1,
     rawResponse: input.content,
     status: input.status ?? "completed",
+    senderDisplayName: input.sender,
   };
   return input.routingKind === "triggered"
     ? {
@@ -358,6 +359,7 @@ test("buildAgentHistoryItems 遇到多个同名 allowed tag 时保留 rawRespons
       runCount: 1,
       rawResponse: "<continue>请检查示例 <continue>done</continue> 是否出现在文档中</continue>",
       status: "completed",
+      senderDisplayName: "TaskReview",
       routingKind: "triggered",
       trigger: "<continue>",
     },
@@ -393,6 +395,7 @@ test("buildAgentHistoryItems 遇到开头多个同名 allowed tag 时保留 rawR
       runCount: 1,
       rawResponse: "<continue><continue>done</continue> 是示例</continue>",
       status: "completed",
+      senderDisplayName: "TaskReview",
       routingKind: "triggered",
       trigger: "<continue>",
     },
@@ -426,6 +429,7 @@ test("buildAgentHistoryItems 只移除 rawResponse 里的 trigger 标签", () =>
       timestamp: toUtcIsoTimestamp("2026-04-20T09:05:00.000Z"),
       kind: "agent-final",
       runCount: 1,
+      senderDisplayName: "TaskReview",
       rawResponse: "<continue>请继续补证。\nNEXT_AGENTS: Build\nTASK_DONE\nSESSION_REF: abc</continue>",
       status: "completed",
       routingKind: "triggered",

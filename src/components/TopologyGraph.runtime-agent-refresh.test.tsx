@@ -123,6 +123,7 @@ function createFinalMessage(input:
     id: input.id,
     taskId: TASK_ID,
     sender: input.sender,
+    senderDisplayName: input.sender,
     content: input.content,
     timestamp: toUtcIsoTimestamp(input.timestamp),
     kind: "agent-final" as const,
@@ -354,6 +355,7 @@ test("TopologyGraph 会继续展示刚完成的运行实例", async () => {
         routingKind: "triggered",
         trigger: "<continue>",
         rawResponse: "误报论证-1 请求继续论证。",
+        senderDisplayName: "误报论证-1",
       },
     ],
   });
@@ -565,6 +567,7 @@ test("TopologyGraph 不再展示节点全屏与详情交互", async () => {
         status: "completed",
         routingKind: "default",
         rawResponse: "最终结果消息",
+        senderDisplayName: "线索发现",
       },
     ],
   });
@@ -610,6 +613,7 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
     status: "completed" as const,
     routingKind: "default" as const,
     rawResponse: `第 ${index + 1} 条最终结果消息 ${"路径/说明 ".repeat(8)}`,
+    senderDisplayName: "线索发现",
   }));
   const task = createTask({
     taskId: TASK_ID,
@@ -645,6 +649,7 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
         status: "completed",
         routingKind: "default",
         rawResponse: "短消息。",
+        senderDisplayName: "误报论证",
       },
     ],
   });
@@ -705,6 +710,7 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
             status: "completed",
             routingKind: "default",
             rawResponse: "第 11 条最终结果消息 路径/说明 路径/说明 路径/说明",
+            senderDisplayName: "线索发现",
           },
         ],
       }),
@@ -744,6 +750,7 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
             status: "completed",
             routingKind: "default",
             rawResponse: "第 11 条最终结果消息 路径/说明 路径/说明 路径/说明",
+            senderDisplayName: "线索发现",
           },
           {
             id: "runtime-final-12",
@@ -756,6 +763,7 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
             status: "completed",
             routingKind: "default",
             rawResponse: "第 12 条最终结果消息 路径/说明 路径/说明 路径/说明",
+            senderDisplayName: "线索发现",
           },
         ],
       }),

@@ -107,6 +107,7 @@ function createMessage(input: TestMessageInput): MessageRecord {
         runCount: 1,
         status: "completed" as const,
         rawResponse: input.response.kind === "raw" ? input.response.rawResponse : input.content,
+        senderDisplayName: input.sender,
       };
       return input.routingKind === "triggered"
         ? {
@@ -135,6 +136,7 @@ function createMessage(input: TestMessageInput): MessageRecord {
         runCount: input.runCount,
         status: "completed" as const,
         rawResponse: input.response.kind === "raw" ? input.response.rawResponse : input.content,
+        senderDisplayName: input.sender,
       };
       return input.routingKind === "triggered"
         ? {
@@ -163,6 +165,7 @@ function createMessage(input: TestMessageInput): MessageRecord {
         targetAgentIds: input.targetAgentIds,
         targetRunCounts: input.targetAgentIds.map((_value, index) => index + 1),
         dispatchDisplayContent: input.content,
+        senderDisplayName: input.sender,
       };
     case "agent-dispatch-with-runs":
       return {
@@ -175,6 +178,7 @@ function createMessage(input: TestMessageInput): MessageRecord {
         targetAgentIds: input.targetAgentIds,
         targetRunCounts: input.targetRunCounts,
         dispatchDisplayContent: input.content,
+        senderDisplayName: input.sender,
       };
     case "user":
       return {

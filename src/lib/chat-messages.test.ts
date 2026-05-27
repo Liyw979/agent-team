@@ -17,6 +17,7 @@ function createAgentFinalMessage(content: string): AgentFinalMessageRecord {
     runCount: 1,
     status: "completed",
     rawResponse: content,
+    senderDisplayName: "Build",
     routingKind: "default",
   };
 }
@@ -32,6 +33,7 @@ function createAgentDispatchMessage(content: string): AgentDispatchMessageRecord
     targetAgentIds: ["Review"],
     targetRunCounts: [1],
     dispatchDisplayContent: content,
+    senderDisplayName: "Build",
   };
 }
 

@@ -42,6 +42,7 @@ function createSystemMessage(id: string, sender: "system" | "BA", content: strin
     status: "completed",
     routingKind: "default",
     rawResponse: content,
+    senderDisplayName: sender,
   };
 }
 

@@ -35,9 +35,6 @@ type AgentFinalMessageInput = AgentFinalMessageInputBase & (
 
 function createAgentFinalMessage(input: AgentFinalMessageInput): AgentFinalMessageRecord {
   const rawResponse = input.response.kind === "raw" ? input.response.rawResponse : input.content;
-  const displayName = input.displayName.kind === "custom"
-    ? { senderDisplayName: input.displayName.value }
-    : {};
   const base: Omit<AgentFinalMessageRecord, "routingKind" | "trigger"> = {
     id: input.id,
     taskId: TASK_ID,
@@ -48,7 +45,9 @@ function createAgentFinalMessage(input: AgentFinalMessageInput): AgentFinalMessa
     runCount: 1,
     status: "completed",
     rawResponse,
-    ...displayName,
+    senderDisplayName: input.displayName.kind === "custom"
+      ? input.displayName.value
+      : input.sender,
   };
   if (input.routingKind === "triggered") {
     return {
@@ -83,6 +82,7 @@ function createAgentDispatchMessage(input: {
     targetAgentIds: input.targetAgentIds,
     targetRunCounts: input.targetAgentIds.map(() => 1),
     dispatchDisplayContent: input.displayContent.kind === "custom" ? input.displayContent.value : input.content,
+    senderDisplayName: input.sender,
   };
 }
 

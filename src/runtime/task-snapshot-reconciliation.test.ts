@@ -39,6 +39,7 @@ function createAgentFinalMessage(
     runCount: input.runCount ?? 1,
     status: input.status ?? "completed",
     rawResponse: input.content,
+    senderDisplayName: input.sender,
   };
   return input.routingKind === "triggered"
     ? {

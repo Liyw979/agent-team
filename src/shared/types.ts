@@ -442,7 +442,7 @@ type AgentFinalMessageRecordBase = BaseMessageRecord & {
   runCount: number;
   rawResponse: string;
   status: "completed" | "error";
-  senderDisplayName?: string;
+  senderDisplayName: string;
 };
 
 export type AgentFinalMessageRecord =
@@ -459,7 +459,7 @@ export interface AgentDispatchMessageRecord extends BaseMessageRecord {
   targetAgentIds: string[];
   targetRunCounts: number[];
   dispatchDisplayContent: string;
-  senderDisplayName?: string;
+  senderDisplayName: string;
 }
 
 export interface TaskCompletedMessageRecord extends BaseMessageRecord {
