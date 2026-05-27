@@ -43,6 +43,7 @@ function createSystemMessage(id: string, sender: "system" | "BA", content: strin
     routingKind: "default",
     responseNote: "",
     rawResponse: content,
+    senderDisplayName: sender,
   };
 }
 

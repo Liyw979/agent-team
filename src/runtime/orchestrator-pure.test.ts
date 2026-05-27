@@ -96,6 +96,7 @@ function createAgentFinalMessage(input: {
     status: "completed",
     responseNote: "",
     rawResponse: input.content,
+    senderDisplayName: input.sender,
   };
   return input.routingKind === "invalid"
     ? {
@@ -123,6 +124,7 @@ function createAgentDispatchMessage(input: {
     targetAgentIds: input.targetAgentIds,
     targetRunCounts: input.targetAgentIds.map(() => 1),
     dispatchDisplayContent: input.content,
+    senderDisplayName: input.sender,
   };
 }
 

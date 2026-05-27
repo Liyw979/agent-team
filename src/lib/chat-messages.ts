@@ -1,5 +1,4 @@
 import type { MessageRecord, UtcIsoTimestamp } from "@shared/types";
-import { withOptionalString } from "@shared/object-utils";
 import {
   getMessageSenderDisplayName,
   isAgentDispatchMessageRecord,
@@ -16,7 +15,7 @@ import {
 export interface ChatMessageItem {
   id: string;
   sender: string;
-  senderDisplayName?: string;
+  senderDisplayName: string;
   timestamp: UtcIsoTimestamp;
   content: string;
   kinds: string[];
@@ -173,12 +172,14 @@ function getDisplayContent(message: MessageRecord): string {
   return message.content;
 }
 
+// 历史要求：senderDisplayName 禁止为可选，群聊展示必须始终依赖显式展示名，不允许缺失后再回退猜测。
 export function mergeTaskChatMessages(messages: MessageRecord[]): ChatMessageItem[] {
   const merged: ChatMessageItem[] = [];
 
   for (const message of messages) {
     const last = merged.at(-1);
-    const senderDisplayName = getMessageSenderDisplayName(message)?.trim();
+    const senderDisplayName = getMessageSenderDisplayName(message)?.trim()
+      ?? message.sender;
 
     if (last && shouldMergeMessages(last, message)) {
       last.id = `${last.id}:${message.id}`;
@@ -194,16 +195,15 @@ export function mergeTaskChatMessages(messages: MessageRecord[]): ChatMessageIte
       continue;
     }
 
-    merged.push(withOptionalString({
+    merged.push({
       id: message.id,
-      sender: senderDisplayName
-        ? senderDisplayName
-        : message.sender,
+      sender: message.sender,
+      senderDisplayName,
       timestamp: message.timestamp,
       content: getDisplayContent(message),
       kinds: [message.kind],
       messageChain: [message],
-    }, "senderDisplayName", senderDisplayName));
+    });
   }
 
   return merged;

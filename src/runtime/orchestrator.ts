@@ -1077,6 +1077,7 @@ export class Orchestrator {
     state: GraphTaskState,
     runtimeAgentId: string,
   ): string {
+    // 历史要求：agent 消息必须写入确定的 senderDisplayName，禁止依赖展示层兜底推断。
     return (
       state.runtimeNodes.find((node) => node.id === runtimeAgentId)
         ?.displayName ?? runtimeAgentId

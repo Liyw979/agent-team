@@ -40,7 +40,7 @@ export function formatChatTranscript(
   const transcriptBody = messages
     .map((message) =>
       [
-        getChatSenderLabel(message.sender),
+        getChatSenderLabel(message.senderDisplayName),
         formatChatTranscriptTimestamp(message.timestamp, options),
         message.content.trim(),
       ]

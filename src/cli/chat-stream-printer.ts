@@ -5,11 +5,7 @@ import type { MessageRecord } from "@shared/types";
 const MESSAGE_LEFT_PADDING = "    ";
 
 function formatChatSender(entry: ChatMessageItem) {
-  return "senderDisplayName" in entry
-    && typeof entry.senderDisplayName === "string"
-    && entry.senderDisplayName.trim().length > 0
-    ? entry.senderDisplayName.trim()
-    : entry.sender;
+  return entry.senderDisplayName.trim();
 }
 
 function formatSingleLineMessageContent(value: string) {
@@ -117,9 +113,9 @@ export function collectIncrementalAgentFinalMessages(
     .map((message) => ({
       id: message.id,
       sender: message.sender,
-      ...("senderDisplayName" in message
-        ? { senderDisplayName: message.senderDisplayName }
-        : {}),
+      senderDisplayName: "senderDisplayName" in message
+        ? message.senderDisplayName
+        : message.sender,
       timestamp: message.timestamp,
       content: message.content,
       kinds: ["agent-final"],

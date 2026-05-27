@@ -40,6 +40,7 @@ function createAgentFinalMessage(
     status: input.status ?? "completed",
     responseNote: "",
     rawResponse: input.content,
+    senderDisplayName: input.sender,
   };
   return input.routingKind === "triggered"
     ? {

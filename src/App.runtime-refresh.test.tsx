@@ -153,6 +153,7 @@ function createAgentFinalMessage() {
       routingKind: "default" as const,
       responseNote: "",
       rawResponse: "挑战结论：这里的消息应当在轮询拿到全量 snapshot 后立即出现。",
+      senderDisplayName: "误报论证-1",
     },
   ];
 }
