@@ -16,6 +16,27 @@ import {
 } from "./agent-history";
 import { toUtcIsoTimestamp } from "@shared/types";
 
+function agentNode(input: { id: string; templateName: string; prompt: string; writable: boolean }): TopologyNodeRecord {
+  return {
+    id: input.id,
+    kind: "agent",
+    templateName: input.templateName,
+    initialMessageRouting: { mode: "inherit" },
+    prompt: input.prompt,
+    writable: input.writable,
+  };
+}
+
+function groupNode(input: { id: string; templateName: string; groupRuleId: string }): TopologyNodeRecord {
+  return {
+    id: input.id,
+    kind: "group",
+    templateName: input.templateName,
+    groupRuleId: input.groupRuleId,
+    initialMessageRouting: { mode: "inherit" },
+  };
+}
+
 function createAgentFinalMessage(
   input: {
     id: string;
@@ -143,8 +164,8 @@ const topology: TopologyRecord = {
     ],
   }),
   nodeRecords: [
-    { id: "Build", kind: "agent", templateName: "Build", initialMessageRouting: { mode: "inherit" } },
-    { id: "TaskReview", kind: "agent", templateName: "TaskReview", initialMessageRouting: { mode: "inherit" } },
+    agentNode({ id: "Build", templateName: "Build", prompt: "", writable: false }),
+    agentNode({ id: "TaskReview", templateName: "TaskReview", prompt: "", writable: false }),
   ],
 };
 
@@ -701,17 +722,11 @@ test("buildAgentHistoryItems 会按 runtime agent 对应模板的 trigger 集合
       ],
     }),
     nodeRecords: [
-      { id: "线索发现", kind: "agent", templateName: "线索发现", initialMessageRouting: { mode: "inherit" } },
-      {
-        id: "疑点辩论",
-        kind: "group",
-        templateName: "疑点辩论",
-        groupRuleId: "group-rule:疑点辩论",
-        initialMessageRouting: { mode: "inherit" },
-      },
-      { id: "误报论证", kind: "agent", templateName: "误报论证", initialMessageRouting: { mode: "inherit" } },
-      { id: "漏洞论证", kind: "agent", templateName: "漏洞论证", initialMessageRouting: { mode: "inherit" } },
-      { id: "讨论总结", kind: "agent", templateName: "讨论总结", initialMessageRouting: { mode: "inherit" } },
+      agentNode({ id: "线索发现", templateName: "线索发现", prompt: "", writable: false }),
+      groupNode({ id: "疑点辩论", templateName: "疑点辩论", groupRuleId: "group-rule:疑点辩论" }),
+      agentNode({ id: "误报论证", templateName: "误报论证", prompt: "", writable: false }),
+      agentNode({ id: "漏洞论证", templateName: "漏洞论证", prompt: "", writable: false }),
+      agentNode({ id: "讨论总结", templateName: "讨论总结", prompt: "", writable: false }),
     ],
     groupRules: [
       {
@@ -794,9 +809,9 @@ test("buildAgentHistoryItems 解析 runtime agent 模板时不会误命中同前
     }),
   ];
   const ambiguousNodeRecords: TopologyNodeRecord[] = [
-    { id: "A", kind: "agent", templateName: "A", initialMessageRouting: { mode: "inherit" } },
-    { id: "A-B", kind: "agent", templateName: "A-B", initialMessageRouting: { mode: "inherit" } },
-    { id: "Next", kind: "agent", templateName: "Next", initialMessageRouting: { mode: "inherit" } },
+    agentNode({ id: "A", templateName: "A", prompt: "", writable: false }),
+    agentNode({ id: "A-B", templateName: "A-B", prompt: "", writable: false }),
+    agentNode({ id: "Next", templateName: "Next", prompt: "", writable: false }),
   ];
   const ambiguousTopology: TopologyRecord = {
     nodes: ["A", "A-B", "Next"],
@@ -902,23 +917,11 @@ test("buildAgentHistoryItems 遇到归属多个 group rule 的模板时不会猜
       ],
     }),
     nodeRecords: [
-      { id: "入口甲", kind: "agent", templateName: "入口甲", initialMessageRouting: { mode: "inherit" } },
-      { id: "入口乙", kind: "agent", templateName: "入口乙", initialMessageRouting: { mode: "inherit" } },
-      {
-        id: "工厂甲",
-        kind: "group",
-        templateName: "工厂甲",
-        groupRuleId: "group-rule:甲",
-        initialMessageRouting: { mode: "inherit" },
-      },
-      {
-        id: "工厂乙",
-        kind: "group",
-        templateName: "工厂乙",
-        groupRuleId: "group-rule:乙",
-        initialMessageRouting: { mode: "inherit" },
-      },
-      { id: "复核", kind: "agent", templateName: "复核", initialMessageRouting: { mode: "inherit" } },
+      agentNode({ id: "入口甲", templateName: "入口甲", prompt: "", writable: false }),
+      agentNode({ id: "入口乙", templateName: "入口乙", prompt: "", writable: false }),
+      groupNode({ id: "工厂甲", templateName: "工厂甲", groupRuleId: "group-rule:甲" }),
+      groupNode({ id: "工厂乙", templateName: "工厂乙", groupRuleId: "group-rule:乙" }),
+      agentNode({ id: "复核", templateName: "复核", prompt: "", writable: false }),
     ],
     groupRules: [
       {

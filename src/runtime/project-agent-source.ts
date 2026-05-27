@@ -55,21 +55,19 @@ export function extractDslAgentsFromTopology(
   if (topology.nodes.length === 0) {
     return null;
   }
+  // 要求记录：
+  // 1. agent 与 group 是不同类型，禁止复用字段模型。
+  // 2. 节点记录禁止可空字段，必须在构建阶段写实完整值。
   const nodeRecords = getTopologyNodeRecords(topology).filter((node) => node.kind === "agent");
-  const hasDslPromptMetadata = nodeRecords.some((node) =>
-    typeof node.prompt === "string" || typeof node.writable === "boolean",
-  );
-  if (nodeRecords.length === 0 || !hasDslPromptMetadata) {
+  if (nodeRecords.length === 0) {
     return null;
   }
 
   const dslAgents = nodeRecords
     .map((node) => ({
       id: node.templateName,
-      prompt: typeof (node as { prompt?: unknown }).prompt === "string" ? (node as { prompt: string }).prompt : "",
-      isWritable: typeof (node as { writable?: unknown }).writable === "boolean"
-        ? (node as { writable: boolean }).writable
-        : undefined,
+      prompt: node.prompt,
+      isWritable: node.writable,
     }))
     .filter((agent) => topology.nodes.includes(agent.id));
 
@@ -77,10 +75,7 @@ export function extractDslAgentsFromTopology(
     return null;
   }
 
-  return dslAgents.map((agent) => ({
-    ...agent,
-    isWritable: agent.isWritable ?? false,
-  }));
+  return dslAgents;
 }
 
 export function buildInjectedConfigFromAgents(agents: AgentRecord[]): Record<string, OpenCodeInjectedAgentConfig> {

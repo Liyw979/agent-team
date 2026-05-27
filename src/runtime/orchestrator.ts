@@ -33,7 +33,9 @@ import {
   type TaskAgentRecord,
   type TaskRecord,
   type TaskSnapshot,
+  type TopologyAgentNodeRecord,
   type TopologyFlowEndIncoming,
+  type TopologyGroupNodeRecord,
   type TopologyNodeRecord,
   type TopologyRecord,
   type WorkspaceSnapshot, toUtcIsoTimestamp,
@@ -1208,6 +1210,9 @@ export class Orchestrator {
       ...topology.nodes.filter((item) => groupNodeIds.has(item)),
       ...groupNodeIds,
     ].filter((value, index, list) => list.indexOf(value) === index);
+    // 要求记录：
+    // 1. agent 与 group 是不同类型，归一化阶段必须分别构造。
+    // 2. 节点记录禁止可空字段，所有默认值必须在这里写实。
     const normalizedNodeRecords = rawNodeRecords
       .filter(
         (node) =>
@@ -1216,32 +1221,30 @@ export class Orchestrator {
           (node.kind === "group" || validNames.has(node.templateName)),
       )
       .map((node) => {
-        const prompt =
-          node.kind === "agent"
-            ? agentByName.get(node.templateName)?.prompt
-            : typeof node.prompt === "string"
-              ? node.prompt
-              : undefined;
-        const writable =
-          node.kind === "agent"
-            ? agentByName.get(node.templateName)?.isWritable === true
-            : node.writable === true;
-
-        return {
+        if (node.kind === "group") {
+          const nextGroupNode: TopologyGroupNodeRecord = {
+            id: node.id,
+            kind: "group",
+            templateName: node.templateName,
+            initialMessageRouting: node.initialMessageRouting,
+            groupRuleId: node.groupRuleId,
+          };
+          return nextGroupNode;
+        }
+        const nextAgentNode: TopologyAgentNodeRecord = {
           id: node.id,
-          kind: node.kind,
+          kind: "agent",
           templateName: node.templateName,
           initialMessageRouting: node.initialMessageRouting,
-          ...(node.groupRuleId ? { groupRuleId: node.groupRuleId } : {}),
-          ...(node.groupEnabled === true ? { groupEnabled: true } : {}),
-          ...(typeof prompt === "string" ? { prompt } : {}),
-          ...(writable ? { writable: true } : {}),
+          prompt: agentByName.get(node.templateName)?.prompt ?? node.prompt,
+          writable: agentByName.get(node.templateName)?.isWritable ?? node.writable,
         };
+        return nextAgentNode;
       });
     const normalizedGroupRules = topology.groupRules?.map((rule) => {
       const groupNodeName =
         rule.groupNodeName ||
-        normalizedNodeRecords.find((node) => node.groupRuleId === rule.id)?.id ||
+        normalizedNodeRecords.find((node) => node.kind === "group" && node.groupRuleId === rule.id)?.id ||
         rule.id;
       return normalizeGroupRule(
         coerceGroupRuleInput(rule),
@@ -1295,22 +1298,17 @@ export class Orchestrator {
       ),
       groupRuleIdByNodeId: new Map(
         normalizedNodeRecords
-          .filter((node) => typeof node.groupRuleId === "string")
-          .map((node) => [node.id, node.groupRuleId as string]),
-      ),
-      groupEnabledNodeIds: new Set(
-        normalizedNodeRecords
-          .filter((node) => node.groupEnabled === true)
-          .map((node) => node.id),
+          .filter((node): node is TopologyGroupNodeRecord => node.kind === "group")
+          .map((node) => [node.id, node.groupRuleId] as const),
       ),
       promptByNodeId: new Map(
         normalizedNodeRecords
-          .filter((node) => typeof node.prompt === "string")
-          .map((node) => [node.id, node.prompt as string]),
+          .filter((node): node is TopologyAgentNodeRecord => node.kind === "agent")
+          .map((node) => [node.id, node.prompt] as const),
       ),
       writableNodeIds: new Set(
         normalizedNodeRecords
-          .filter((node) => node.writable === true)
+          .filter((node): node is TopologyAgentNodeRecord => node.kind === "agent" && node.writable)
           .map((node) => node.id),
       ),
     });

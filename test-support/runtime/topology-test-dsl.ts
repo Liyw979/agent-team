@@ -125,7 +125,6 @@ function buildNodeRecords(
     templateNameByNodeId: new Map(),
     initialMessageRoutingByNodeId: new Map(),
     groupRuleIdByNodeId,
-    groupEnabledNodeIds: groupTargets,
     promptByNodeId: new Map(),
     writableNodeIds: new Set(),
   });

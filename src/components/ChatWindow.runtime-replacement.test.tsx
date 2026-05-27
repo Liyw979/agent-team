@@ -106,6 +106,21 @@ function createWorkspaceAndTask(): {
   workspace: WorkspaceSnapshot;
   task: TaskSnapshot;
 } {
+  const agentNode = (id: string) => ({
+    id,
+    kind: "agent" as const,
+    templateName: id,
+    initialMessageRouting: { mode: "inherit" as const },
+    prompt: "",
+    writable: false,
+  });
+  const groupNode = (id: string, groupRuleId: string) => ({
+    id,
+    kind: "group" as const,
+    templateName: id,
+    groupRuleId,
+    initialMessageRouting: { mode: "inherit" as const },
+  });
   const topology: WorkspaceSnapshot["topology"] = {
     nodes: ["线索发现", "误报论证", "漏洞论证", "讨论总结", "疑点辩论"],
     edges: [
@@ -130,17 +145,11 @@ function createWorkspaceAndTask(): {
       ],
     }),
     nodeRecords: [
-      { id: "线索发现", kind: "agent" as const, templateName: "线索发现", initialMessageRouting: { mode: "inherit" } },
-      {
-        id: "疑点辩论",
-        kind: "group" as const,
-        templateName: "疑点辩论",
-        groupRuleId: "group-rule:疑点辩论",
-        initialMessageRouting: { mode: "inherit" },
-      },
-      { id: "误报论证", kind: "agent" as const, templateName: "误报论证", initialMessageRouting: { mode: "inherit" } },
-      { id: "漏洞论证", kind: "agent" as const, templateName: "漏洞论证", initialMessageRouting: { mode: "inherit" } },
-      { id: "讨论总结", kind: "agent" as const, templateName: "讨论总结", initialMessageRouting: { mode: "inherit" } },
+      agentNode("线索发现"),
+      groupNode("疑点辩论", "group-rule:疑点辩论"),
+      agentNode("误报论证"),
+      agentNode("漏洞论证"),
+      agentNode("讨论总结"),
     ],
     groupRules: [
       {

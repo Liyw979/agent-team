@@ -332,7 +332,7 @@ export class GatingScheduler {
   private isGroupReportEdgeSatisfiedByRuntimeReport(edge: TopologyEdge, completedEdges: Set<string>): boolean {
     const groupRule = this.topology.groupRules?.find((rule) => {
       const groupNodeName = rule.groupNodeName
-        || getTopologyNodeRecords(this.topology).find((node) => node.groupRuleId === rule.id)?.id
+        || getTopologyNodeRecords(this.topology).find((node) => node.kind === "group" && node.groupRuleId === rule.id)?.id
         || "";
       return (
         groupNodeName === edge.source

@@ -736,7 +736,6 @@ function compileGraphDsl(graph: GraphDslGraph): CompiledTeamDsl {
         kind: "group",
         templateName: node.id,
         initialMessageRouting: { mode: "inherit" },
-        groupEnabled: true,
         groupRuleId: `group-rule:${node.id}`,
       };
     }
@@ -753,7 +752,7 @@ function compileGraphDsl(graph: GraphDslGraph): CompiledTeamDsl {
         node.initialMessageRouting,
         agentDefinitionOrderById,
       ),
-      ...(compiledAgent.isWritable ? { writable: true } : {}),
+      writable: compiledAgent.isWritable,
     };
   });
 

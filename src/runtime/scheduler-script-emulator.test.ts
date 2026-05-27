@@ -102,7 +102,6 @@ function withAgentNodeRecords(
       templateNameByNodeId: new Map(),
       initialMessageRoutingByNodeId: new Map(),
       groupRuleIdByNodeId: new Map(),
-      groupEnabledNodeIds: new Set(),
       promptByNodeId: new Map(),
       writableNodeIds: new Set(),
     }),
@@ -646,9 +645,9 @@ test("scheduler script emulator 纯函数不允许 execute_batch 在脚本可见
   const topology: TopologyRecord = withAgentNodeRecords({
     nodes: ["线索发现", "疑点辩论", "误报论证"],
     nodeRecords: [
-      { id: "线索发现", kind: "agent", templateName: "线索发现", initialMessageRouting: { mode: "inherit" } },
+      { id: "线索发现", kind: "agent", templateName: "线索发现", initialMessageRouting: { mode: "inherit" }, prompt: "", writable: false },
       { id: "疑点辩论", kind: "group", templateName: "疑点辩论", groupRuleId: "group-rule:疑点辩论", initialMessageRouting: { mode: "inherit" } },
-      { id: "误报论证", kind: "agent", templateName: "误报论证", initialMessageRouting: { mode: "inherit" } },
+      { id: "误报论证", kind: "agent", templateName: "误报论证", initialMessageRouting: { mode: "inherit" }, prompt: "", writable: false },
     ],
     edges: [
       { source: "线索发现", target: "疑点辩论", trigger: "<continue>", messageMode: "last", maxTriggerRounds: 4 },

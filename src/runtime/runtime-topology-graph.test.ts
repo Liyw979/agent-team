@@ -21,7 +21,7 @@ test("buildEffectiveTopology 不会因为 nodeRecords 只保存局部节点而�
       ],
     }),
     nodeRecords: [
-      { id: "BA", kind: "agent", templateName: "BA", groupEnabled: false, initialMessageRouting: { mode: "inherit" } },
+      { id: "BA", kind: "agent", templateName: "BA", initialMessageRouting: { mode: "inherit" }, prompt: "", writable: false },
     ],
   };
   const state = createEmptyGraphTaskState({
