@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "bun:test";
 import type { SubmitTaskPayload, TaskSnapshot, WorkspaceSnapshot } from "@shared/types";
+import { toUtcIsoTimestamp } from "@shared/types";
 
 import {
   reserveLoopbackPort,
@@ -334,6 +335,11 @@ test("startWebHost 的 /api/ui-snapshot 会区分 idle 与 active task", async (
     assert.equal(payload.workspace.cwd, "/tmp/active");
     assert.equal(payload.workspace.tasks.length, 1);
     assert.deepEqual(payload.task, activeTaskSnapshot);
+    assert.deepEqual(payload.workspace.tasks[0], {
+      ...activeTaskSnapshot,
+      messages: [],
+    });
+    assert.deepEqual(payload.workspace.messages, []);
     assert.equal(payload.taskLogFilePath, path.join("/tmp/user-data", "logs", "tasks", "task-active.log"));
     assert.equal(payload.launchCwd, "/tmp/active");
     assert.equal(payload.taskUrl, `http://localhost:${activePort}/`);
@@ -345,10 +351,60 @@ test("startWebHost 的 /api/ui-snapshot 会区分 idle 与 active task", async (
 
 test("startWebHost 的 /api/ui-snapshot 会注入非持久化 OpenCode 过程消息", async () => {
   const port = await reservePort();
-  const taskSnapshot = buildRunningTaskSnapshot({
-    id: "task-live-progress",
-    cwd: "/tmp/live-progress",
-  });
+  const taskSnapshot = {
+    ...buildRunningTaskSnapshot({
+      id: "task-live-progress",
+      cwd: "/tmp/live-progress",
+    }),
+    agents: [
+      {
+        taskId: "task-live-progress",
+        id: "BA",
+        opencodeSessionId: "session-ba",
+        opencodeAttachBaseUrl: "http://127.0.0.1:43127",
+        status: "completed" as const,
+        runCount: 1,
+      },
+      {
+        taskId: "task-live-progress",
+        id: "TaskReview",
+        opencodeSessionId: "session-task-review",
+        opencodeAttachBaseUrl: "http://127.0.0.1:43128",
+        status: "running" as const,
+        runCount: 1,
+      },
+    ],
+    messages: [
+      {
+        id: "persisted-progress-completed",
+        taskId: "task-live-progress",
+        content: "tool",
+        sender: "BA",
+        timestamp: toUtcIsoTimestamp("2026-04-30T12:00:00.000Z"),
+        kind: "agent-progress" as const,
+        activityKind: "tool" as const,
+        label: "tool",
+        detail: "已结束 agent 的过程消息",
+        detailState: "complete" as const,
+        sessionId: "session-ba",
+        runCount: 1,
+      },
+      {
+        id: "persisted-progress-running",
+        taskId: "task-live-progress",
+        content: "thinking",
+        sender: "TaskReview",
+        timestamp: toUtcIsoTimestamp("2026-04-30T12:00:00.500Z"),
+        kind: "agent-progress" as const,
+        activityKind: "thinking" as const,
+        label: "thinking",
+        detail: "运行中 agent 的过程消息",
+        detailState: "not_applicable" as const,
+        sessionId: "session-task-review",
+        runCount: 1,
+      },
+    ],
+  };
   const host = await startWebHost({
     orchestrator: {
       submitTask: async () => {
@@ -361,14 +417,17 @@ test("startWebHost 的 /api/ui-snapshot 会注入非持久化 OpenCode 过程消
         tasks: [taskSnapshot],
       }),
       opencodeClient: {
-        listSessionActivities: async () => [{
-          sourceMessageId: "msg-tool",
-          sourcePartIndex: 0,
-          kind: "tool",
-          label: "read",
-          detail: "参数: filePath=/tmp/demo.txt",
-          timestamp: "2026-04-30T12:00:01.000Z",
-        }],
+        listSessionActivities: async (sessionId: string) =>
+          sessionId === "session-task-review"
+            ? [{
+                sourceMessageId: "msg-tool",
+                sourcePartIndex: 0,
+                kind: "tool",
+                label: "read",
+                detail: "参数: filePath=/tmp/demo.txt",
+                timestamp: "2026-04-30T12:00:01.000Z",
+              }]
+            : [],
       },
       openAgentTerminal: async () => {
         throw new Error("unexpected openAgentTerminal");
@@ -385,21 +444,16 @@ test("startWebHost 的 /api/ui-snapshot 会注入非持久化 OpenCode 过程消
     assert.equal(response.status, 200);
     const payload = await response.json();
     assert.equal(payload.kind, "task");
-    assert.equal(taskSnapshot.messages.length, 0);
-    assert.deepEqual(payload.task.messages, [{
-      id: "live:BA:msg-tool:0",
-      taskId: "task-live-progress",
-      content: "参数: filePath=/tmp/demo.txt",
-      sender: "BA",
-      timestamp: "2026-04-30T12:00:01.000Z",
-      kind: "agent-progress",
-      activityKind: "tool",
-      label: "read",
-      detail: "参数: filePath=/tmp/demo.txt",
-      detailState: "not_applicable",
-      sessionId: "session-ba",
-      runCount: 1,
-    }]);
+    assert.deepEqual(payload.task.messages.map((message: { id: string }) => message.id), [
+      "persisted-progress-running",
+      "live:TaskReview:msg-tool:0",
+    ]);
+    assert.deepEqual(payload.task.messages.map((message: { content: string }) => message.content), [
+      "thinking",
+      "read",
+    ]);
+    assert.deepEqual(payload.workspace.tasks[0].messages, []);
+    assert.deepEqual(payload.workspace.messages, []);
   } finally {
     await host.close();
   }

@@ -4,10 +4,12 @@ import path from "node:path";
 import { URL } from "node:url";
 import type {
   AgentProgressMessageRecord,
+  MessageRecord,
   TaskAgentRecord,
   TaskSnapshot,
   SubmitTaskPayload,
   UiSnapshotPayload,
+  WorkspaceSnapshot,
 } from "@shared/types";
 import type { Orchestrator } from "../runtime/orchestrator";
 import type { OpenCodeSessionActivity } from "../runtime/opencode-client";
@@ -99,6 +101,50 @@ function parseOpenAgentTerminalPayload(body: unknown): string {
   return agentId;
 }
 
+function isAgentEnded(agent: TaskAgentRecord) {
+  return agent.status === "completed" || agent.status === "failed";
+}
+
+function pruneTaskMessagesForUi(
+  messages: MessageRecord[],
+  agents: TaskAgentRecord[],
+): MessageRecord[] {
+  const endedAgentIds = new Set(
+    agents.filter(isAgentEnded).map((agent) => agent.id),
+  );
+  return messages.reduce<MessageRecord[]>((acc, message) => {
+    if (message.kind !== "agent-progress") {
+      acc.push(message);
+      return acc;
+    }
+    if (endedAgentIds.has(message.sender)) {
+      return acc;
+    }
+    acc.push({
+      ...message,
+      content: message.label,
+    });
+    return acc;
+  }, []);
+}
+
+function pruneWorkspaceSnapshotForUi(
+  workspace: WorkspaceSnapshot,
+  currentTaskId: string,
+): WorkspaceSnapshot {
+  return {
+    ...workspace,
+    messages: [],
+    tasks: workspace.tasks.map((taskSnapshot) =>
+      taskSnapshot.task.id === currentTaskId
+        ? {
+            ...taskSnapshot,
+            messages: [],
+          }
+        : taskSnapshot),
+  };
+}
+
 async function buildUiSnapshotPayload(
   orchestrator: Orchestrator,
   options: Pick<StartWebHostOptions, "port" | "userDataPath">,
@@ -115,10 +161,22 @@ async function buildUiSnapshotPayload(
     };
   }
 
-  const task = await withLiveProgressMessages(orchestrator, await orchestrator.getTaskSnapshot());
+  // 2026-05-27: 用户要求在保持 snapshot 外层格式的前提下降低原始 payload，
+  // task 模式下不再重复传输 workspace 中的重型消息内容，并移除已结束 agent 的运行态过程消息。
+  const taskWithLiveProgress = await withLiveProgressMessages(
+    orchestrator,
+    await orchestrator.getTaskSnapshot(),
+  );
+  const task = {
+    ...taskWithLiveProgress,
+    messages: pruneTaskMessagesForUi(
+      taskWithLiveProgress.messages,
+      taskWithLiveProgress.agents,
+    ),
+  };
   return {
     kind: "task",
-    workspace,
+    workspace: pruneWorkspaceSnapshotForUi(workspace, task.task.id),
     task,
     launchCwd: workspace.cwd,
     taskLogFilePath: buildTaskLogFilePath(options.userDataPath, task.task.id),
@@ -164,10 +222,11 @@ function createLiveProgressMessage(
   agent: TaskAgentRecord,
   activity: OpenCodeSessionActivity,
 ): AgentProgressMessageRecord {
+  // 2026-05-27: live progress 仍保留完整 detail，content 改为 label，避免同一大文本在 snapshot 中重复两次。
   return {
     id: `live:${agent.id}:${activity.sourceMessageId}:${activity.sourcePartIndex}`,
     taskId,
-    content: activity.detail,
+    content: activity.label,
     sender: agent.id,
     timestamp: activity.timestamp,
     kind: "agent-progress",
