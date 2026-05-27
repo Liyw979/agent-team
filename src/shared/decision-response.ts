@@ -1,7 +1,5 @@
 import { normalizeTopologyEdgeTrigger } from "./types";
 
-const EMPTY_ALLOWED_TRIGGERS: readonly string[] = [];
-
 function buildDecisionEndLabel(label: string): string {
   return `</${label.slice(1, -1)}>`;
 }
@@ -58,19 +56,19 @@ export type DecisionSignalBlockResult =
   | typeof MISSING_DECISION_SIGNAL_BLOCK;
 
 function normalizeDecisionSignalTokens(
-  allowedTriggers: readonly string[] = EMPTY_ALLOWED_TRIGGERS,
+  allowedTriggers: readonly string[],
 ): DecisionSignalToken[] {
-  const labels = allowedTriggers.length > 0 ? allowedTriggers : [];
-  const normalized = [...new Set(labels.map((label) => normalizeTopologyEdgeTrigger(label)))];
+  const normalized = [...new Set(allowedTriggers.map((label) => normalizeTopologyEdgeTrigger(label)))];
   return normalized.map((label) => ({
     start: label,
     end: buildDecisionEndLabel(label),
   }));
 }
 
+// 用户要求：allowedTriggers 必须由调用方显式传入，避免缺失上下文被默认空集合掩盖。
 export function extractTrailingDecisionSignalBlock(
   content: string,
-  allowedTriggers: readonly string[] = EMPTY_ALLOWED_TRIGGERS,
+  allowedTriggers: readonly string[],
 ): DecisionSignalBlockResult {
   const trimmed = content.trim();
   const tokens = normalizeDecisionSignalTokens(allowedTriggers);
@@ -98,9 +96,10 @@ export function extractTrailingDecisionSignalBlock(
   };
 }
 
+// 用户要求：allowedTriggers 必须由调用方显式传入，避免缺失上下文被默认空集合掩盖。
 export function stripDecisionResponseMarkup(
   content: string,
-  allowedTriggers: readonly string[] = EMPTY_ALLOWED_TRIGGERS,
+  allowedTriggers: readonly string[],
 ): string {
   const trimmed = content.trim();
   if (!trimmed) {

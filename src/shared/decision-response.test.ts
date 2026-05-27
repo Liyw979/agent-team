@@ -116,7 +116,7 @@ test("extractTrailingDecisionSignalBlock 正文后只保留裸 trigger 时也视
 });
 
 test("extractTrailingDecisionSignalBlock 在缺少标签时返回 missing", () => {
-  assert.deepEqual(extractTrailingDecisionSignalBlock("这是普通正文。"), { kind: "missing" });
+  assert.deepEqual(extractTrailingDecisionSignalBlock("这是普通正文。", []), { kind: "missing" });
 });
 
 test("extractTrailingDecisionSignalBlock 支持按允许的 trigger 集合解析自定义标签", () => {
@@ -261,7 +261,7 @@ test("stripDecisionResponseMarkup 会去掉示例 trigger 标签并保留正文"
     "文字\n\n示例",
   );
   assert.equal(
-    stripDecisionResponseMarkup("继续处理。\n\n<chalenge>请继续补充实现依据。</chalenge>"),
+    stripDecisionResponseMarkup("继续处理。\n\n<chalenge>请继续补充实现依据。</chalenge>", []),
     "继续处理。\n\n<chalenge>请继续补充实现依据。</chalenge>",
   );
   assert.equal(

@@ -820,10 +820,11 @@ export class Orchestrator {
       : `${buildSourceAgentMessageSectionLabel(prompt.from)}\n${content}`;
   }
 
+  // 用户要求：allowedTriggers 必须显式传入 resolveAgentContextContent，避免上下文缺失被空集合掩盖。
   private resolveAgentContextContent(
     parsedDecision: ParsedDecision,
     rawFinalMessage: string,
-    allowedTriggers?: readonly string[],
+    allowedTriggers: readonly string[],
   ): string {
     const candidates = [
       parsedDecision.contentWithoutTrigger.trim(),
