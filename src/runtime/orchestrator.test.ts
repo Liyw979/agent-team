@@ -3895,7 +3895,7 @@ test("agent-final 入库前会保留完整正文和尾部分隔线", async () =>
     .find((record) => record.event === "agent.final_message");
   assert.equal(finalMessageLog.agentId, "BA");
   assert.equal(finalMessageLog.messageId, "msg-full-final");
-  assert.equal(finalMessageLog.content, "前置分析 ## 结论 这里是最终判断，并附加额外说明用于验证");
+  assert.equal(finalMessageLog.content, "前置分析 ## 结论 这里是最终判断，并附加额外说明用于验证日志截断是否生效。 ---");
 });
 
 test("agent-final 入库前会移除协议 trigger 并保留正文细节", async () => {

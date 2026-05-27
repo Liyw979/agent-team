@@ -3,6 +3,7 @@ import { mergeTaskChatMessages, type ChatMessageItem } from "../lib/chat-message
 import type { MessageRecord } from "@shared/types";
 
 const MESSAGE_LEFT_PADDING = "    ";
+const AGENT_FINAL_PREVIEW_LENGTH = 30;
 
 function formatChatSender(entry: ChatMessageItem) {
   return entry.senderDisplayName.trim();
@@ -10,6 +11,10 @@ function formatChatSender(entry: ChatMessageItem) {
 
 function formatSingleLineMessageContent(value: string) {
   return value.replace(/\s+/gu, " ").trim();
+}
+
+function formatAgentFinalPreview(value: string) {
+  return formatSingleLineMessageContent(value).slice(0, AGENT_FINAL_PREVIEW_LENGTH);
 }
 
 function formatTimestamp(value: string) {
@@ -131,7 +136,7 @@ export function renderChatStreamEntries(entries: ChatMessageItem[]): string {
   const lines = entries.map((entry) => {
     const sender = formatChatSender(entry);
     if (entry.kinds.includes("agent-final")) {
-      return `[${formatTimestamp(entry.timestamp)}] ${sender}: ${formatSingleLineMessageContent(entry.content)}`;
+      return `[${formatTimestamp(entry.timestamp)}] ${sender}: ${formatAgentFinalPreview(entry.content)}`;
     }
     return renderMessageBox(`[${formatTimestamp(entry.timestamp)}] ${sender}`, entry.content);
   });

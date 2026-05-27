@@ -284,6 +284,25 @@ test("renderChatStreamEntries 会把 agent final 正文压成单行", () => {
   );
 });
 
+test("renderChatStreamEntries 会把 agent final 正文限制为前 30 个字符", () => {
+  const output = renderChatStreamEntries([
+    {
+      id: "m1",
+      sender: "漏洞论证-1",
+      senderDisplayName: "漏洞论证-1",
+      timestamp: toUtcIsoTimestamp("2026-04-19T10:00:00.000Z"),
+      content: "我同意你这次的结论：就当前代码证据看，把 os.CreateTemp 直接定成可远程利用的安全漏洞并不成立。",
+      kinds: ["agent-final"],
+      messageChain: [],
+    },
+  ]);
+
+  assert.match(
+    output,
+    /^\[2026\/04\/19 \d{2}:00:00\] 漏洞论证-1: 我同意你这次的结论：就当前代码证据看，把 o\n\n$/u,
+  );
+});
+
 test("renderChatStreamEntries 单条 agent final 输出块会以空行结束", () => {
   const output = renderChatStreamEntries([
     {
