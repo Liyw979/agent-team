@@ -4,31 +4,25 @@ import { test } from "bun:test";
 
 import { resolveLaunchContext } from "./launch-context";
 
-test("resolveLaunchContext 鍦ㄥ惎鍔ㄥ叆鍙ｆ病鏈夐€忎紶鑷畾涔?CLI 鍙傛暟鏃讹紝浼氬洖閫€璇诲彇鐜鍙橀噺", () => {
+test("resolveLaunchContext 在没有显式 CLI 启动目录时回退到默认目录", () => {
+  // 2026-05-27: 用户要求仅保留显式 CLI 启动目录与默认目录，不保留环境变量兼容入口。
   const launch = resolveLaunchContext({
     argv: ["node", "src/cli/index.ts"],
-    env: {
-      AGENT_TEAM_TASK_ID: "task-123",
-      AGENT_TEAM_CWD: "/Users/demo/code/empty",
-    },
     defaultCwd: "/repo/agent-team",
   });
 
   assert.deepEqual(launch, {
-    launchTaskId: "task-123",
-    launchCwd: path.resolve("/Users/demo/code/empty"),
+    launchCwd: path.resolve("/repo/agent-team"),
   });
 });
 
-test("resolveLaunchContext 鍙瘑鍒柊鐨?agent-team 鍚姩鍙傛暟", () => {
+test("resolveLaunchContext 只识别 agent-team 显式 CLI 启动参数", () => {
   const launch = resolveLaunchContext({
-    argv: ["node", "src/cli/index.ts", "--agent-team-task-id", "task-456", "--agent-team-cwd", "/tmp/agent-team"],
-    env: {},
+    argv: ["node", "src/cli/index.ts", "--agent-team-cwd", "/tmp/agent-team"],
     defaultCwd: "/repo/agent-team",
   });
 
   assert.deepEqual(launch, {
-    launchTaskId: "task-456",
     launchCwd: path.resolve("/tmp/agent-team"),
   });
 });
