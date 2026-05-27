@@ -921,16 +921,6 @@ export class OpenCodeClient {
     return serializedValue.replace(/\s*\n\s*/gu, " ");
   }
 
-  private isDisplayableToolActivityValue(value: unknown): boolean {
-    if (value === "") {
-      return false;
-    }
-    if (typeof value === "object") {
-      return Object.keys(Object(value)).length > 0;
-    }
-    return true;
-  }
-
   private appendTrimmedString(target: string[], value: unknown) {
     if (typeof value !== "string") {
       return;
