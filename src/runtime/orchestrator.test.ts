@@ -3910,6 +3910,15 @@ test("agent-final 入库前会保留完整正文和尾部分隔线", async () =>
     "缺少 BA 最终消息",
   );
   assert.equal(baFinalMessage.content, finalMessage);
+  const taskLogPath = buildTaskLogFilePath(userDataPath, submittedTask.task.id);
+  const finalMessageLog = fs.readFileSync(taskLogPath, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line))
+    .find((record) => record.event === "agent.final_message");
+  assert.equal(finalMessageLog.agentId, "BA");
+  assert.equal(finalMessageLog.messageId, "msg-full-final");
+  assert.equal(finalMessageLog.content, "前置分析 ## 结论 这里是最终判断。 ---");
 });
 
 test("agent-final 入库前会移除协议 trigger 并保留正文细节", async () => {

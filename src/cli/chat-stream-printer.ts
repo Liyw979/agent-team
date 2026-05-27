@@ -4,6 +4,18 @@ import type { MessageRecord } from "@shared/types";
 
 const MESSAGE_LEFT_PADDING = "    ";
 
+function formatChatSender(entry: ChatMessageItem) {
+  return "senderDisplayName" in entry
+    && typeof entry.senderDisplayName === "string"
+    && entry.senderDisplayName.trim().length > 0
+    ? entry.senderDisplayName.trim()
+    : entry.sender;
+}
+
+function formatSingleLineMessageContent(value: string) {
+  return value.replace(/\s+/gu, " ").trim();
+}
+
 function formatTimestamp(value: string) {
   const date = new Date(value);
   const pad = (input: number) => String(input).padStart(2, "0");
@@ -93,18 +105,40 @@ export function collectIncrementalChatTranscript(
   return nextMerged.slice(previousMerged.length);
 }
 
+// 历史要求：拓扑里渲染的 agent final message 必须同步打印到命令行，每条 final message 只占一行。
+export function collectIncrementalAgentFinalMessages(
+  previousMessages: MessageRecord[],
+  nextMessages: MessageRecord[],
+): ChatMessageItem[] {
+  const previousMessageIds = new Set(previousMessages.map((message) => message.id));
+  return nextMessages
+    .filter((message) => message.kind === "agent-final" && !previousMessageIds.has(message.id))
+    .sort((left, right) => left.timestamp.localeCompare(right.timestamp))
+    .map((message) => ({
+      id: message.id,
+      sender: message.sender,
+      ...("senderDisplayName" in message
+        ? { senderDisplayName: message.senderDisplayName }
+        : {}),
+      timestamp: message.timestamp,
+      content: message.content,
+      kinds: ["agent-final"],
+      messageChain: [message],
+    }));
+}
+
 export function renderChatStreamEntries(entries: ChatMessageItem[]): string {
   if (entries.length === 0) {
     return "";
   }
 
-  return entries.map((entry) => {
-    const sender =
-      "senderDisplayName" in entry
-      && typeof entry.senderDisplayName === "string"
-      && entry.senderDisplayName.trim().length > 0
-        ? entry.senderDisplayName.trim()
-        : entry.sender;
-    return `${renderMessageBox(`[${formatTimestamp(entry.timestamp)}] ${sender}`, entry.content)}\n`;
-  }).join("\n");
+  const lines = entries.map((entry) => {
+    const sender = formatChatSender(entry);
+    if (entry.kinds.includes("agent-final")) {
+      return `[${formatTimestamp(entry.timestamp)}] ${sender}: ${formatSingleLineMessageContent(entry.content)}`;
+    }
+    return renderMessageBox(`[${formatTimestamp(entry.timestamp)}] ${sender}`, entry.content);
+  });
+
+  return `${lines.join("\n\n")}\n\n`;
 }
