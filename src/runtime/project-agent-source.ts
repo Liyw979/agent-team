@@ -8,7 +8,7 @@ import {
   type AgentRecord,
   getTopologyNodeRecords,
   type PermissionMode,
-  type TopologyNodeRecord,
+  type TopologyAgentNodeRecord,
   type TopologyRecord,
 } from "@shared/types";
 import { toOpenCodeAgentId } from "./opencode-agent-id";
@@ -42,14 +42,6 @@ function buildReadonlyAgentPermissionConfig(): OpenCodePermissionConfig {
   };
 }
 
-function readNodePrompt(node: TopologyNodeRecord): string {
-  return typeof node.prompt === "string" ? node.prompt : "";
-}
-
-function readNodeWritable(node: TopologyNodeRecord): boolean {
-  return node.writable === true;
-}
-
 export function extractDslAgentsFromTopology(
   topology: TopologyRecord,
 ): AgentRecord[] {
@@ -59,19 +51,18 @@ export function extractDslAgentsFromTopology(
   // 要求记录：
   // 1. agent 与 group 是不同类型，禁止复用字段模型。
   // 2. 节点记录禁止可空字段，必须在构建阶段写实完整值。
-  const nodeRecords = getTopologyNodeRecords(topology).filter((node) => node.kind === "agent");
-  const hasDslPromptMetadata = nodeRecords.some((node) =>
-    typeof node.prompt === "string" || typeof node.writable === "boolean",
+  const nodeRecords = getTopologyNodeRecords(topology).filter(
+    (node): node is TopologyAgentNodeRecord => node.kind === "agent",
   );
-  if (nodeRecords.length === 0 || !hasDslPromptMetadata) {
+  if (nodeRecords.length === 0) {
     return [];
   }
 
   const dslAgents = nodeRecords
     .map((node) => ({
       id: node.templateName,
-      prompt: readNodePrompt(node),
-      isWritable: readNodeWritable(node),
+      prompt: node.prompt,
+      isWritable: node.writable,
     }))
     .filter((agent) => topology.nodes.includes(agent.id));
 
