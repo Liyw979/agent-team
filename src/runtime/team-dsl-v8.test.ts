@@ -25,7 +25,7 @@ test("compileTeamDsl 支持 v8 递归式图 DSL，并保留 group 子图定义",
       source: "线索发现",
       target: "线索完备性评估",
       trigger: "<complete>",
-      messageMode: "last", maxTriggerRounds: 4,
+      messageMode: "last", maxTriggerRounds: 999,
     },
     {
       source: "线索完备性评估",
