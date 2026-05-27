@@ -1763,6 +1763,7 @@ export class Orchestrator {
           failureReason: string;
         },
   ) {
+    // 2026-05-27: 用户要求“本轮已完成，可继续 @Agent 发起下一轮。”必须同步打印任务日志。
     const { taskId, status } = input;
     const currentTask = this.store.getTask(taskId);
     if (currentTask.status === status && currentTask.completedAt) {
@@ -1802,6 +1803,13 @@ export class Orchestrator {
             status: "failed",
           };
     this.store.insertMessage(completionMessage);
+    if (completionMessage.kind === "task-round-finished") {
+      appendAppLog("info", "task.round_finished", {
+        messageId: completionMessage.id,
+        finishReason: completionMessage.finishReason,
+        content: completionMessage.content,
+      }, "file-only");
+    }
   }
 
   private createTrailingMessageTimestamp(taskId: string): string {
