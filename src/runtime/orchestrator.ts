@@ -1,4 +1,5 @@
 // 历史要求：执行期决策 Agent 判断直接使用共享拓扑能力，不保留薄包装方法，不引入多个拓扑兼容设想。
+// 历史要求：orchestrator 内直接调用已有共享能力，不保留无业务语义的透传包装方法。
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { withOptionalString } from "@shared/object-utils";
@@ -173,7 +174,7 @@ type AgentExecutionPrompt =
   | {
       mode: "raw";
       content: string;
-      from?: string;
+      from: string;
     }
   | {
       mode: "control";
@@ -490,7 +491,7 @@ export class Orchestrator {
     }
 
     this.syncTaskAgents(task, agents);
-    const targetAgentRecord = this.findAgent(agents, mentionAgentId);
+    const targetAgentRecord = agents.find((agent) => agent.id === mentionAgentId);
 
     if (!targetAgentRecord) {
       throw new Error(`未找到被 @ 的 Agent：${mentionAgentId}`);
@@ -799,9 +800,10 @@ export class Orchestrator {
   }
 
   protected buildAgentExecutionPrompt(prompt: AgentExecutionPrompt): string {
+    // 历史要求：raw prompt 的来源必须由构造入口显式传入，渲染阶段不得用默认值掩盖缺失来源。
     if (prompt.mode === "raw") {
       const content = prompt.content.trim();
-      const from = this.getAgentDisplayName(prompt.from?.trim() || "System");
+      const from = prompt.from.trim();
       return `[${from}] ${content || "（无）"}`.trim();
     }
 
@@ -860,13 +862,6 @@ export class Orchestrator {
     }
 
     return allowed;
-  }
-
-  private buildDispatchMessageContent(
-    targetAgentIds: string[],
-    content: string,
-  ): string {
-    return formatAgentDispatchContent(content, targetAgentIds);
   }
 
   protected createDisplayContent(parsedDecision: ParsedDecision): string {
@@ -1025,19 +1020,15 @@ export class Orchestrator {
     return this.hydrateTask(task.id);
   }
 
-  private getOrderedAgentIds(
-    agents: Array<Pick<AgentRecord, "id">>,
-    topologyOverride?: TopologyRecord,
-  ): string[] {
-    const topology = topologyOverride ?? this.store.getTopology();
-    return resolveTopologyAgentOrder(agents.map((agent) => agent.id), topology.nodes);
-  }
-
   private orderAgents(
     agents: AgentRecord[],
     topologyOverride?: TopologyRecord,
   ): AgentRecord[] {
-    const orderedNames = this.getOrderedAgentIds(agents, topologyOverride);
+    const topology = topologyOverride ?? this.store.getTopology();
+    const orderedNames = resolveTopologyAgentOrder(
+      agents.map((agent) => agent.id),
+      topology.nodes,
+    );
     const agentByName = new Map(agents.map((agent) => [agent.id, agent]));
     return orderedNames
       .map((name) => agentByName.get(name))
@@ -1064,16 +1055,6 @@ export class Orchestrator {
       .map((item) => item.trim())
       .find(Boolean);
     return (firstLine ?? "未命名任务").slice(0, 80);
-  }
-
-  private findAgent(
-    agents: AgentRecord[],
-    id: string | undefined,
-  ): AgentRecord | undefined {
-    if (!id) {
-      return undefined;
-    }
-    return agents.find((agent) => agent.id === id);
   }
 
   private resolveExecutableAgentId(
@@ -1412,10 +1393,6 @@ export class Orchestrator {
     return [...aliases].filter(Boolean);
   }
 
-  private resolveGlobalSourceOrder(state: GraphTaskState): string[] {
-    return buildEffectiveTopology(state).nodes;
-  }
-
   protected async createRuntimeBatchRunners(
     taskId: string,
     state: GraphTaskState,
@@ -1451,9 +1428,9 @@ export class Orchestrator {
           taskId,
           sender: sourceAgentId,
           timestamp: toUtcIsoTimestamp(new Date().toISOString()),
-          content: this.buildDispatchMessageContent(
-            batch.triggerTargets,
+          content: formatAgentDispatchContent(
             batch.displayContent,
+            batch.triggerTargets,
           ),
           kind: "agent-dispatch",
           targetAgentIds: [...batch.triggerTargets],
@@ -1501,9 +1478,18 @@ export class Orchestrator {
             ? DEFAULT_TOPOLOGY_TRIGGER
             : batch.trigger,
         );
+        // 历史要求：读取 Task Agent 运行次数前必须显式证明记录存在，不得用 0 兜底掩盖状态缺失。
+        const taskAgent = this.store
+          .listTaskAgents(taskId)
+          .find((agent) => agent.id === job.agentId);
+        if (!taskAgent) {
+          throw new Error(
+            `Task ${taskId} 缺少 Agent ${job.agentId}，无法解析初始消息路由。`,
+          );
+        }
         const dispatchInitialMessageRouting =
           this.resolveDispatchInitialMessageRouting(
-            this.getTaskAgentRunCount(taskId, job.agentId),
+            taskAgent.runCount,
             edgeForwardingConfig.initialMessageRouting,
           );
         const initialMessageSourceAliasesByAgentId =
@@ -1521,7 +1507,7 @@ export class Orchestrator {
             initialMessageRouting: dispatchInitialMessageRouting,
             sourceAgentId,
             initialMessageSourceAliasesByAgentId,
-            globalSourceOrder: this.resolveGlobalSourceOrder(state),
+            globalSourceOrder: buildEffectiveTopology(state).nodes,
           },
         );
         prompt =
@@ -1613,9 +1599,8 @@ export class Orchestrator {
         currentTask,
         currentAgent,
       );
-      const latestAgent = this.findAgent(
-        this.listWorkspaceAgents(),
-        executableAgentId,
+      const latestAgent = this.listWorkspaceAgents().find(
+        (agent) => agent.id === executableAgentId,
       );
       if (!latestAgent) {
         throw new Error(`当前工作区缺少 Agent ${executableAgentId}`);
@@ -1872,21 +1857,6 @@ export class Orchestrator {
 
     throw new Error(
       `拓扑边不存在，无法解析转发配置：${sourceAgentId} -> ${targetAgentId} (${trigger})`,
-    );
-  }
-
-  private getAgentDisplayName(id: string) {
-    return id;
-  }
-
-  private getTaskAgentRunCount(
-    taskId: string,
-    agentId: string,
-  ): number {
-    return (
-      this.store
-        .listTaskAgents(taskId)
-        .find((agent) => agent.id === agentId)?.runCount ?? 0
     );
   }
 
