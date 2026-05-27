@@ -912,21 +912,13 @@ export class OpenCodeClient {
     return "";
   }
 
+  // 需求记录：工具参数展示直接输出 JSON 字符串并移除换行，禁止再做摘要拼接或出现 [object Object]。
   private summarizeToolActivityValue(value: unknown): string {
-    if (typeof value === "string") {
-      return this.shortenText(value, 160);
-    }
-    if (typeof value === "number" || typeof value === "boolean") {
-      return String(value);
-    }
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
+    const serializedValue = JSON.stringify(value);
+    if (typeof serializedValue !== "string" || serializedValue === "{}" || serializedValue === "[]" || serializedValue === "\"\"") {
       return "";
     }
-    return Object.entries(value)
-      .filter(([, item]) => this.isDisplayableToolActivityValue(item))
-      .slice(0, 4)
-      .map(([key, item]) => `${key}=${this.shortenText(String(item), 80)}`)
-      .join(", ");
+    return serializedValue.replace(/\s*\n\s*/gu, " ");
   }
 
   private isDisplayableToolActivityValue(value: unknown): boolean {

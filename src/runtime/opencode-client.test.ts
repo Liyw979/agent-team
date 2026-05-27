@@ -817,7 +817,47 @@ test("listSessionActivities 会保留工具参数中的 0 和 false", async () =
   assert.equal(activities.length, 1);
   const [activity] = activities as [OpenCodeSessionActivity];
   assert.equal(activity.kind, "tool");
-  assert.equal(activity.detail, "参数: offset=0, recursive=false, pattern=TODO");
+  assert.equal(
+    activity.detail,
+    '参数: {"emptyObject":{},"emptyValue":null,"offset":0,"recursive":false,"pattern":"TODO"}',
+  );
+});
+
+test("listSessionActivities 会把对象数组参数序列化成单行 JSON，避免显示 [object Object]", async () => {
+  const { client } = createClient();
+  client.request = async (pathname) => {
+    assert.equal(pathname, "/session/session-1/message?limit=100");
+    return new Response(JSON.stringify([{
+      id: "msg-todowrite",
+      role: "assistant",
+      createdAt: "2026-04-21T12:52:26.000Z",
+      completedAt: "2026-04-21T12:52:26.000Z",
+      parts: [{
+        type: "tool",
+        tool: "todowrite",
+        state: {
+          input: {
+            todos: [
+              { content: "定位渲染问题", status: "in_progress", priority: "high" },
+              { content: "补回归测试", status: "pending", priority: "medium" },
+              { content: "运行检查", status: "pending", priority: "medium" },
+            ],
+          },
+        },
+      }],
+    }]), { status: 200 });
+  };
+
+  const activities = await client.listSessionActivities("session-1");
+
+  assert.equal(activities.length, 1);
+  const [activity] = activities as [OpenCodeSessionActivity];
+  assert.equal(activity.kind, "tool");
+  assert.equal(
+    activity.detail,
+    '参数: {"todos":[{"content":"定位渲染问题","status":"in_progress","priority":"high"},{"content":"补回归测试","status":"pending","priority":"medium"},{"content":"运行检查","status":"pending","priority":"medium"}]}',
+  );
+  assert.doesNotMatch(activity.detail, /\[object Object\]/u);
 });
 
 test("listSessionActivities 会重试直到拿到消息数组", async () => {
