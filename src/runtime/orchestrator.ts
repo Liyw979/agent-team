@@ -201,6 +201,10 @@ interface AgentRunBehaviorOptions {
   completeTaskOnFinish?: boolean;
 }
 
+function summarizeAgentLogContent(content: string): string {
+  return content.replace(/\s+/gu, " ").trim().slice(0, 30);
+}
+
 const idleProcessWorkspace = { cwd: "", refCount: 0 };
 let activeProcessWorkspace = idleProcessWorkspace;
 
@@ -1495,6 +1499,7 @@ export class Orchestrator {
   }
 
   // 2026-05-27: 用户要求删除仅把 invalid 映射为 failed、其余映射为 completed 的废话状态函数，执行结果状态必须在唯一调用点直接判定，禁止回引无业务语义的中间层。
+  // 2026-05-27: 用户要求 agent 消息写任务日志时只保留前 30 个字符，避免完整正文进入日志；修改本方法前必须先核对该约束。
   private async executeRuntimeAgentOnce(
     runtimeAgentId: string,
     executableAgentId: string,
@@ -1610,7 +1615,7 @@ export class Orchestrator {
         messageId: taskMessage.id,
         runCount: currentAgent.runCount,
         routingKind: taskMessage.routingKind,
-        content: taskMessage.content.replace(/\s+/gu, " ").trim(),
+        content: summarizeAgentLogContent(taskMessage.content),
       }, "file-only");
 
       const agentStatus: AgentStatus = resolvedDecision === "invalid"
