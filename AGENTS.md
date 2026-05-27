@@ -3,7 +3,8 @@
 本文件汇总当前项目的产品定位、运行约定、开发命令与文档同步要求
 
 ## 1. 要求
-每次交付前必须在仓库根目录运行 `bun tsc --noEmit` 与 `bun test --only-failures; bun run knip --fix`；类型检查通过是前置条件，同时要确认没有遗留失败用例与可自动修复的未使用项。
+每次交付前必须在仓库根目录运行 `bun tsc --noEmit` 与 `bun test --only-failures; bun run knip --fix`；
+先运行`bun install`安装依赖
 
 ## 2. 约束
 禁用词：`收口`。新增或修改文案、注释、提示词、日志、界面文案时都不得使用该表述，统一改为含义更准确的描述。
