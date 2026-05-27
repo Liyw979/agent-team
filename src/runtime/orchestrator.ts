@@ -43,9 +43,9 @@ import {
 } from "@shared/chat-message-format";
 import { stripDecisionResponseMarkup } from "@shared/decision-response";
 import {
-  parseDecision as parseDecisionPure,
-  parseDefaultAgentResult as parseDefaultAgentResultPure,
-  stripStructuredSignals as stripStructuredSignalsPure,
+  parseDecision,
+  parseDefaultAgentResult,
+  stripStructuredSignals,
   type ParsedDecision,
 } from "./decision-parser";
 import { OpenCodeClient } from "./opencode-client";
@@ -55,13 +55,13 @@ import {
   buildDownstreamForwardedContextFromMessages,
   NONE_MODE_PLACEHOLDER_MESSAGE,
   buildSourceAgentMessageSectionLabel,
-  buildUserHistoryContent as buildUserHistoryContentPure,
-  stripTargetMention as stripTargetMentionPure,
+  buildUserHistoryContent,
+  stripTargetMention,
 } from "./message-forwarding";
 import {
-  reconcileTaskSnapshotFromMessages as reconcileTaskSnapshotFromMessagesPure,
+  reconcileTaskSnapshotFromMessages,
   resolveStandaloneTaskStatusAfterAgentRun,
-  shouldFinishTaskFromPersistedState as shouldFinishTaskFromPersistedStatePure,
+  shouldFinishTaskFromPersistedState,
 } from "./task-lifecycle-rules";
 import { TaskRuntime } from "./task-runtime";
 import type { GraphDispatchBatch, GraphAgentResult } from "./gating-router";
@@ -512,7 +512,7 @@ export class Orchestrator {
     );
     this.store.insertMessage(message);
 
-    const forwardedContent = stripTargetMentionPure(
+    const forwardedContent = stripTargetMention(
       content,
       targetAgentRecord.id,
     );
@@ -588,7 +588,7 @@ export class Orchestrator {
     targetAgentId: string,
     targetRunCount: number,
   ): MessageRecord {
-    const normalizedContent = buildUserHistoryContentPure(
+    const normalizedContent = buildUserHistoryContent(
       content,
       targetAgentId,
     );
@@ -772,7 +772,7 @@ export class Orchestrator {
   private async reconcilePersistedTaskStatus(taskId: string) {
     const task = this.store.getTask(taskId);
     if (
-      !shouldFinishTaskFromPersistedStatePure({
+      !shouldFinishTaskFromPersistedState({
         taskStatus: task.status,
         topology: this.store.getTopology(),
         agents: this.store.listTaskAgents(taskId),
@@ -827,7 +827,7 @@ export class Orchestrator {
   ): string {
     const candidates = [
       parsedDecision.contentWithoutTrigger.trim(),
-      stripStructuredSignalsPure(
+      stripStructuredSignals(
         stripDecisionResponseMarkup(rawFinalMessage, allowedTriggers),
       ).trim(),
     ];
@@ -1114,7 +1114,7 @@ export class Orchestrator {
     this.syncTaskAgents(task, agents);
     const persistedAgents = this.store.listTaskAgents(taskId);
     const messages = this.store.listMessages(taskId);
-    const reconciled = reconcileTaskSnapshotFromMessagesPure({
+    const reconciled = reconcileTaskSnapshotFromMessages({
       task: this.store.getTask(taskId),
       agents: this.overlayTaskAgents(task, persistedAgents),
       messages,
@@ -1615,8 +1615,8 @@ export class Orchestrator {
       });
 
       const parsedDecision = decisionAgent
-        ? parseDecisionPure(response.finalMessage, allowedDecisionTriggers)
-        : parseDefaultAgentResultPure(response.finalMessage);
+        ? parseDecision(response.finalMessage, allowedDecisionTriggers)
+        : parseDefaultAgentResult(response.finalMessage);
       const resolvedDecision = this.resolveParsedDecisionValue({
         parsedDecision,
         decisionAgent,

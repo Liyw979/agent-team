@@ -21,7 +21,7 @@ import {
 import { OpenCodeClient, type OpenCodeExecutionResult } from "./opencode-client";
 import { Orchestrator, isTerminalTaskStatus } from "./orchestrator";
 import { compileBuiltinTopology } from "../../test-support/runtime/builtin-topology-test-helpers";
-import { parseDecision as parseDecisionPure } from "./decision-parser";
+import { parseDecision } from "./decision-parser";
 import { type GraphDispatchBatch, type GraphAgentResult } from "./gating-router";
 import { createEmptyGraphTaskState, type GraphTaskState } from "./gating-state";
 import { compileTeamDsl, type TeamDslDefinition } from "./team-dsl";
@@ -4070,7 +4070,7 @@ test("agent 运行中不会把 OpenCode runtime 过程消息持久化到 task me
 });
 
 test("判定 Agent 未返回合法标签时必须判为 invalid", () => {
-  const parsedDecision = parseDecisionPure(
+  const parsedDecision = parseDecision(
     "这是普通判定正文，标签写错了。\n\n<chalenge>请继续补充实现依据。</chalenge>",
     [],
   );
