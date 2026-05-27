@@ -2,23 +2,16 @@
  * 要求记录：
  * 1. 拓扑中的 writable 完全由 YAML 显式声明决定，允许多个 Agent 同时可写。
  * 2. 设计与修改时先读取本注释，保持最小改动范围，避免回退到隐式默认或兼容性补丁。
+ * 3. 本文件内部禁止用 null、undefined 表达 Agent 列表或 Agent 可写状态缺失，统一使用完整 AgentRecord 与空数组。
  */
 import {
   type AgentRecord,
   getTopologyNodeRecords,
   type PermissionMode,
+  type TopologyNodeRecord,
   type TopologyRecord,
 } from "@shared/types";
 import { toOpenCodeAgentId } from "./opencode-agent-id";
-
-export function resolveProjectAgents(input: {
-  dslAgents: AgentRecord[] | null;
-}): AgentRecord[] {
-  if (input.dslAgents && input.dslAgents.length > 0) {
-    return input.dslAgents.map((agent) => ({ ...agent }));
-  }
-  return [];
-}
 
 type OpenCodePermissionValue =
   | PermissionMode
@@ -49,38 +42,41 @@ function buildReadonlyAgentPermissionConfig(): OpenCodePermissionConfig {
   };
 }
 
+function readNodePrompt(node: TopologyNodeRecord): string {
+  return typeof node.prompt === "string" ? node.prompt : "";
+}
+
+function readNodeWritable(node: TopologyNodeRecord): boolean {
+  return node.writable === true;
+}
+
 export function extractDslAgentsFromTopology(
   topology: TopologyRecord,
-): AgentRecord[] | null {
+): AgentRecord[] {
   if (topology.nodes.length === 0) {
-    return null;
+    return [];
   }
   const nodeRecords = getTopologyNodeRecords(topology).filter((node) => node.kind === "agent");
   const hasDslPromptMetadata = nodeRecords.some((node) =>
     typeof node.prompt === "string" || typeof node.writable === "boolean",
   );
   if (nodeRecords.length === 0 || !hasDslPromptMetadata) {
-    return null;
+    return [];
   }
 
   const dslAgents = nodeRecords
     .map((node) => ({
       id: node.templateName,
-      prompt: typeof (node as { prompt?: unknown }).prompt === "string" ? (node as { prompt: string }).prompt : "",
-      isWritable: typeof (node as { writable?: unknown }).writable === "boolean"
-        ? (node as { writable: boolean }).writable
-        : undefined,
+      prompt: readNodePrompt(node),
+      isWritable: readNodeWritable(node),
     }))
     .filter((agent) => topology.nodes.includes(agent.id));
 
   if (dslAgents.length === 0) {
-    return null;
+    return [];
   }
 
-  return dslAgents.map((agent) => ({
-    ...agent,
-    isWritable: agent.isWritable ?? false,
-  }));
+  return dslAgents;
 }
 
 export function buildInjectedConfigFromAgents(agents: AgentRecord[]): Record<string, OpenCodeInjectedAgentConfig> {

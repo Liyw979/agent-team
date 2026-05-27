@@ -78,7 +78,6 @@ import { resolveTaskAgentIdsToPrewarm } from "./task-session-prewarm";
 import { appendAppLog, bindCurrentTaskLog } from "./app-log";
 import {
   extractDslAgentsFromTopology,
-  resolveProjectAgents,
 } from "./project-agent-source";
 
 type GroupRuleInputBase = Omit<GroupRule, "report">;
@@ -310,9 +309,7 @@ export class Orchestrator {
   }
 
   private listWorkspaceAgents(): AgentRecord[] {
-    return resolveProjectAgents({
-      dslAgents: extractDslAgentsFromTopology(this.store.getTopology()),
-    });
+    return extractDslAgentsFromTopology(this.store.getTopology());
   }
 
   async saveTopology(

@@ -5,26 +5,19 @@ import { createTopologyFlowRecord } from "@shared/types";
 import {
   buildInjectedConfigFromAgents,
   extractDslAgentsFromTopology,
-  resolveProjectAgents,
 } from "./project-agent-source";
 
-test("resolveProjectAgents 在存在 DSL agents 时直接返回 DSL prompt", () => {
-  const resolved = resolveProjectAgents({
-    dslAgents: [
-      { id: "BA", prompt: "DSL BA prompt", isWritable: false },
-      { id: "Build", prompt: "", isWritable: true },
+test("extractDslAgentsFromTopology 在没有任何 DSL metadata 时返回空数组而不是可空值", () => {
+  const resolved = extractDslAgentsFromTopology({
+    nodes: ["Build"],
+    edges: [],
+    flow: createTopologyFlowRecord({
+      nodes: ["Build"],
+      edges: [],
+    }),
+    nodeRecords: [
+      { id: "Build", kind: "agent", templateName: "Build", initialMessageRouting: { mode: "inherit" } },
     ],
-  });
-
-  assert.deepEqual(resolved, [
-    { id: "BA", prompt: "DSL BA prompt", isWritable: false },
-    { id: "Build", prompt: "", isWritable: true },
-  ]);
-});
-
-test("resolveProjectAgents 在不存在 DSL agents 时不再回退到用户自定义 prompt", () => {
-  const resolved = resolveProjectAgents({
-    dslAgents: null,
   });
 
   assert.deepEqual(resolved, []);
