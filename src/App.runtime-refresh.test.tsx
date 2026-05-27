@@ -22,7 +22,6 @@ import {
 
 import App from "./App";
 import { resolveAppUiSnapshot, type AppUiSnapshot } from "./lib/app-ui-snapshot";
-import { resolveUiSnapshotQueryStructuralSharing } from "./lib/ui-snapshot-refresh-gate";
 import { fetchUiSnapshot, submitTask } from "./lib/web-api";
 
 type GlobalPatchKey =
@@ -152,6 +151,16 @@ function createAgentFinalMessage() {
   ];
 }
 
+function createUpdatedAgentFinalMessage(content: string) {
+  const [message] = createAgentFinalMessage();
+  assert.ok(message);
+  return {
+    ...message,
+    content,
+    rawResponse: content,
+  };
+}
+
 function getRequestUrl(input: RequestInfo | URL) {
   if (typeof input === "string") {
     return new URL(input, "http://localhost");
@@ -270,7 +279,6 @@ function SubmitTaskInvalidationProbe() {
     queryKey: uiSnapshotQueryKey,
     retry: false,
     queryFn: fetchUiSnapshot,
-    structuralSharing: resolveUiSnapshotQueryStructuralSharing,
     select: resolveAppUiSnapshot,
   });
   const submitTaskMutation = useMutation({
@@ -383,6 +391,44 @@ test("App 在 ui-snapshot 自动轮询后会把新 final 消息展示出来", as
 
     await waitForAssertion(() => {
       assert.match(document.body.textContent ?? "", /挑战结论：这里的消息应当在轮询拿到全量 snapshot 后立即出现。/u);
+    });
+  } finally {
+    await appTest.cleanup();
+  }
+});
+
+test("App 在消息条数不变但同一条消息内容更新时也会刷新展示", async () => {
+  let uiSnapshotRequestCount = 0;
+  const snapshots = [
+    createUiSnapshot({
+      agentSessionId: "session-challenge-1",
+      messages: [createUpdatedAgentFinalMessage("第一版消息")],
+    }),
+    createUiSnapshot({
+      agentSessionId: "session-challenge-1",
+      messages: [createUpdatedAgentFinalMessage("第二版消息")],
+    }),
+  ];
+  const fetchImpl = (async () => {
+    const next = snapshots[Math.min(uiSnapshotRequestCount, snapshots.length - 1)]!;
+    uiSnapshotRequestCount += 1;
+    return new Response(JSON.stringify(next), { status: 200 });
+  }) as unknown as typeof fetch;
+
+  const appTest = setupAppTest(fetchImpl);
+
+  try {
+    await appTest.render();
+
+    await waitForAssertion(() => {
+      assert.match(document.body.textContent ?? "", /第一版消息/u);
+      assert.doesNotMatch(document.body.textContent ?? "", /第二版消息/u);
+    });
+
+    await appTest.tickPolling();
+
+    await waitForAssertion(() => {
+      assert.match(document.body.textContent ?? "", /第二版消息/u);
     });
   } finally {
     await appTest.cleanup();

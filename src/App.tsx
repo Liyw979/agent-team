@@ -27,7 +27,6 @@ import {
   buildAgentPromptDialogState,
   type AgentPromptDialogState,
 } from "./lib/agent-prompt-dialog";
-import { resolveUiSnapshotQueryStructuralSharing } from "./lib/ui-snapshot-refresh-gate";
 import { getUiSnapshotPollingIntervalMs } from "./lib/ui-snapshot-polling";
 import { resolveAppPanelVisibility, type AppPanelMode } from "./lib/app-panel-visibility";
 
@@ -82,7 +81,6 @@ function App() {
     queryFn: fetchUiSnapshot,
     refetchInterval: uiSnapshotPollingIntervalMs ?? false,
     refetchIntervalInBackground: true,
-    structuralSharing: resolveUiSnapshotQueryStructuralSharing,
     select: resolveAppUiSnapshot,
   });
   const submitTaskMutation = useMutation({
