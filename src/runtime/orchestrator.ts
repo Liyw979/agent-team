@@ -45,7 +45,6 @@ import { stripDecisionResponseMarkup } from "@shared/decision-response";
 import {
   parseDecision,
   parseDefaultAgentResult,
-  stripStructuredSignals,
   type ParsedDecision,
 } from "./decision-parser";
 import { OpenCodeClient } from "./opencode-client";
@@ -827,10 +826,8 @@ export class Orchestrator {
     allowedTriggers: readonly string[],
   ): string {
     const candidates = [
-      parsedDecision.contentWithoutTrigger.trim(),
-      stripStructuredSignals(
-        stripDecisionResponseMarkup(rawFinalMessage, allowedTriggers),
-      ).trim(),
+      parsedDecision.kind === "valid" ? parsedDecision.contentWithoutTrigger.trim() : "",
+      stripDecisionResponseMarkup(rawFinalMessage, allowedTriggers).trim(),
     ];
 
     return candidates.find((item) => item.length > 0) ?? "";
@@ -866,12 +863,10 @@ export class Orchestrator {
   }
 
   protected createDisplayContent(parsedDecision: ParsedDecision): string {
-    const contentWithoutTrigger = parsedDecision.contentWithoutTrigger.trim();
     if (parsedDecision.kind === "invalid") {
-      return [contentWithoutTrigger, parsedDecision.validationError]
-        .filter(Boolean)
-        .join("\n\n");
+      return parsedDecision.validationError;
     }
+    const contentWithoutTrigger = parsedDecision.contentWithoutTrigger.trim();
     if (contentWithoutTrigger) {
       return contentWithoutTrigger;
     }

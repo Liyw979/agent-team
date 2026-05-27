@@ -13,7 +13,6 @@ import {
   normalizeTopologyEdgeTrigger,
 } from "@shared/types";
 import { stripDecisionResponseMarkup } from "@shared/decision-response";
-import { normalizeDecisionDisplayContent } from "../runtime/decision-parser";
 
 export interface AgentHistoryItem {
   label: string;
@@ -234,10 +233,10 @@ function mapAgentFinalHistoryItem(input: {
     status: input.message.status,
   });
   const detail = decisionAgent
-    ? normalizeDecisionDisplayContent(
-      input.message.rawResponse,
-      allowedTriggers,
-    ).replace(/\r\n?/gu, "\n").replace(/[ \t]+\n/gu, "\n").trim()
+    ? stripDecisionResponseMarkup(input.message.rawResponse, allowedTriggers)
+      .replace(/\r\n?/gu, "\n")
+      .replace(/[ \t]+\n/gu, "\n")
+      .trim()
     : normalizeHistoryDetail(input.message.content, allowedTriggers);
 
   return {

@@ -1,68 +1,48 @@
 import { DEFAULT_TOPOLOGY_TRIGGER } from "@shared/types";
-import { extractTrailingDecisionSignalBlock, stripDecisionResponseMarkup } from "@shared/decision-response";
+import {
+  extractDecisionSignalBlock,
+  hasSingleDecisionSignalTrigger,
+  stripDecisionResponseMarkup,
+} from "@shared/decision-response";
 
 export type ParsedDecision =
   | {
       contentWithoutTrigger: string;
       kind: "valid";
       trigger: string;
-      rawDecisionBlock?: string;
     }
   | {
-      contentWithoutTrigger: string;
       kind: "invalid";
       validationError: string;
     };
 
 type ValidParsedDecision = Extract<ParsedDecision, { kind: "valid" }>;
 
-export function stripStructuredSignals(content: string): string {
-  return content
-    .split(/\r?\n/)
-    .filter((line) => !/^\s*(NEXT_AGENTS:|TASK_DONE\b|SESSION_REF:)/i.test(line))
-    .join("\n")
-    .trim();
-}
-
-export function normalizeDecisionDisplayContent(
-  content: string,
-  allowedTriggerLiterals: readonly string[],
-): string {
-  return stripStructuredSignals(
-    stripDecisionResponseMarkup(content, allowedTriggerLiterals),
-  );
-}
-
 export function parseDecision(
   content: string,
   allowedTriggers: readonly string[],
 ): ParsedDecision {
-  const signalMatch = extractTrailingDecisionSignalBlock(content, allowedTriggers);
-  if (signalMatch.kind === "found") {
+  // 2026-05-27: 用户要求 decision-parser 不再保留 stripStructuredSignals 后处理，判定回复只按显式 trigger 解析。
+  const signalMatch = extractDecisionSignalBlock(content, allowedTriggers);
+  const hasOneDecisionTrigger = hasSingleDecisionSignalTrigger(content, allowedTriggers)
+    && signalMatch.kind === "found";
+  if (!hasOneDecisionTrigger) {
     return {
-      contentWithoutTrigger: normalizeDecisionDisplayContent(
-        content,
-        allowedTriggers,
-      ),
-      kind: "valid",
-      trigger: signalMatch.trigger,
-      rawDecisionBlock: signalMatch.rawBlock,
+      kind: "invalid",
+      validationError: `回复必须有且仅有 ${allowedTriggers.join(" / ")} 之一`,
     };
   }
 
-  const contentWithoutTrigger = stripStructuredSignals(content);
   return {
-    contentWithoutTrigger,
-    kind: "invalid",
-    validationError: allowedTriggers.length > 0
-      ? `当前 Agent 必须返回以下 trigger 之一：${allowedTriggers.join(" / ")}`
-      : "当前 Agent 未配置任何可用 trigger",
+    contentWithoutTrigger: stripDecisionResponseMarkup(content, allowedTriggers).trim(),
+    kind: "valid",
+    trigger: signalMatch.trigger,
   };
 }
 
 export function parseDefaultAgentResult(content: string): ValidParsedDecision {
   return {
-    contentWithoutTrigger: stripStructuredSignals(content),
+    contentWithoutTrigger: content.trim(),
     kind: "valid",
     trigger: DEFAULT_TOPOLOGY_TRIGGER,
   };

@@ -1,5 +1,7 @@
 import { normalizeTopologyEdgeTrigger } from "./types";
 
+const DECISION_TAG_PATTERN = /<\w+>/gu;
+
 function buildDecisionEndLabel(label: string): string {
   return `</${label.slice(1, -1)}>`;
 }
@@ -14,6 +16,7 @@ interface DecisionAnchorMatch {
   index: number;
   endIndex: number;
   responseRaw: string;
+  markerRanges: DecisionMarkerRange[];
 }
 
 interface DecisionMarkerRange {
@@ -29,25 +32,7 @@ interface FoundDecisionSignalBlock {
   trigger: string;
 }
 
-interface FoundDecisionAnchorResult {
-  kind: "found";
-  anchor: DecisionAnchorMatch;
-}
-
-interface FoundDecisionStartTokenResult {
-  kind: "found";
-  token: DecisionSignalToken;
-}
-
 const MISSING_DECISION_SIGNAL_BLOCK = {
-  kind: "missing",
-} as const;
-
-const MISSING_DECISION_ANCHOR_RESULT = {
-  kind: "missing",
-} as const;
-
-const MISSING_DECISION_START_TOKEN_RESULT = {
   kind: "missing",
 } as const;
 
@@ -65,23 +50,61 @@ function normalizeDecisionSignalTokens(
   }));
 }
 
-// 用户要求：allowedTriggers 必须由调用方显式传入，避免缺失上下文被默认空集合掩盖。
-export function extractTrailingDecisionSignalBlock(
+function isBareDecisionAnchor(anchor: DecisionAnchorMatch): boolean {
+  const range = anchor.markerRanges[0];
+  return anchor.markerRanges.length === 1
+    && range !== undefined
+    && range.start === anchor.index
+    && range.end === anchor.endIndex
+    && anchor.responseRaw.trim() === "";
+}
+
+function isBoundaryRepeatedBareTrigger(
+  content: string,
+  anchors: readonly DecisionAnchorMatch[],
+): boolean {
+  if (anchors.length !== 2) {
+    return false;
+  }
+  const [first, second] = anchors;
+  return first !== undefined
+    && second !== undefined
+    && first.trigger === second.trigger
+    && isBareDecisionAnchor(first)
+    && isBareDecisionAnchor(second)
+    && first.index === 0
+    && second.endIndex === content.length
+    && content.slice(first.endIndex, second.index).trim().length > 0;
+}
+
+export function hasSingleDecisionSignalTrigger(
+  content: string,
+  allowedTriggers: readonly string[],
+): boolean {
+  const trimmed = content.trim();
+  const tokens = normalizeDecisionSignalTokens(allowedTriggers);
+  const anchors = collectDecisionSignalAnchors(trimmed, tokens);
+  return anchors.length === 1 || isBoundaryRepeatedBareTrigger(trimmed, anchors);
+}
+
+// 用户要求：allowedTriggers 必须由调用方显式传入；共享解析结果不引入 multiple 状态。
+export function extractDecisionSignalBlock(
   content: string,
   allowedTriggers: readonly string[],
 ): DecisionSignalBlockResult {
   const trimmed = content.trim();
   const tokens = normalizeDecisionSignalTokens(allowedTriggers);
-  const structure = collectDecisionSignalStructure(trimmed, tokens);
-  if (structure.anchorResult.kind === "missing") {
+  const anchors = collectDecisionSignalAnchors(trimmed, tokens);
+  const anchor = anchors.at(-1);
+  if (!anchor) {
     return MISSING_DECISION_SIGNAL_BLOCK;
   }
-  const anchor = structure.anchorResult.anchor;
 
-  const body = stripDecisionSignalMarkers(trimmed, structure.markerRanges, 0, anchor.index).trim();
+  const markerRanges = mergeDecisionMarkerRanges(anchors.flatMap((match) => match.markerRanges));
+  const body = stripDecisionSignalMarkers(trimmed, markerRanges, 0, anchor.index).trim();
   const trailingRemainder = stripDecisionSignalMarkers(
     trimmed,
-    structure.markerRanges,
+    markerRanges,
     anchor.endIndex,
     trimmed.length,
   ).trim();
@@ -96,7 +119,7 @@ export function extractTrailingDecisionSignalBlock(
   };
 }
 
-// 用户要求：allowedTriggers 必须由调用方显式传入，避免缺失上下文被默认空集合掩盖。
+// 用户要求：allowedTriggers 必须由调用方显式传入，避免缺失上下文被空集合掩盖。
 export function stripDecisionResponseMarkup(
   content: string,
   allowedTriggers: readonly string[],
@@ -106,8 +129,12 @@ export function stripDecisionResponseMarkup(
     return "";
   }
 
-  const parsed = extractTrailingDecisionSignalBlock(trimmed, allowedTriggers);
-  if (parsed.kind === "missing") {
+  if (!hasSingleDecisionSignalTrigger(trimmed, allowedTriggers)) {
+    return trimmed;
+  }
+
+  const parsed = extractDecisionSignalBlock(trimmed, allowedTriggers);
+  if (parsed.kind !== "found") {
     return trimmed;
   }
 
@@ -120,166 +147,35 @@ export function stripDecisionResponseMarkup(
   return [parsed.body, parsed.response].filter(Boolean).join("\n\n").trim();
 }
 
-function escapeForRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-}
-
-function collectDecisionSignalStructure(
-  content: string,
-  tokens: readonly DecisionSignalToken[],
-): {
-  anchorResult: FoundDecisionAnchorResult | typeof MISSING_DECISION_ANCHOR_RESULT;
-  markerRanges: DecisionMarkerRange[];
-} {
-  const markerRanges: DecisionMarkerRange[] = [];
-  const sortedTokens = [...tokens].sort((left, right) => right.start.length - left.start.length);
-  const wrappedMatches = collectTopLevelWrappedMatches(content, sortedTokens);
-  const wrappedRanges = wrappedMatches.map((match) => ({
-    start: match.index,
-    end: match.endIndex,
-  }));
-  for (const match of wrappedMatches) {
-    const endToken = buildDecisionEndLabel(match.trigger);
-    markerRanges.push(
-      { start: match.index, end: match.index + match.trigger.length },
-      { start: match.endIndex - endToken.length, end: match.endIndex },
-    );
-  }
-
-  let lastMatchResult: FoundDecisionAnchorResult | typeof MISSING_DECISION_ANCHOR_RESULT =
-    MISSING_DECISION_ANCHOR_RESULT;
-  for (const match of wrappedMatches) {
-    if (lastMatchResult.kind === "missing" || match.index >= lastMatchResult.anchor.index) {
-      lastMatchResult = {
-        kind: "found",
-        anchor: match,
-      };
-    }
-  }
-
-  for (const token of sortedTokens) {
-    const barePattern = new RegExp(escapeForRegex(token.start), "gu");
-    // 协议约束是“命中允许 trigger 即有效”，因此 bare trigger 只要不位于其他 wrapped trigger 内，
-    // 无论出现在开头、正文中还是尾部，都参与最终决策锚点判定。
-    for (const bareMatch of content.matchAll(barePattern)) {
-      const start = bareMatch.index;
-      if (typeof start !== "number") {
-        continue;
-      }
-      const insideWrappedRange = wrappedRanges.some((range) => start >= range.start && start < range.end);
-      if (insideWrappedRange) {
-        continue;
-      }
-
-      markerRanges.push({ start, end: start + token.start.length });
-      if (lastMatchResult.kind === "missing" || start >= lastMatchResult.anchor.index) {
-        lastMatchResult = {
-          kind: "found",
-          anchor: {
-            trigger: token.start,
-            index: start,
-            endIndex: start + token.start.length,
-            responseRaw: "",
-          },
-        };
-      }
-    }
-  }
-
-  return {
-    anchorResult: lastMatchResult,
-    markerRanges: mergeDecisionMarkerRanges(markerRanges),
-  };
-}
-
-function collectTopLevelWrappedMatches(
+function collectDecisionSignalAnchors(
   content: string,
   tokens: readonly DecisionSignalToken[],
 ): DecisionAnchorMatch[] {
-  const matches: DecisionAnchorMatch[] = [];
-  const stack: Array<{ token: DecisionSignalToken; markerStart: number }> = [];
-  let index = 0;
-
-  while (index < content.length) {
-    const top = stack[stack.length - 1];
-    if (!top) {
-      const startTokenResult = findDecisionStartTokenAt(content, index, tokens);
-      if (startTokenResult.kind === "missing") {
-        index += 1;
-        continue;
+  const tokenByStart = new Map(tokens.map((token) => [token.start, token]));
+  return [...content.matchAll(DECISION_TAG_PATTERN)]
+    .flatMap((match) => {
+      const start = match.index;
+      const token = tokenByStart.get(match[0]);
+      if (typeof start !== "number" || !token) {
+        return [];
       }
 
-      const startToken = startTokenResult.token;
-      stack.push({ token: startToken, markerStart: index });
-      index += startToken.start.length;
-      continue;
-    }
-
-    if (content.startsWith(top.token.start, index)) {
-      const remainingEndTokenCount = countDecisionTokenOccurrencesFrom(content, top.token.end, index);
-      if (remainingEndTokenCount <= stack.length) {
-        index += top.token.start.length;
-        continue;
-      }
-      stack.push({ token: top.token, markerStart: index });
-      index += top.token.start.length;
-      continue;
-    }
-
-    if (content.startsWith(top.token.end, index)) {
-      stack.pop();
-      const endIndex = index + top.token.end.length;
-      if (stack.length === 0) {
-        matches.push({
-          trigger: top.token.start,
-          index: top.markerStart,
-          endIndex,
-          responseRaw: content.slice(
-            top.markerStart + top.token.start.length,
-            index,
-          ),
-        });
-      }
-      index = endIndex;
-      continue;
-    }
-
-    index += 1;
-  }
-
-  return matches;
-}
-
-function countDecisionTokenOccurrencesFrom(
-  content: string,
-  token: string,
-  startIndex: number,
-): number {
-  let matchIndex = content.indexOf(token, startIndex);
-  let count = 0;
-
-  while (matchIndex >= 0) {
-    count += 1;
-    matchIndex = content.indexOf(token, matchIndex + token.length);
-  }
-
-  return count;
-}
-
-function findDecisionStartTokenAt(
-  content: string,
-  index: number,
-  tokens: readonly DecisionSignalToken[],
-): FoundDecisionStartTokenResult | typeof MISSING_DECISION_START_TOKEN_RESULT {
-  for (const token of tokens) {
-    if (content.startsWith(token.start, index)) {
-      return {
-        kind: "found",
-        token,
-      };
-    }
-  }
-  return MISSING_DECISION_START_TOKEN_RESULT;
+      const closeStart = content.indexOf(token.end, start + token.start.length);
+      const wrapped = closeStart >= 0;
+      const endIndex = wrapped ? closeStart + token.end.length : start + token.start.length;
+      return [{
+        trigger: token.start,
+        index: start,
+        endIndex,
+        responseRaw: wrapped ? content.slice(start + token.start.length, closeStart) : "",
+        markerRanges: wrapped
+          ? [
+            { start, end: start + token.start.length },
+            { start: closeStart, end: endIndex },
+          ]
+          : [{ start, end: start + token.start.length }],
+      } satisfies DecisionAnchorMatch];
+    });
 }
 
 function mergeDecisionMarkerRanges(
