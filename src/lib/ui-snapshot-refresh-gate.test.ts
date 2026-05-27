@@ -23,7 +23,6 @@ function createSystemMessage(id: string, sender: "system" | "BA", content: strin
   if (sender === "system") {
     return {
       id,
-      taskId: "task-1",
       sender: "system",
       content,
       timestamp: toUtcIsoTimestamp(timestamp),
@@ -33,7 +32,6 @@ function createSystemMessage(id: string, sender: "system" | "BA", content: strin
 
   return {
     id,
-    taskId: "task-1",
     sender: "BA",
     content,
     timestamp: toUtcIsoTimestamp(timestamp),
@@ -82,8 +80,6 @@ function createWorkspaceSnapshot(): WorkspaceSnapshot {
     name: "empty",
     agents: [],
     topology: TEST_TOPOLOGY,
-    messages: [],
-    tasks: [],
   };
 }
 
@@ -123,7 +119,6 @@ function createUiSnapshotPayload(input: {
       },
       agents: [
         {
-          taskId: "task-1",
           id: "BA",
           opencodeSessionId: "",
           opencodeAttachBaseUrl: "",
@@ -131,7 +126,6 @@ function createUiSnapshotPayload(input: {
           runCount: baRunCount,
         },
         {
-          taskId: "task-1",
           id: "UnitTest",
           opencodeSessionId: "",
           opencodeAttachBaseUrl: "",
@@ -139,7 +133,6 @@ function createUiSnapshotPayload(input: {
           runCount: unitTestRunCount,
         },
         {
-          taskId: "task-1",
           id: "Build",
           opencodeSessionId: "",
           opencodeAttachBaseUrl: "",
@@ -486,7 +479,6 @@ test("较小请求号若首次带回新的 runtime agent，也必须被视为语
   assert.equal(lowerRequestPayload.kind, "task");
   lowerRequestPayload.task.agents.push({
     id: "误报论证-2",
-    taskId: "task-1",
     opencodeSessionId: "session-challenge-2",
     opencodeAttachBaseUrl: "http://localhost:4310",
     status: "running",
@@ -666,7 +658,6 @@ test("较小请求号若首次带回新的 runtime agent，查询缓存也必须
   assert.equal(nextPayload.kind, "task");
   nextPayload.task.agents.push({
     id: "误报论证-2",
-    taskId: "task-1",
     opencodeSessionId: "session-challenge-2",
     opencodeAttachBaseUrl: "http://localhost:4310",
     status: "running",

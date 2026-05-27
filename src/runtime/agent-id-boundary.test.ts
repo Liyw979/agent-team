@@ -8,7 +8,6 @@ import { createUserDispatchDecision } from "./gating-router";
 
 test("用户派发决策使用 agentId 字段表达来源和目标", () => {
   const state = createEmptyGraphTaskState({
-    taskId: "task-1",
     topology: {
       nodes: ["Build"],
       edges: [],
@@ -54,7 +53,6 @@ test("用户派发决策使用 agentId 字段表达来源和目标", () => {
 
 test("用户直接命中 group 时不会把 group 节点伪造成来源 agent", () => {
   const state = createEmptyGraphTaskState({
-    taskId: "task-group-user-dispatch",
     topology: {
       nodes: ["讨论", "执行"],
       edges: [],

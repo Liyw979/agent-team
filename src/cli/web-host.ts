@@ -9,7 +9,6 @@ import type {
   TaskSnapshot,
   SubmitTaskPayload,
   UiSnapshotPayload,
-  WorkspaceSnapshot,
 } from "@shared/types";
 import type { Orchestrator } from "../runtime/orchestrator";
 import type { OpenCodeSessionActivity } from "../runtime/opencode-client";
@@ -128,21 +127,8 @@ function pruneTaskMessagesForUi(
   }, []);
 }
 
-function pruneWorkspaceSnapshotForUi(
-  workspace: WorkspaceSnapshot,
-  currentTaskId: string,
-): WorkspaceSnapshot {
-  return {
-    ...workspace,
-    messages: [],
-    tasks: workspace.tasks.map((taskSnapshot) =>
-      taskSnapshot.task.id === currentTaskId
-        ? {
-            ...taskSnapshot,
-            messages: [],
-          }
-        : taskSnapshot),
-  };
+function isMissingCurrentTaskError(error: unknown): boolean {
+  return error instanceof Error && error.message === "当前没有 Task";
 }
 
 async function buildUiSnapshotPayload(
@@ -150,7 +136,13 @@ async function buildUiSnapshotPayload(
   options: Pick<StartWebHostOptions, "port" | "userDataPath">,
 ): Promise<UiSnapshotPayload> {
   const workspace = await orchestrator.getWorkspaceSnapshot();
-  if (workspace.tasks.length === 0) {
+  let currentTask: TaskSnapshot;
+  try {
+    currentTask = await orchestrator.getTaskSnapshot();
+  } catch (error) {
+    if (!isMissingCurrentTaskError(error)) {
+      throw error;
+    }
     return {
       kind: "workspace",
       workspace,
@@ -163,10 +155,7 @@ async function buildUiSnapshotPayload(
 
   // 2026-05-27: 用户要求在保持 snapshot 外层格式的前提下降低原始 payload，
   // task 模式下不再重复传输 workspace 中的重型消息内容，并移除已结束 agent 的运行态过程消息。
-  const taskWithLiveProgress = await withLiveProgressMessages(
-    orchestrator,
-    await orchestrator.getTaskSnapshot(),
-  );
+  const taskWithLiveProgress = await withLiveProgressMessages(orchestrator, currentTask);
   const task = {
     ...taskWithLiveProgress,
     messages: pruneTaskMessagesForUi(
@@ -176,7 +165,7 @@ async function buildUiSnapshotPayload(
   };
   return {
     kind: "task",
-    workspace: pruneWorkspaceSnapshotForUi(workspace, task.task.id),
+    workspace,
     task,
     launchCwd: workspace.cwd,
     taskLogFilePath: buildTaskLogFilePath(options.userDataPath, task.task.id),
@@ -211,21 +200,19 @@ async function listLiveProgressMessages(
       .map(async (agent) => {
         const activities = await orchestrator.opencodeClient.listSessionActivities(agent.opencodeSessionId);
         return activities.map((activity) =>
-          createLiveProgressMessage(snapshot.task.id, agent, activity));
+          createLiveProgressMessage(agent, activity));
       }),
   );
   return grouped.flat();
 }
 
 function createLiveProgressMessage(
-  taskId: string,
   agent: TaskAgentRecord,
   activity: OpenCodeSessionActivity,
 ): AgentProgressMessageRecord {
   // 2026-05-27: live progress 仍保留完整 detail，content 改为 label，避免同一大文本在 snapshot 中重复两次。
   return {
     id: `live:${agent.id}:${activity.sourceMessageId}:${activity.sourcePartIndex}`,
-    taskId,
     content: activity.label,
     sender: agent.id,
     timestamp: activity.timestamp,

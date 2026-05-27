@@ -483,7 +483,6 @@ test("scheduler script emulator 纯函数在 finished 状态下不会再为下�
           signalDone: false,
         },
         state: createEmptyGraphTaskState({
-          taskId: "scheduler-script-emulator-prefer-finished-1",
           topology: withAgentNodeRecords({ nodes: ["Build", "TaskReview"], edges: [] }),
         }),
         decision: {
@@ -505,7 +504,6 @@ test("scheduler script emulator 纯函数在 finished 状态下不会再为下�
           signalDone: false,
         },
         state: createEmptyGraphTaskState({
-          taskId: "scheduler-script-emulator-prefer-finished-2",
           topology: withAgentNodeRecords({ nodes: ["Build", "TaskReview"], edges: [] }),
         }),
         decision: {
@@ -546,7 +544,6 @@ test("scheduler script emulator 纯函数在下一条是显式 dispatch 行时�
     ],
   });
   const state = createEmptyGraphTaskState({
-    taskId: "scheduler-script-emulator-test",
     topology,
   });
   const decision: GraphRoutingDecision = {
@@ -610,7 +607,6 @@ test("scheduler script emulator 纯函数允许 decisionAgent 的 execute_batch 
     ],
   });
   const state = createEmptyGraphTaskState({
-    taskId: "scheduler-script-emulator-decision-next-sender",
     topology,
   });
   const decision: GraphRoutingDecision = {
@@ -655,7 +651,6 @@ test("scheduler script emulator 纯函数不允许 execute_batch 在脚本可见
     ],
   });
   const state = createEmptyGraphTaskState({
-    taskId: "scheduler-script-emulator-hidden-runtime-target",
     topology,
   });
   state.runtimeNodes = [
@@ -831,7 +826,6 @@ test("scheduler script emulator 纯函数会在脚本提前结束时带出未完
     edges: [],
   });
   const state = createEmptyGraphTaskState({
-    taskId: "scheduler-script-emulator-unexpected-end",
     topology,
   });
   state.activeHandoffBatchBySource = {

@@ -106,8 +106,6 @@ function createUiSnapshot(input: {
         },
       ],
       topology: createSingleAgentTopology("误报论证-1"),
-      messages: [],
-      tasks: [],
     },
     task: {
       task: {
@@ -123,7 +121,6 @@ function createUiSnapshot(input: {
       agents: [
         {
           id: "误报论证-1",
-          taskId: TASK_ID,
           opencodeSessionId: input.agentSessionId,
           opencodeAttachBaseUrl: input.agentSessionId ? "http://localhost:4310" : "",
           status: "completed",
@@ -143,7 +140,6 @@ function createAgentFinalMessage() {
   return [
     {
       id: "challenge-final-1",
-      taskId: TASK_ID,
       sender: "误报论证-1",
       content: "挑战结论：这里的消息应当在轮询拿到全量 snapshot 后立即出现。",
       timestamp: toUtcIsoTimestamp("2026-04-29T10:00:02.000Z"),

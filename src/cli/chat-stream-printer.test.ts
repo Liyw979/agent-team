@@ -43,7 +43,6 @@ function createMessage(input: TestMessageInput): MessageRecord {
   if (input.kind === "user") {
     return {
       id: input.id,
-      taskId: "task-1",
       sender: "user",
       timestamp: toUtcIsoTimestamp(input.timestamp),
       content: input.content,
@@ -57,7 +56,6 @@ function createMessage(input: TestMessageInput): MessageRecord {
   if (input.kind === "agent-final") {
     return {
       id: input.id,
-      taskId: "task-1",
       sender: input.sender,
       timestamp: toUtcIsoTimestamp(input.timestamp),
       content: input.content,
@@ -71,7 +69,6 @@ function createMessage(input: TestMessageInput): MessageRecord {
   if (input.kind === "agent-dispatch") {
     return {
       id: input.id,
-      taskId: "task-1",
       sender: input.sender,
       timestamp: toUtcIsoTimestamp(input.timestamp),
       content: input.content,
@@ -84,7 +81,6 @@ function createMessage(input: TestMessageInput): MessageRecord {
   if (input.kind === "task-completed") {
     return {
       id: input.id,
-      taskId: "task-1",
       sender: "system",
       timestamp: toUtcIsoTimestamp(input.timestamp),
       content: input.content,
@@ -95,7 +91,6 @@ function createMessage(input: TestMessageInput): MessageRecord {
   if (input.kind === "task-round-finished") {
     return {
       id: input.id,
-      taskId: "task-1",
       sender: "system",
       timestamp: toUtcIsoTimestamp(input.timestamp),
       content: input.content,
@@ -106,7 +101,6 @@ function createMessage(input: TestMessageInput): MessageRecord {
   if (input.kind === "task-created") {
     return {
       id: input.id,
-      taskId: "task-1",
       sender: "system",
       timestamp: toUtcIsoTimestamp(input.timestamp),
       content: input.content,
@@ -115,7 +109,6 @@ function createMessage(input: TestMessageInput): MessageRecord {
   }
   return {
     id: input.id,
-    taskId: "task-1",
     sender: "system",
     timestamp: toUtcIsoTimestamp(input.timestamp),
     content: input.content,
@@ -219,7 +212,6 @@ test("renderChatStreamEntries 输出的是群聊文本，不包含 agent runtime
       messageChain: [
         {
           id: "m1-final",
-          taskId: "task-1",
           sender: "Build",
           timestamp: toUtcIsoTimestamp("2026-04-19T10:00:00.000Z"),
           content: "Build 已完成。",
@@ -231,7 +223,6 @@ test("renderChatStreamEntries 输出的是群聊文本，不包含 agent runtime
         },
         {
           id: "m1-dispatch",
-          taskId: "task-1",
           sender: "Build",
           timestamp: toUtcIsoTimestamp("2026-04-19T10:00:00.000Z"),
           content: "@CodeReview",

@@ -435,7 +435,6 @@ async function runSchedulerScriptInternal(
   assert.ok(initialTarget, "第一条 user 消息必须以 @Agent 开头");
 
   let state = createEmptyGraphTaskState({
-    taskId: "scheduler-script-emulator",
     topology: options.topology,
   });
   let currentDecision = createUserDispatchDecision(state, {

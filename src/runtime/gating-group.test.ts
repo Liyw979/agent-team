@@ -85,7 +85,6 @@ function link(
 test("materializeRuntimeGroupAgentsForItems 会把 finding 批量实例化进 GraphTaskState", () => {
   const topology = createGroupTopology();
   const state = createEmptyGraphTaskState({
-    taskId: "task-group-1",
     topology,
   });
 
@@ -128,7 +127,6 @@ test("materializeRuntimeGroupAgentsForItems 展开嵌套 group 时会继承父�
     ],
   }).topology;
   const state = createEmptyGraphTaskState({
-    taskId: "task-nested-group-runtime",
     topology,
   });
 

@@ -12,14 +12,19 @@ import type {
 interface WorkspaceStateFile {
   version: number;
   topology: TopologyRecord;
-  tasks: TaskRecord[];
+  taskSlot: TaskSlot;
   taskAgents: TaskAgentRecord[];
   messages: MessageRecord[];
 }
 
-function sortByCreatedAtDesc<T extends { createdAt: string }>(items: T[]): T[] {
-  return [...items].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-}
+type TaskSlot =
+  | {
+      kind: "present";
+      task: TaskRecord;
+    }
+  | {
+      kind: "empty";
+    };
 
 function getMessageKindSortRank(message: MessageRecord): number {
   switch (message.kind) {
@@ -89,7 +94,7 @@ function createDefaultWorkspaceState(): WorkspaceStateFile {
         writableNodeIds: new Set(),
       }),
     },
-    tasks: [],
+    taskSlot: { kind: "empty" },
     taskAgents: [],
     messages: [],
   };
@@ -102,80 +107,71 @@ export class StoreService {
     this.state = createDefaultWorkspaceState();
   }
 
-  listTasks(): TaskRecord[] {
-    return sortByCreatedAtDesc(this.state.tasks);
-  }
-
-  getTask(taskId: string): TaskRecord {
-    const task = this.state.tasks.find((item) => item.id === taskId);
-    if (!task) {
-      throw new Error(`Task ${taskId} not found`);
+  getTask(): TaskRecord {
+    if (this.state.taskSlot.kind === "empty") {
+      throw new Error("当前没有 Task");
     }
-    return task;
+    return this.state.taskSlot.task;
   }
 
   insertTask(record: TaskRecord) {
     this.updateWorkspaceState((state) => ({
       ...state,
-      tasks: uniqueById([...state.tasks, record]),
+      taskSlot: {
+        kind: "present",
+        task: record,
+      },
     }));
   }
 
-  deleteTask(taskId: string) {
+  updateTaskStatus(status: TaskRecord["status"], completedAt = "") {
     this.updateWorkspaceState((state) => ({
       ...state,
-      tasks: state.tasks.filter((task) => task.id !== taskId),
-      taskAgents: state.taskAgents.filter((agent) => agent.taskId !== taskId),
-      messages: state.messages.filter((message) => message.taskId !== taskId),
-    }));
-  }
-
-  updateTaskStatus(taskId: string, status: TaskRecord["status"], completedAt = "") {
-    this.updateWorkspaceState((state) => ({
-      ...state,
-      tasks: state.tasks.map((task) =>
-        task.id === taskId
-          ? {
-              ...task,
+      taskSlot: state.taskSlot.kind === "present"
+        ? {
+            kind: "present",
+            task: {
+              ...state.taskSlot.task,
               status,
               completedAt,
-            }
-          : task,
-      ),
+            },
+          }
+        : state.taskSlot,
     }));
   }
 
-  updateTaskAgentCount(taskId: string, agentCount: number) {
+  updateTaskAgentCount(agentCount: number) {
     this.updateWorkspaceState((state) => ({
       ...state,
-      tasks: state.tasks.map((task) =>
-        task.id === taskId
-          ? {
-              ...task,
+      taskSlot: state.taskSlot.kind === "present"
+        ? {
+            kind: "present",
+            task: {
+              ...state.taskSlot.task,
               agentCount,
-            }
-          : task,
-      ),
+            },
+          }
+        : state.taskSlot,
     }));
   }
 
-  updateTaskInitialized(taskId: string, initializedAt: string) {
+  updateTaskInitialized(initializedAt: string) {
     this.updateWorkspaceState((state) => ({
       ...state,
-      tasks: state.tasks.map((task) =>
-        task.id === taskId
-          ? {
-              ...task,
+      taskSlot: state.taskSlot.kind === "present"
+        ? {
+            kind: "present",
+            task: {
+              ...state.taskSlot.task,
               initializedAt,
-            }
-          : task,
-      ),
+            },
+          }
+        : state.taskSlot,
     }));
   }
 
-  listTaskAgents(taskId: string): TaskAgentRecord[] {
+  listTaskAgents(): TaskAgentRecord[] {
     return [...this.state.taskAgents]
-      .filter((agent) => agent.taskId === taskId)
       .sort((left, right) => left.id.localeCompare(right.id));
   }
 
@@ -186,11 +182,11 @@ export class StoreService {
     }));
   }
 
-  updateTaskAgentRun(taskId: string, agentId: string, status: TaskAgentRecord["status"]) {
+  updateTaskAgentRun(agentId: string, status: TaskAgentRecord["status"]) {
     this.updateWorkspaceState((state) => ({
       ...state,
       taskAgents: state.taskAgents.map((agent) =>
-        agent.taskId === taskId && agent.id === agentId
+        agent.id === agentId
           ? {
               ...agent,
               status,
@@ -201,11 +197,11 @@ export class StoreService {
     }));
   }
 
-  updateTaskAgentStatus(taskId: string, agentId: string, status: TaskAgentRecord["status"]) {
+  updateTaskAgentStatus(agentId: string, status: TaskAgentRecord["status"]) {
     this.updateWorkspaceState((state) => ({
       ...state,
       taskAgents: state.taskAgents.map((agent) =>
-        agent.taskId === taskId && agent.id === agentId
+        agent.id === agentId
           ? {
               ...agent,
               status,
@@ -226,12 +222,8 @@ export class StoreService {
     }));
   }
 
-  listMessages(taskId?: string | null): MessageRecord[] {
-    const scoped =
-      typeof taskId === "string"
-        ? this.state.messages.filter((message) => message.taskId === taskId)
-        : this.state.messages;
-    return sortMessages(scoped);
+  listMessages(): MessageRecord[] {
+    return sortMessages(this.state.messages);
   }
 
   insertMessage(record: MessageRecord) {

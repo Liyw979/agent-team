@@ -78,13 +78,10 @@ type TestMessageInput =
     });
 
 function createMessage(input: TestMessageInput): MessageRecord {
-  const taskId = "task-id";
-
   switch (input.kind) {
     case "agent-progress":
       return {
         id: input.id,
-        taskId,
         content: input.content,
         sender: input.sender,
         timestamp: input.timestamp,
@@ -99,7 +96,6 @@ function createMessage(input: TestMessageInput): MessageRecord {
     case "agent-final": {
       const base: Omit<AgentFinalMessageRecord, "routingKind" | "trigger"> = {
         id: input.id,
-        taskId,
         content: input.content,
         sender: input.sender,
         timestamp: input.timestamp,
@@ -127,7 +123,6 @@ function createMessage(input: TestMessageInput): MessageRecord {
     case "agent-final-with-run": {
       const base: Omit<AgentFinalMessageRecord, "routingKind" | "trigger"> = {
         id: input.id,
-        taskId,
         content: input.content,
         sender: input.sender,
         timestamp: input.timestamp,
@@ -155,7 +150,6 @@ function createMessage(input: TestMessageInput): MessageRecord {
     case "agent-dispatch":
       return {
         id: input.id,
-        taskId,
         content: input.content,
         sender: input.sender,
         timestamp: input.timestamp,
@@ -167,7 +161,6 @@ function createMessage(input: TestMessageInput): MessageRecord {
     case "agent-dispatch-with-runs":
       return {
         id: input.id,
-        taskId,
         content: input.content,
         sender: input.sender,
         timestamp: input.timestamp,
@@ -179,7 +172,6 @@ function createMessage(input: TestMessageInput): MessageRecord {
     case "user":
       return {
         id: input.id,
-        taskId,
         content: input.content,
         sender: "user",
         timestamp: input.timestamp,
@@ -192,7 +184,6 @@ function createMessage(input: TestMessageInput): MessageRecord {
     case "task-created":
       return {
         id: input.id,
-        taskId,
         content: input.content,
         sender: "system",
         timestamp: input.timestamp,
@@ -201,7 +192,6 @@ function createMessage(input: TestMessageInput): MessageRecord {
     case "system-message":
       return {
         id: input.id,
-        taskId,
         content: input.content,
         sender: "system",
         timestamp: input.timestamp,
@@ -210,7 +200,6 @@ function createMessage(input: TestMessageInput): MessageRecord {
     case "task-completed":
       return {
         id: input.id,
-        taskId,
         content: input.content,
         sender: "system",
         timestamp: input.timestamp,
@@ -220,7 +209,6 @@ function createMessage(input: TestMessageInput): MessageRecord {
     case "task-round-finished":
       return {
         id: input.id,
-        taskId,
         content: input.content,
         sender: "system",
         timestamp: input.timestamp,

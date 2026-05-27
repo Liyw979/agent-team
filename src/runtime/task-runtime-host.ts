@@ -14,19 +14,16 @@ export interface TaskRuntimeBatchRunner {
 
 export interface TaskRuntimeLoopHost {
   createBatchRunners(input: {
-    taskId: string;
     state: GraphTaskState;
     batch: GraphDispatchBatch;
   }): Promise<TaskRuntimeBatchRunner[]>;
   completeTask(
     input:
       | {
-          taskId: string;
           status: "finished";
           finishReason: string;
         }
       | {
-          taskId: string;
           status: "failed";
           failureReason: string;
         },

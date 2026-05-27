@@ -36,7 +36,6 @@ function createAgentFinalMessage(
 ): AgentFinalMessageRecord {
   const base: Omit<AgentFinalMessageRecord, "routingKind" | "trigger"> = {
     id: input.id,
-    taskId: "task-1",
     sender: input.sender,
     content: input.content,
     timestamp: toUtcIsoTimestamp(input.timestamp),
@@ -70,7 +69,6 @@ function createTaskCompletedMessage(input: {
 }): MessageRecord {
   return {
     id: input.id,
-    taskId: "task-1",
     sender: "system",
     content: input.content,
     timestamp: toUtcIsoTimestamp(input.timestamp),
@@ -92,7 +90,6 @@ function createAgentProgressMessage(input: {
 }): MessageRecord {
   return {
     id: input.id,
-    taskId: "task-1",
     sender: input.sender,
     content: input.content,
     timestamp: toUtcIsoTimestamp(input.timestamp),
@@ -350,7 +347,6 @@ test("buildAgentHistoryItems 遇到多个同名 allowed tag 时保留 rawRespons
   const messages: MessageRecord[] = [
     {
       id: "decision-same-trigger-example",
-      taskId: "task-1",
       sender: "TaskReview",
       content: "请检查示例 <continue>done</continue> 是否出现在文档中",
       timestamp: toUtcIsoTimestamp("2026-04-20T09:05:00.000Z"),
@@ -385,7 +381,6 @@ test("buildAgentHistoryItems 遇到开头多个同名 allowed tag 时保留 rawR
   const messages: MessageRecord[] = [
     {
       id: "decision-leading-trigger-example",
-      taskId: "task-1",
       sender: "TaskReview",
       content: "<continue>done</continue> 是示例",
       timestamp: toUtcIsoTimestamp("2026-04-20T09:05:00.000Z"),
@@ -420,7 +415,6 @@ test("buildAgentHistoryItems 只移除 rawResponse 里的 trigger 标签", () =>
   const messages: MessageRecord[] = [
     {
       id: "decision-with-structured-signals",
-      taskId: "task-1",
       sender: "TaskReview",
       content: "请继续补证。",
       timestamp: toUtcIsoTimestamp("2026-04-20T09:05:00.000Z"),

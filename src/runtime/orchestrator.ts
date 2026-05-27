@@ -164,10 +164,18 @@ interface WorkspaceRecord {
 }
 
 interface TaskRuntimeOverlay {
-  taskId: string;
   attachBaseUrl: string;
   agentSessions: Map<string, string>;
 }
+
+type TaskRuntimeOverlaySlot =
+  | {
+      kind: "ready";
+      overlay: TaskRuntimeOverlay;
+    }
+  | {
+      kind: "empty";
+    };
 
 type AgentExecutionPrompt =
   | {
@@ -236,12 +244,12 @@ export class Orchestrator {
   readonly cwd: string;
   private readonly runtime = new TaskRuntime({
     host: {
-      createBatchRunners: async ({ taskId, state, batch }) =>
-        this.createRuntimeBatchRunners(taskId, state, batch),
+      createBatchRunners: async ({ state, batch }) =>
+        this.createRuntimeBatchRunners(state, batch),
       completeTask: async (input) => this.completeTask(input),
     },
   });
-  private readonly taskRuntimeOverlays = new Map<string, TaskRuntimeOverlay>();
+  private taskRuntimeOverlaySlot: TaskRuntimeOverlaySlot = { kind: "empty" };
   readonly pendingTaskRuns = new Set<Promise<void>>();
   private readonly terminalLauncher: (command: string) => Promise<void>;
   private isDisposing = false;
@@ -271,7 +279,7 @@ export class Orchestrator {
     } else if (!awaitPendingTaskRuns) {
       this.pendingTaskRuns.clear();
     }
-    this.taskRuntimeOverlays.clear();
+    this.taskRuntimeOverlaySlot = { kind: "empty" };
     try {
       return await this.opencodeClient.shutdown();
     } finally {
@@ -285,10 +293,9 @@ export class Orchestrator {
   }
 
   async getTaskSnapshot(): Promise<TaskSnapshot> {
-    const task = this.requireCurrentTask();
-    const taskId = task.id;
-    await this.reconcilePersistedTaskStatus(taskId);
-    return this.hydrateTask(taskId);
+    this.requireCurrentTask();
+    await this.reconcilePersistedTaskStatus();
+    return this.hydrateTask();
   }
 
   private ensureWorkspaceRecord(): WorkspaceRecord {
@@ -337,14 +344,6 @@ export class Orchestrator {
     return this.hydrateWorkspace();
   }
 
-  async deleteTask(): Promise<WorkspaceSnapshot> {
-    const task = this.requireCurrentTask();
-    await this.runtime.deleteTask(task.id);
-    this.taskRuntimeOverlays.delete(task.id);
-    this.store.deleteTask(task.id);
-    return this.hydrateWorkspace();
-  }
-
   async submitTask(payload: SubmitTaskPayload): Promise<TaskSnapshot> {
     const agents = this.listWorkspaceAgents();
     this.syncTopology(agents);
@@ -364,23 +363,20 @@ export class Orchestrator {
     }
     const mentionAgentId = resolution.targetAgentId;
 
-    if (this.listCurrentTasks().length !== 0) {
-      const currentTask = this.requireCurrentTask();
+    if (this.store.getState().taskSlot.kind === "present") {
       return this.continueTask(
-        currentTask.id,
         payload.content,
         mentionAgentId,
         agents,
       );
     }
 
-    const initialized = await this.createTask(agents, {
+    await this.createTask(agents, {
       title: this.createTaskTitle(payload.content),
       source: "submit",
     });
 
     return this.continueTask(
-      initialized.task.id,
       payload.content,
       mentionAgentId,
       agents,
@@ -398,9 +394,8 @@ export class Orchestrator {
   }
 
   async openAgentTerminal(agentId: string) {
-    const task = this.requireCurrentTask();
+    this.requireCurrentTask();
     const snapshot = await this.ensureTaskInitialized(
-      task,
       this.listWorkspaceAgents(),
     );
     const taskAgent = snapshot.agents.find(
@@ -450,7 +445,6 @@ export class Orchestrator {
     this.store.insertTask(task);
     for (const agent of agents) {
       this.store.insertTaskAgent({
-        taskId,
         id: agent.id,
         opencodeSessionId: "",
         opencodeAttachBaseUrl: "",
@@ -459,11 +453,10 @@ export class Orchestrator {
       });
     }
 
-    await this.ensureTaskInitialized(task, agents);
+    await this.ensureTaskInitialized(agents);
 
     const taskCreatedMessage: MessageRecord = {
       id: randomUUID(),
-      taskId,
       content:
         options.source === "initialize"
           ? "Task 已初始化"
@@ -474,36 +467,34 @@ export class Orchestrator {
     };
     this.store.insertMessage(taskCreatedMessage);
 
-    const snapshot = this.hydrateTask(taskId);
+    const snapshot = this.hydrateTask();
     return snapshot;
   }
 
   private async continueTask(
-    taskId: string,
     content: string,
     mentionAgentId: string,
     agents: AgentRecord[],
   ): Promise<TaskSnapshot> {
-    const task = this.store.getTask(taskId);
+    const task = this.store.getTask();
     if (isTerminalTaskStatus(task.status)) {
-      this.store.updateTaskStatus(task.id, "running");
+      this.store.updateTaskStatus("running");
     }
 
-    this.syncTaskAgents(task, agents);
+    this.syncTaskAgents(agents);
     const targetAgentRecord = agents.find((agent) => agent.id === mentionAgentId);
 
     if (!targetAgentRecord) {
       throw new Error(`未找到被 @ 的 Agent：${mentionAgentId}`);
     }
 
-    await this.ensureTaskInitialized(task, agents);
+    await this.ensureTaskInitialized(agents);
 
     const targetRunCount =
       (this.store
-        .listTaskAgents(task.id)
+        .listTaskAgents()
         .find((item) => item.id === targetAgentRecord.id)?.runCount ?? 0) + 1;
     const message = this.createUserMessage(
-      task.id,
       task.title,
       content,
       targetAgentRecord.id,
@@ -519,7 +510,6 @@ export class Orchestrator {
     this.trackBackgroundTask(
       this.runtime
         .resumeTask({
-          taskId: task.id,
           topology,
           event: {
             type: "user_message",
@@ -529,24 +519,21 @@ export class Orchestrator {
         })
         .then(() => undefined),
       {
-        taskId: task.id,
         agentId: targetAgentRecord.id,
       },
     );
-    return this.hydrateTask(task.id);
+    return this.hydrateTask();
   }
 
   protected trackBackgroundTask(
     promise: Promise<void>,
     context: {
-      taskId: string;
       agentId: string;
     },
   ) {
     const tracked = promise
       .catch((error) => {
         console.error("[orchestrator] 后台发送任务失败", {
-          taskId: context.taskId,
           agentId: context.agentId,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -558,30 +545,16 @@ export class Orchestrator {
   }
 
   private requireCurrentTask(): TaskRecord {
-    const tasks = this.listCurrentTasks();
-    const task = tasks[0];
-    if (!task) {
-      throw new Error("当前进程没有可用的 Task");
-    }
-    return task;
+    return this.store.getTask();
   }
 
   private assertTaskCreationAllowed() {
-    if (this.listCurrentTasks().length !== 0) {
+    if (this.store.getState().taskSlot.kind === "present") {
       throw new Error("当前进程只允许一个 Task");
     }
   }
 
-  private listCurrentTasks(): TaskRecord[] {
-    const tasks = this.store.listTasks();
-    if (tasks.length > 1) {
-      throw new Error(`当前进程只允许一个 Task，实际存在 ${tasks.length} 个`);
-    }
-    return tasks;
-  }
-
   private createUserMessage(
-    taskId: string,
     taskTitle: string,
     content: string,
     targetAgentId: string,
@@ -593,10 +566,9 @@ export class Orchestrator {
     );
     return {
       id: randomUUID(),
-      taskId,
       content: normalizedContent,
       sender: "user",
-      timestamp: toUtcIsoTimestamp(this.createTrailingMessageTimestamp(taskId)),
+      timestamp: toUtcIsoTimestamp(this.createTrailingMessageTimestamp()),
       kind: "user",
       scope: "task",
       taskTitle,
@@ -605,17 +577,17 @@ export class Orchestrator {
     };
   }
 
-  private syncTaskAgents(task: TaskRecord, agents: AgentRecord[]) {
+  // 2026-05-27: 用户要求当前产品只保留单 Task 运行模型；TaskAgentRecord 不再按 taskId 分区。
+  private syncTaskAgents(agents: AgentRecord[]) {
     const orderedAgents = this.orderAgents(agents);
     const existingByName = new Set(
-      this.store.listTaskAgents(task.id).map((item) => item.id),
+      this.store.listTaskAgents().map((item) => item.id),
     );
     for (const agent of orderedAgents) {
       if (existingByName.has(agent.id)) {
         continue;
       }
       this.store.insertTaskAgent({
-        taskId: task.id,
         id: agent.id,
         opencodeSessionId: "",
         opencodeAttachBaseUrl: "",
@@ -624,21 +596,17 @@ export class Orchestrator {
       });
     }
 
-    this.store.updateTaskAgentCount(task.id, agents.length);
+    this.store.updateTaskAgentCount(agents.length);
   }
 
-  private ensureRuntimeTaskAgent(
-    task: TaskRecord,
-    runtimeAgentId: string,
-  ): void {
+  private ensureRuntimeTaskAgent(runtimeAgentId: string): void {
     const existing = this.store
-      .listTaskAgents(task.id)
+      .listTaskAgents()
       .find((item) => item.id === runtimeAgentId);
     if (existing) {
       return;
     }
     this.store.insertTaskAgent({
-      taskId: task.id,
       id: runtimeAgentId,
       opencodeSessionId: "",
       opencodeAttachBaseUrl: "",
@@ -646,13 +614,11 @@ export class Orchestrator {
       runCount: 0,
     });
     this.store.updateTaskAgentCount(
-      task.id,
-      this.store.listTaskAgents(task.id).length,
+      this.store.listTaskAgents().length,
     );
   }
 
   protected async runAgent(
-    task: TaskRecord,
     agentId: string,
     prompt: AgentExecutionPrompt,
     behavior: AgentRunBehaviorOptions = {},
@@ -665,7 +631,6 @@ export class Orchestrator {
 
     const topology = this.store.getTopology();
     const result = await this.executeRuntimeAgentOnce(
-      task,
       agentId,
       agentId,
       prompt,
@@ -679,11 +644,10 @@ export class Orchestrator {
       return;
     }
 
-    const latestTask = this.store.getTask(task.id);
+    const latestTask = this.store.getTask();
     if (isTerminalTaskStatus(latestTask.status)) {
       if (latestTask.status === "failed" && latestTask.completedAt.length === 0) {
         await this.completeTask({
-          taskId: task.id,
           status: "failed",
           failureReason: "standalone_agent_failed",
         });
@@ -693,12 +657,11 @@ export class Orchestrator {
 
     const nextTaskStatus = resolveStandaloneTaskStatusAfterAgentRun({
       latestAgentStatus: result.agentStatus,
-      agentStatuses: this.store.listTaskAgents(task.id),
+      agentStatuses: this.store.listTaskAgents(),
     });
 
     if (nextTaskStatus === "finished") {
       await this.completeTask({
-        taskId: task.id,
         status: "finished",
         finishReason: "standalone_round_finished",
       });
@@ -707,7 +670,6 @@ export class Orchestrator {
 
     if (nextTaskStatus === "failed") {
       await this.completeTask({
-        taskId: task.id,
         status: "failed",
         failureReason: "standalone_agent_failed",
       });
@@ -716,13 +678,12 @@ export class Orchestrator {
   }
 
   private shouldSuppressDuplicateDispatchMessage(
-    taskId: string,
     sourceAgentId: string,
     targetAgentIds: string[],
   ): boolean {
     const now = Date.now();
     const incomingTargets = [...targetAgentIds].sort().join(",");
-    const messages = this.store.listMessages(taskId);
+    const messages = this.store.listMessages();
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const message = messages[index];
       if (!message) {
@@ -756,41 +717,40 @@ export class Orchestrator {
   }
 
   private updateTaskStatusIfActive(
-    taskId: string,
     status: TaskRecord["status"],
     completedAt = "",
   ): boolean {
-    const task = this.store.getTask(taskId);
+    const task = this.store.getTask();
     if (isTerminalTaskStatus(task.status)) {
       return false;
     }
-    this.store.updateTaskStatus(taskId, status, completedAt);
+    this.store.updateTaskStatus(status, completedAt);
     return true;
   }
 
-  private async reconcilePersistedTaskStatus(taskId: string) {
-    const task = this.store.getTask(taskId);
+  // 2026-05-27: 用户要求当前产品只保留单 Task 运行模型；持久化状态回补不得依赖多 Task 容器。
+  private async reconcilePersistedTaskStatus() {
+    const task = this.store.getTask();
     if (
       !shouldFinishTaskFromPersistedState({
         taskStatus: task.status,
         topology: this.store.getTopology(),
-        agents: this.store.listTaskAgents(taskId),
-        messages: this.store.listMessages(taskId),
+        agents: this.store.listTaskAgents(),
+        messages: this.store.listMessages(),
       })
     ) {
       return;
     }
 
     await this.completeTask({
-      taskId,
       status: "finished",
       finishReason: "persisted_round_finished",
     });
   }
 
   private async reconcilePersistedWorkspaceTasks() {
-    for (const task of this.store.listTasks()) {
-      await this.reconcilePersistedTaskStatus(task.id);
+    if (this.store.getState().taskSlot.kind === "present") {
+      await this.reconcilePersistedTaskStatus();
     }
   }
 
@@ -901,54 +861,60 @@ export class Orchestrator {
     return "invalid";
   }
 
-  private ensureTaskRuntimeOverlay(taskId: string): TaskRuntimeOverlay {
-    const existing = this.taskRuntimeOverlays.get(taskId);
-    if (existing) {
-      return existing;
+  private ensureTaskRuntimeOverlay(): TaskRuntimeOverlay {
+    if (this.taskRuntimeOverlaySlot.kind === "ready") {
+      return this.taskRuntimeOverlaySlot.overlay;
     }
 
     const created: TaskRuntimeOverlay = {
-      taskId,
       attachBaseUrl: "",
       agentSessions: new Map(),
     };
-    this.taskRuntimeOverlays.set(taskId, created);
+    this.taskRuntimeOverlaySlot = {
+      kind: "ready",
+      overlay: created,
+    };
     return created;
   }
 
-  private setTaskAttachBaseUrl(
-    taskId: string,
-    attachBaseUrl: string,
-  ) {
-    const overlay = this.ensureTaskRuntimeOverlay(taskId);
-    this.taskRuntimeOverlays.set(taskId, {
-      ...overlay,
-      attachBaseUrl,
-    });
+  private setTaskAttachBaseUrl(attachBaseUrl: string) {
+    const overlay = this.ensureTaskRuntimeOverlay();
+    this.taskRuntimeOverlaySlot = {
+      kind: "ready",
+      overlay: {
+        ...overlay,
+        attachBaseUrl,
+      },
+    };
   }
 
   private overlayTaskAgents(
-    task: TaskRecord,
     agents: TaskAgentRecord[],
   ): TaskAgentRecord[] {
-    const overlay = this.taskRuntimeOverlays.get(task.id);
+    if (this.taskRuntimeOverlaySlot.kind === "empty") {
+      return agents.map((agent) => ({
+        ...agent,
+        opencodeSessionId: "",
+        opencodeAttachBaseUrl: "",
+      }));
+    }
+    const overlay = this.taskRuntimeOverlaySlot.overlay;
     return agents.map((agent) => ({
       ...agent,
-      opencodeSessionId: overlay?.agentSessions.get(agent.id) ?? "",
-      opencodeAttachBaseUrl: overlay ? overlay.attachBaseUrl : "",
+      opencodeSessionId: overlay.agentSessions.get(agent.id) ?? "",
+      opencodeAttachBaseUrl: overlay.attachBaseUrl,
     }));
   }
 
   protected async ensureAgentSession(
-    task: TaskRecord,
     agent: TaskAgentRecord,
   ): Promise<string> {
-    const overlay = this.ensureTaskRuntimeOverlay(task.id);
+    const overlay = this.ensureTaskRuntimeOverlay();
     const existingSessionId = overlay.agentSessions.get(agent.id) ?? "";
     if (existingSessionId) {
       return existingSessionId;
     }
-    await this.ensureTaskServer(task.id);
+    await this.ensureTaskServer();
     const sessionId = await this.opencodeClient.createSession(
       agent.id,
     );
@@ -956,64 +922,56 @@ export class Orchestrator {
     return sessionId;
   }
 
-  protected async ensureTaskPanels(task: TaskRecord) {
-    await this.ensureTaskInitialized(task, this.listWorkspaceAgents());
+  protected async ensureTaskPanels() {
+    await this.ensureTaskInitialized(this.listWorkspaceAgents());
   }
 
-  private async ensureTaskServer(
-    taskId: string,
-  ): Promise<void> {
-    const overlay = this.ensureTaskRuntimeOverlay(taskId);
+  private async ensureTaskServer(): Promise<void> {
+    const overlay = this.ensureTaskRuntimeOverlay();
     if (overlay.attachBaseUrl) {
       return;
     }
-    const existingAttachBaseUrl = [...this.taskRuntimeOverlays.values()]
-      .find((currentOverlay) => currentOverlay.attachBaseUrl)?.attachBaseUrl ?? "";
+    const existingAttachBaseUrl = this.taskRuntimeOverlaySlot.kind === "ready"
+      ? this.taskRuntimeOverlaySlot.overlay.attachBaseUrl
+      : "";
     if (existingAttachBaseUrl) {
-      this.setTaskAttachBaseUrl(taskId, existingAttachBaseUrl);
+      this.setTaskAttachBaseUrl(existingAttachBaseUrl);
       return;
     }
-    this.setTaskAttachBaseUrl(taskId, await this.opencodeClient.getAttachBaseUrl());
+    this.setTaskAttachBaseUrl(await this.opencodeClient.getAttachBaseUrl());
   }
 
-  private async ensureTaskAgentSessions(
-    task: TaskRecord,
-  ): Promise<void> {
+  private async ensureTaskAgentSessions(): Promise<void> {
     const topology = this.store.getTopology();
     const prewarmAgentIds = new Set(
       resolveTaskAgentIdsToPrewarm(
         topology,
-        this.store.listTaskAgents(task.id),
+        this.store.listTaskAgents(),
       ),
     );
     await Promise.all(
       this.store
-        .listTaskAgents(task.id)
+        .listTaskAgents()
         .filter((agent) => prewarmAgentIds.has(agent.id))
         .map(
-          async (agent) => this.ensureAgentSession(task, agent),
+          async (agent) => this.ensureAgentSession(agent),
         ),
     );
   }
 
   private async ensureTaskInitialized(
-    task: TaskRecord,
     agents: AgentRecord[],
   ): Promise<TaskSnapshot> {
-    this.syncTaskAgents(task, agents);
-    const currentTask = this.store.getTask(task.id);
-    await this.ensureTaskServer(currentTask.id);
-    await this.ensureTaskAgentSessions(currentTask);
+    this.syncTaskAgents(agents);
+    await this.ensureTaskServer();
+    await this.ensureTaskAgentSessions();
 
-    const refreshedTask = this.store.getTask(task.id);
+    const refreshedTask = this.store.getTask();
     if (!refreshedTask.initializedAt) {
-      this.store.updateTaskInitialized(
-        task.id,
-        new Date().toISOString(),
-      );
+      this.store.updateTaskInitialized(new Date().toISOString());
     }
 
-    return this.hydrateTask(task.id);
+    return this.hydrateTask();
   }
 
   private orderAgents(
@@ -1089,9 +1047,8 @@ export class Orchestrator {
     const topology = forceSyncTopology
       ? this.syncTopology(agents)
       : this.ensureTopologyExists(agents);
-    const tasks = this.store.listTasks();
-    for (const task of tasks) {
-      this.syncTaskAgents(task, agents);
+    if (this.store.getState().taskSlot.kind === "present") {
+      this.syncTaskAgents(agents);
     }
 
     return {
@@ -1099,20 +1056,18 @@ export class Orchestrator {
       name: workspace.id,
       agents,
       topology,
-      messages: this.store.listMessages(),
-      tasks: tasks.map((task) => this.hydrateTask(task.id)),
     };
   }
 
-  private hydrateTask(taskId: string): TaskSnapshot {
-    const task = this.store.getTask(taskId);
+  // 2026-05-27: 用户要求 TaskSnapshot 只表达当前唯一 Task，不再从 workspace.tasks 数组派生。
+  private hydrateTask(): TaskSnapshot {
     const agents = this.listWorkspaceAgents();
-    this.syncTaskAgents(task, agents);
-    const persistedAgents = this.store.listTaskAgents(taskId);
-    const messages = this.store.listMessages(taskId);
+    this.syncTaskAgents(agents);
+    const persistedAgents = this.store.listTaskAgents();
+    const messages = this.store.listMessages();
     const reconciled = reconcileTaskSnapshotFromMessages({
-      task: this.store.getTask(taskId),
-      agents: this.overlayTaskAgents(task, persistedAgents),
+      task: this.store.getTask(),
+      agents: this.overlayTaskAgents(persistedAgents),
       messages,
     });
     return {
@@ -1389,13 +1344,12 @@ export class Orchestrator {
     return [...aliases].filter(Boolean);
   }
 
+  // 2026-05-27: 用户要求调度算法状态不得携带 Task ID；运行实例标识只能停留在 runtime 边界。
   protected async createRuntimeBatchRunners(
-    taskId: string,
     state: GraphTaskState,
     batch: GraphDispatchBatch,
   ) {
-    const task = this.store.getTask(taskId);
-    const taskMessages = this.store.listMessages(taskId);
+    const taskMessages = this.store.listMessages();
 
     if (
       batch.jobs.every(
@@ -1408,7 +1362,6 @@ export class Orchestrator {
       const sourceAgentId = batch.source.agentId;
       if (
         !this.shouldSuppressDuplicateDispatchMessage(
-          taskId,
           sourceAgentId,
           batch.triggerTargets,
         )
@@ -1416,12 +1369,11 @@ export class Orchestrator {
         const targetRunCounts = batch.jobs.map(
           (job) =>
             (this.store
-              .listTaskAgents(taskId)
+              .listTaskAgents()
               .find((item) => item.id === job.agentId)?.runCount ?? 0) + 1,
         );
         const triggerMessage: MessageRecord = {
           id: randomUUID(),
-          taskId,
           sender: sourceAgentId,
           timestamp: toUtcIsoTimestamp(new Date().toISOString()),
           content: formatAgentDispatchContent(
@@ -1442,7 +1394,7 @@ export class Orchestrator {
     }
 
     return batch.jobs.map((job) => {
-      this.ensureRuntimeTaskAgent(task, job.agentId);
+      this.ensureRuntimeTaskAgent(job.agentId);
       const executableAgentId = this.resolveExecutableAgentId(
         state,
         job.agentId,
@@ -1476,11 +1428,11 @@ export class Orchestrator {
         );
         // 历史要求：读取 Task Agent 运行次数前必须显式证明记录存在，不得用 0 兜底掩盖状态缺失。
         const taskAgent = this.store
-          .listTaskAgents(taskId)
+          .listTaskAgents()
           .find((agent) => agent.id === job.agentId);
         if (!taskAgent) {
           throw new Error(
-            `Task ${taskId} 缺少 Agent ${job.agentId}，无法解析初始消息路由。`,
+            `当前 Task 缺少 Agent ${job.agentId}，无法解析初始消息路由。`,
           );
         }
         const dispatchInitialMessageRouting =
@@ -1524,7 +1476,6 @@ export class Orchestrator {
       return {
         agentId: job.agentId,
         promise: this.executeRuntimeAgentOnce(
-          task,
           job.agentId,
           executableAgentId,
           prompt,
@@ -1548,7 +1499,6 @@ export class Orchestrator {
   }
 
   private async executeRuntimeAgentOnce(
-    task: TaskRecord,
     runtimeAgentId: string,
     executableAgentId: string,
     prompt: AgentExecutionPrompt,
@@ -1558,22 +1508,21 @@ export class Orchestrator {
     allowedDecisionTriggers: string[],
     senderDisplayName: string,
   ): Promise<GraphAgentResult> {
-    this.store.updateTaskAgentRun(task.id, runtimeAgentId, "running");
-    this.updateTaskStatusIfActive(task.id, "running");
+    this.store.updateTaskAgentRun(runtimeAgentId, "running");
+    this.updateTaskStatusIfActive("running");
     const currentAgent = this.store
-      .listTaskAgents(task.id)
+      .listTaskAgents()
       .find((item) => item.id === runtimeAgentId);
     if (!currentAgent) {
       const missingAgentMessage: MessageRecord = {
         id: randomUUID(),
-        taskId: task.id,
-        content: `[${runtimeAgentId}] 执行失败：Task ${task.id} 缺少 Agent ${runtimeAgentId}`,
+        content: `[${runtimeAgentId}] 执行失败：当前 Task 缺少 Agent ${runtimeAgentId}`,
         sender: "system",
         timestamp: toUtcIsoTimestamp(new Date().toISOString()),
         kind: "system-message",
       };
       this.store.insertMessage(missingAgentMessage);
-      this.updateTaskStatusIfActive(task.id, "failed");
+      this.updateTaskStatusIfActive("failed");
       return {
         agentId: runtimeAgentId,
         messageId: missingAgentMessage.id,
@@ -1584,15 +1533,14 @@ export class Orchestrator {
         agentContextContent: "",
         forwardedAgentMessage: "",
         signalDone: false,
-        errorMessage: `Task ${task.id} 缺少 Agent ${runtimeAgentId}`,
+        errorMessage: `当前 Task 缺少 Agent ${runtimeAgentId}`,
       };
     }
 
     try {
-      const currentTask = this.store.getTask(task.id);
-      await this.ensureTaskPanels(currentTask);
+      this.store.getTask();
+      await this.ensureTaskPanels();
       const agentSessionId = await this.ensureAgentSession(
-        currentTask,
         currentAgent,
       );
       const latestAgent = this.listWorkspaceAgents().find(
@@ -1631,7 +1579,6 @@ export class Orchestrator {
       // 2026-05-27: 用户要求移除 AgentFinalMessageRecord 中与 content 重复的冗余展示正文字段，agent-final 只保留展示正文与原始回复两类事实。
       const baseTaskMessage: Omit<AgentFinalMessageRecord, "routingKind" | "trigger"> = {
         id: response.messageId,
-        taskId: task.id,
         content: displayContent,
         sender: runtimeAgentId,
         timestamp: toUtcIsoTimestamp(response.timestamp),
@@ -1673,14 +1620,13 @@ export class Orchestrator {
         routingKind: resolvedDecision,
       });
       this.store.updateTaskAgentStatus(
-        task.id,
         runtimeAgentId,
         agentStatus,
       );
       if (agentStatus === "failed") {
-        this.updateTaskStatusIfActive(task.id, "failed");
+        this.updateTaskStatusIfActive("failed");
       } else {
-        this.updateTaskStatusIfActive(task.id, "running");
+        this.updateTaskStatusIfActive("running");
       }
 
       const signalDone = this.parseSignal(response.finalMessage);
@@ -1716,20 +1662,18 @@ export class Orchestrator {
       return invalidResult;
     } catch (error) {
       this.store.updateTaskAgentStatus(
-        task.id,
         runtimeAgentId,
         "failed",
       );
       const failedMessage: MessageRecord = {
         id: randomUUID(),
-        taskId: task.id,
         content: `[${runtimeAgentId}] 执行失败：${error instanceof Error ? error.message : "未知错误"}`,
         sender: "system",
         timestamp: toUtcIsoTimestamp(new Date().toISOString()),
         kind: "system-message",
       };
       this.store.insertMessage(failedMessage);
-      this.updateTaskStatusIfActive(task.id, "failed");
+      this.updateTaskStatusIfActive("failed");
 
       return {
         agentId: runtimeAgentId,
@@ -1749,34 +1693,29 @@ export class Orchestrator {
   private async completeTask(
     input:
       | {
-          taskId: string;
           status: "finished";
           finishReason: string;
         }
       | {
-          taskId: string;
           status: "failed";
           failureReason: string;
         },
   ) {
     // 2026-05-27: 用户要求“本轮已完成，可继续 @Agent 发起下一轮。”必须同步打印任务日志。
-    const { taskId, status } = input;
-    const currentTask = this.store.getTask(taskId);
+    const { status } = input;
+    const currentTask = this.store.getTask();
     if (currentTask.status === status && currentTask.completedAt) {
       return;
     }
 
     const completedAt = new Date().toISOString();
-    this.store.updateTaskStatus(taskId, status, completedAt);
-    const snapshot = this.hydrateTask(taskId);
-    const completionTimestamp = this.createTrailingMessageTimestamp(
-      taskId,
-    );
+    this.store.updateTaskStatus(status, completedAt);
+    const snapshot = this.hydrateTask();
+    const completionTimestamp = this.createTrailingMessageTimestamp();
     const completionMessage: MessageRecord =
       status === "finished"
         ? {
             id: randomUUID(),
-            taskId,
             sender: "system",
             timestamp: toUtcIsoTimestamp(completionTimestamp),
             content: buildTaskRoundFinishedMessageContent(),
@@ -1785,7 +1724,6 @@ export class Orchestrator {
           }
         : {
             id: randomUUID(),
-            taskId,
             sender: "system",
             timestamp: toUtcIsoTimestamp(completionTimestamp),
             content: buildTaskCompletionMessageContent(
@@ -1808,9 +1746,9 @@ export class Orchestrator {
     }
   }
 
-  private createTrailingMessageTimestamp(taskId: string): string {
+  private createTrailingMessageTimestamp(): string {
     const nowMs = Date.now();
-    const messages = this.store.listMessages(taskId);
+    const messages = this.store.listMessages();
     const [latestMessage] = messages.slice(-1);
     if (!latestMessage) {
       return new Date(nowMs).toISOString();

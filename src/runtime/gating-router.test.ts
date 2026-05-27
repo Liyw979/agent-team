@@ -108,7 +108,6 @@ function driveJudgeReviseLimit(
   judgeRound2Trigger: string = "<revise>",
 ) {
   let state = createEmptyGraphTaskState({
-    taskId: `task-${topology.nodes.join("-")}`,
     topology,
   });
 
@@ -180,7 +179,6 @@ test("default handoff 会派发到所有 default 下游", () => {
     ],
   });
   const state = createEmptyGraphTaskState({
-    taskId: "task-handoff",
     topology,
   });
 
@@ -225,7 +223,6 @@ test("triggered 会按 trigger 字面值派发到匹配边", () => {
     ],
   });
   const state = createEmptyGraphTaskState({
-    taskId: "task-triggered",
     topology,
   });
 
@@ -277,7 +274,6 @@ test("同一 trigger 多入边任一来源完成后会立即派发", () => {
     ],
   });
   const state = createEmptyGraphTaskState({
-    taskId: "task-group",
     topology,
   });
 
@@ -354,7 +350,6 @@ test("多个可转派 trigger 都已超限时，不会无限递归，而是直�
     ],
   });
   let state = createEmptyGraphTaskState({
-    taskId: "task-loop-escalation-exhausted",
     topology,
   });
 
@@ -410,7 +405,6 @@ test("maxTriggerRounds=-1 表示无限次，不会触发上限失败", () => {
     ],
   });
   let state = createEmptyGraphTaskState({
-    taskId: "task-loop-infinite",
     topology,
   });
 
