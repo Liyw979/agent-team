@@ -353,7 +353,7 @@ test("compileTeamDsl 支持从内置漏洞拓扑编译出 group 辩论拓扑", (
       source: "线索发现",
       target: "线索完备性评估",
       trigger: "<complete>",
-      messageMode: "last", maxTriggerRounds: 4,
+      messageMode: "last", maxTriggerRounds: 999,
     },
     {
       source: "线索完备性评估",
