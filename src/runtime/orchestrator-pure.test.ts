@@ -21,7 +21,6 @@ import {
   shouldFinishTaskFromPersistedState,
 } from "./task-lifecycle-rules";
 
-const TASK_ID = "task-1";
 const TIMESTAMP = "2026-04-16T00:00:00.000Z";
 const DEFAULT_TIMESTAMP = toUtcIsoTimestamp(TIMESTAMP);
 
@@ -66,7 +65,6 @@ function createUserMessage(input: {
 }): MessageRecord {
   return {
     id: `user:${input.content}`,
-    taskId: TASK_ID,
     sender: "user",
     content: input.content,
     timestamp: DEFAULT_TIMESTAMP,
@@ -85,7 +83,6 @@ function createAgentFinalMessage(input: {
 }): AgentFinalMessageRecord {
   const base: Omit<AgentFinalMessageRecord, "routingKind" | "trigger"> = {
     id: `${input.sender}:${input.content}`,
-    taskId: TASK_ID,
     sender: input.sender,
     content: input.content,
     timestamp: DEFAULT_TIMESTAMP,
@@ -113,7 +110,6 @@ function createAgentDispatchMessage(input: {
 }): MessageRecord {
   return {
     id: `${input.sender}:${input.content}`,
-    taskId: TASK_ID,
     sender: input.sender,
     content: input.content,
     timestamp: DEFAULT_TIMESTAMP,
@@ -131,7 +127,6 @@ function createAgent(input: {
   runCount: number;
 }): TaskAgentRecord {
   return {
-    taskId: TASK_ID,
     id: input.id,
     opencodeSessionId: `session:${input.id}`,
     opencodeAttachBaseUrl: "http://127.0.0.1:43127",

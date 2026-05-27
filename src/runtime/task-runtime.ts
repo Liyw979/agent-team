@@ -63,7 +63,7 @@ type CheckpointSlot =
     };
 
 export class TaskRuntime {
-  private readonly checkpoints = new Map<string, RuntimeEnvelope>();
+  private checkpointSlot: CheckpointSlot = { kind: "missing" };
 
   constructor(
     private readonly options: {
@@ -72,16 +72,13 @@ export class TaskRuntime {
   ) {}
 
   async startTask(input: {
-    taskId: string;
     topology: GraphTaskState["topology"];
     initialInput: TaskRuntimeInputEvent;
   }): Promise<GraphTaskState> {
     const graphState = createEmptyGraphTaskState({
-      taskId: input.taskId,
       topology: input.topology,
     });
     const result = await this.runAndPersist(
-      input.taskId,
       {
         graphState: { kind: "created", graphState },
         pendingInput: { kind: "received", event: input.initialInput },
@@ -93,14 +90,12 @@ export class TaskRuntime {
   }
 
   async resumeTask(input: {
-    taskId: string;
     topology: GraphTaskState["topology"];
     event: TaskRuntimeInputEvent;
   }): Promise<GraphTaskState> {
-    const existing = await this.getCheckpoint(input.taskId);
-    const graphState = resolveCheckpointGraphState(existing, input.taskId, input.topology);
+    const existing = await this.getCheckpoint();
+    const graphState = resolveCheckpointGraphState(existing, input.topology);
     const result = await this.runAndPersist(
-      input.taskId,
       {
         graphState: { kind: "created", graphState },
         pendingInput: { kind: "received", event: input.event },
@@ -111,31 +106,24 @@ export class TaskRuntime {
     return result.graphState.kind === "created" ? result.graphState.graphState : graphState;
   }
 
-  async getCheckpoint(taskId: string): Promise<CheckpointSlot> {
-    const checkpoint = this.checkpoints.get(taskId);
-    if (!checkpoint) {
-      return { kind: "missing" };
-    }
-    return { kind: "found", checkpoint };
+  async getCheckpoint(): Promise<CheckpointSlot> {
+    return this.checkpointSlot;
   }
 
   async streamTask(
-    taskId: string,
     listener: (state: CheckpointSlot) => void,
   ): Promise<void> {
-    listener(await this.getCheckpoint(taskId));
-  }
-
-  async deleteTask(taskId: string): Promise<void> {
-    this.checkpoints.delete(taskId);
+    listener(await this.getCheckpoint());
   }
 
   private async runAndPersist(
-    taskId: string,
     state: RuntimeEnvelope,
   ): Promise<RuntimeEnvelope> {
     const result = await this.runTaskLoop(state);
-    this.checkpoints.set(taskId, result);
+    this.checkpointSlot = {
+      kind: "found",
+      checkpoint: result,
+    };
     return result;
   }
 
@@ -161,7 +149,6 @@ export class TaskRuntime {
     while (true) {
       while (currentDecision.kind === "decided" && currentDecision.decision.type === "execute_batch") {
         const runners = await this.options.host.createBatchRunners({
-          taskId: currentState.taskId,
           state: currentState,
           batch: currentDecision.decision.batch,
         });
@@ -176,7 +163,6 @@ export class TaskRuntime {
           currentState.taskStatus = "finished";
           currentState.finishReason = resolveFinishReason(currentDecision, currentState);
           await this.options.host.completeTask({
-            taskId: currentState.taskId,
             status: "finished",
             finishReason: currentState.finishReason,
           });
@@ -200,7 +186,6 @@ export class TaskRuntime {
         currentState.taskStatus = "failed";
         currentState.finishReason = "running";
         await this.options.host.completeTask({
-          taskId: currentState.taskId,
           status: "failed",
           failureReason: failedDecision.errorMessage,
         });
@@ -228,14 +213,12 @@ export class TaskRuntime {
 
 function resolveCheckpointGraphState(
   checkpoint: CheckpointSlot,
-  taskId: string,
   topology: GraphTaskState["topology"],
 ): GraphTaskState {
   if (checkpoint.kind === "found" && checkpoint.checkpoint.graphState.kind === "created") {
     return checkpoint.checkpoint.graphState.graphState;
   }
   return createEmptyGraphTaskState({
-    taskId,
     topology,
   });
 }

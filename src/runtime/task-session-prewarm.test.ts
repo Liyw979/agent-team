@@ -10,7 +10,6 @@ test("resolveTaskAgentIdsToPrewarm 不会为仅作为 group 模板存在的静�
   const topology: TopologyRecord = compileBuiltinTopology("vulnerability.yaml").topology;
   const taskAgents: TaskAgentRecord[] = [
     {
-      taskId: "task-1",
       id: "线索发现",
       opencodeSessionId: "",
       opencodeAttachBaseUrl: "",
@@ -18,7 +17,6 @@ test("resolveTaskAgentIdsToPrewarm 不会为仅作为 group 模板存在的静�
       runCount: 0,
     },
     {
-      taskId: "task-1",
       id: "漏洞论证",
       opencodeSessionId: "",
       opencodeAttachBaseUrl: "",
@@ -26,7 +24,6 @@ test("resolveTaskAgentIdsToPrewarm 不会为仅作为 group 模板存在的静�
       runCount: 0,
     },
     {
-      taskId: "task-1",
       id: "误报论证",
       opencodeSessionId: "",
       opencodeAttachBaseUrl: "",
@@ -34,7 +31,6 @@ test("resolveTaskAgentIdsToPrewarm 不会为仅作为 group 模板存在的静�
       runCount: 0,
     },
     {
-      taskId: "task-1",
       id: "讨论总结",
       opencodeSessionId: "",
       opencodeAttachBaseUrl: "",

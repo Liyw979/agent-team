@@ -52,7 +52,6 @@ export interface GraphHandoffBatchState {
 }
 
 export interface GraphTaskState {
-  taskId: string;
   topology: TopologyRecord;
   runtimeNodes: RuntimeTopologyNode[];
   runtimeEdges: RuntimeTopologyEdge[];
@@ -76,12 +75,10 @@ export interface GraphTaskState {
 }
 
 export function createEmptyGraphTaskState(input: {
-  taskId: string;
   topology: TopologyRecord;
 }): GraphTaskState {
   const topology = input.topology;
   return {
-    taskId: input.taskId,
     topology,
     runtimeNodes: [],
     runtimeEdges: [],

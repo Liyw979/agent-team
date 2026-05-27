@@ -10,7 +10,6 @@ import { toUtcIsoTimestamp } from "@shared/types";
 
 import { mergeTaskChatMessages } from "../lib/chat-messages";
 
-const TASK_ID = "task-id";
 const TIMESTAMP = "2026-04-14T12:00:00.000Z";
 const DEFAULT_DISPLAY_NAME = { kind: "default" } as const;
 const CONTENT_RESPONSE = { kind: "content" } as const;
@@ -37,7 +36,6 @@ function createAgentFinalMessage(input: AgentFinalMessageInput): AgentFinalMessa
   const rawResponse = input.response.kind === "raw" ? input.response.rawResponse : input.content;
   const base: Omit<AgentFinalMessageRecord, "routingKind" | "trigger"> = {
     id: input.id,
-    taskId: TASK_ID,
     content: input.content,
     sender: input.sender,
     timestamp: toUtcIsoTimestamp(TIMESTAMP),
@@ -74,7 +72,6 @@ function createAgentDispatchMessage(input: {
 }): AgentDispatchMessageRecord {
   return {
     id: input.id,
-    taskId: TASK_ID,
     content: input.content,
     sender: input.sender,
     timestamp: toUtcIsoTimestamp(TIMESTAMP),

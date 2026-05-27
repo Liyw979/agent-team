@@ -51,7 +51,6 @@ function createStaticWebRoot() {
 function buildWorkspaceSnapshot(input: {
   cwd: string;
   name: string;
-  tasks: WorkspaceSnapshot["tasks"];
 }): WorkspaceSnapshot {
   return {
     cwd: input.cwd,
@@ -66,8 +65,6 @@ function buildWorkspaceSnapshot(input: {
       },
       nodeRecords: [],
     },
-    messages: [],
-    tasks: input.tasks,
   };
 }
 
@@ -101,7 +98,6 @@ function buildRunningTaskSnapshot(input: { id: string; cwd: string }): TaskSnaps
   return {
     ...buildTaskSnapshot(input),
     agents: [{
-      taskId: input.id,
       id: "BA",
       opencodeSessionId: "session-ba",
       opencodeAttachBaseUrl: "http://127.0.0.1:43127",
@@ -172,10 +168,6 @@ test("startWebHost 会按 JSON 解析 /api/tasks/submit 请求体", async () => 
 
 test("startWebHost 会同时监听 IPv4 和 IPv6 loopback，避免 localhost 命中其他进程", async () => {
   const port = await reservePort();
-  const taskSnapshot = buildTaskSnapshot({
-    id: "task-123",
-    cwd: "/tmp/demo",
-  });
   const host = await startWebHost({
     orchestrator: {
       submitTask: async () => {
@@ -184,7 +176,6 @@ test("startWebHost 会同时监听 IPv4 和 IPv6 loopback，避免 localhost 命
       getWorkspaceSnapshot: async () => buildWorkspaceSnapshot({
         cwd: "/tmp/demo",
         name: "demo",
-        tasks: [taskSnapshot],
       }),
       openAgentTerminal: async () => {
         throw new Error("unexpected openAgentTerminal");
@@ -259,7 +250,6 @@ test("startWebHost 的 /api/ui-snapshot 会区分 idle 与 active task", async (
   const idleWorkspace = buildWorkspaceSnapshot({
     cwd: "/tmp/idle",
     name: "idle",
-    tasks: [],
   });
   const idleHost = await startWebHost({
     orchestrator: {
@@ -268,7 +258,7 @@ test("startWebHost 的 /api/ui-snapshot 会区分 idle 与 active task", async (
       },
       getTaskSnapshot: async () => {
         idleTaskSnapshotCalls += 1;
-        throw new Error("unexpected getTaskSnapshot");
+        throw new Error("当前没有 Task");
       },
       getWorkspaceSnapshot: async () => idleWorkspace,
       openAgentTerminal: async () => {
@@ -287,12 +277,11 @@ test("startWebHost 的 /api/ui-snapshot 会区分 idle 与 active task", async (
     const payload = await response.json();
     assert.equal(payload.kind, "workspace");
     assert.equal(payload.workspace.cwd, "/tmp/idle");
-    assert.equal(payload.workspace.tasks.length, 0);
     assert.equal("task" in payload, false);
     assert.equal("taskLogFilePath" in payload, false);
     assert.equal(payload.launchCwd, "/tmp/idle");
     assert.equal(payload.taskUrl, `http://localhost:${idlePort}/`);
-    assert.equal(idleTaskSnapshotCalls, 0);
+    assert.equal(idleTaskSnapshotCalls, 1);
   } finally {
     await idleHost.close();
   }
@@ -315,7 +304,6 @@ test("startWebHost 的 /api/ui-snapshot 会区分 idle 与 active task", async (
       getWorkspaceSnapshot: async () => buildWorkspaceSnapshot({
         cwd: "/tmp/active",
         name: "active",
-        tasks: [activeTaskSnapshot],
       }),
       openAgentTerminal: async () => {
         throw new Error("unexpected openAgentTerminal");
@@ -333,13 +321,7 @@ test("startWebHost 的 /api/ui-snapshot 会区分 idle 与 active task", async (
     const payload = await response.json();
     assert.equal(payload.kind, "task");
     assert.equal(payload.workspace.cwd, "/tmp/active");
-    assert.equal(payload.workspace.tasks.length, 1);
     assert.deepEqual(payload.task, activeTaskSnapshot);
-    assert.deepEqual(payload.workspace.tasks[0], {
-      ...activeTaskSnapshot,
-      messages: [],
-    });
-    assert.deepEqual(payload.workspace.messages, []);
     assert.equal(payload.taskLogFilePath, path.join("/tmp/user-data", "logs", "tasks", "task-active.log"));
     assert.equal(payload.launchCwd, "/tmp/active");
     assert.equal(payload.taskUrl, `http://localhost:${activePort}/`);
@@ -358,7 +340,6 @@ test("startWebHost 的 /api/ui-snapshot 会注入非持久化 OpenCode 过程消
     }),
     agents: [
       {
-        taskId: "task-live-progress",
         id: "BA",
         opencodeSessionId: "session-ba",
         opencodeAttachBaseUrl: "http://127.0.0.1:43127",
@@ -366,7 +347,6 @@ test("startWebHost 的 /api/ui-snapshot 会注入非持久化 OpenCode 过程消
         runCount: 1,
       },
       {
-        taskId: "task-live-progress",
         id: "TaskReview",
         opencodeSessionId: "session-task-review",
         opencodeAttachBaseUrl: "http://127.0.0.1:43128",
@@ -377,7 +357,6 @@ test("startWebHost 的 /api/ui-snapshot 会注入非持久化 OpenCode 过程消
     messages: [
       {
         id: "persisted-progress-completed",
-        taskId: "task-live-progress",
         content: "tool",
         sender: "BA",
         timestamp: toUtcIsoTimestamp("2026-04-30T12:00:00.000Z"),
@@ -391,7 +370,6 @@ test("startWebHost 的 /api/ui-snapshot 会注入非持久化 OpenCode 过程消
       },
       {
         id: "persisted-progress-running",
-        taskId: "task-live-progress",
         content: "thinking",
         sender: "TaskReview",
         timestamp: toUtcIsoTimestamp("2026-04-30T12:00:00.500Z"),
@@ -414,7 +392,6 @@ test("startWebHost 的 /api/ui-snapshot 会注入非持久化 OpenCode 过程消
       getWorkspaceSnapshot: async () => buildWorkspaceSnapshot({
         cwd: "/tmp/live-progress",
         name: "live-progress",
-        tasks: [taskSnapshot],
       }),
       opencodeClient: {
         listSessionActivities: async (sessionId: string) =>
@@ -452,8 +429,41 @@ test("startWebHost 的 /api/ui-snapshot 会注入非持久化 OpenCode 过程消
       "thinking",
       "read",
     ]);
-    assert.deepEqual(payload.workspace.tasks[0].messages, []);
-    assert.deepEqual(payload.workspace.messages, []);
+  } finally {
+    await host.close();
+  }
+});
+
+test("startWebHost 的 /api/ui-snapshot 遇到非空任务异常时返回 500", async () => {
+  const port = await reservePort();
+  const host = await startWebHost({
+    orchestrator: {
+      submitTask: async () => {
+        throw new Error("unexpected submitTask");
+      },
+      getTaskSnapshot: async () => {
+        throw new Error("snapshot_failed");
+      },
+      getWorkspaceSnapshot: async () => buildWorkspaceSnapshot({
+        cwd: "/tmp/snapshot-failed",
+        name: "snapshot-failed",
+      }),
+      openAgentTerminal: async () => {
+        throw new Error("unexpected openAgentTerminal");
+      },
+    } as never,
+    port,
+    staticAssets: { kind: "api-only" },
+    userDataPath: "/tmp/user-data",
+    bindHosts: [UI_LOOPBACK_IPV4_HOST],
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/api/ui-snapshot`);
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), {
+      message: "snapshot_failed",
+    });
   } finally {
     await host.close();
   }
@@ -488,7 +498,6 @@ test("startWebHost 的 /api/tasks/open-agent-terminal 只透传 agentId", async 
       },
       body: JSON.stringify({
         agentId: "Build",
-        taskId: "task-overridden",
       }),
     });
 
@@ -658,10 +667,6 @@ test("startWebHost 任一 bind host 监听失败时会关闭已监听 server", a
     await blocker.reservation.close();
   }
 
-  const taskSnapshot = buildTaskSnapshot({
-    id: "task-123",
-    cwd: "/tmp/demo",
-  });
   const reusedHost = await startWebHost({
     orchestrator: {
       submitTask: async () => {
@@ -670,7 +675,6 @@ test("startWebHost 任一 bind host 监听失败时会关闭已监听 server", a
       getWorkspaceSnapshot: async () => buildWorkspaceSnapshot({
         cwd: "/tmp/demo",
         name: "demo",
-        tasks: [taskSnapshot],
       }),
       openAgentTerminal: async () => {
         throw new Error("unexpected openAgentTerminal");

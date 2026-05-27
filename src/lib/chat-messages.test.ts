@@ -9,7 +9,6 @@ const TIMESTAMP = toUtcIsoTimestamp("2026-05-21T00:00:00.000Z");
 function createAgentFinalMessage(content: string): AgentFinalMessageRecord {
   return {
     id: "final",
-    taskId: "task",
     sender: "Build",
     timestamp: TIMESTAMP,
     content,
@@ -25,7 +24,6 @@ function createAgentFinalMessage(content: string): AgentFinalMessageRecord {
 function createAgentDispatchMessage(content: string): AgentDispatchMessageRecord {
   return {
     id: "dispatch",
-    taskId: "task",
     sender: "Build",
     timestamp: TIMESTAMP,
     content,

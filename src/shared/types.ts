@@ -152,7 +152,6 @@ export type TopologyNodeRecord =
 
 export interface TaskAgentRecord {
   id: string;
-  taskId: string;
   opencodeSessionId: string;
   opencodeAttachBaseUrl: string;
   status: AgentStatus;
@@ -404,7 +403,6 @@ export function getTriggerEdgeLoopLimit(
 
 interface BaseMessageRecord {
   id: string;
-  taskId: string;
   content: string;
   sender: string;
   timestamp: UtcIsoTimestamp;
@@ -563,8 +561,6 @@ export interface WorkspaceSnapshot {
   name: string;
   agents: AgentRecord[];
   topology: TopologyRecord;
-  messages: MessageRecord[];
-  tasks: TaskSnapshot[];
 }
 
 interface UiSnapshotPayloadBase {

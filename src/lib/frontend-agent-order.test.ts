@@ -42,9 +42,9 @@ test("resolveDefaultSelectedAgentIdForFrontend 会回到拓扑定义中的第一
       { id: "BA", prompt: "", isWritable: false },
     ],
     taskAgents: [
-      { taskId: "task-1", id: "Build", opencodeSessionId: "", opencodeAttachBaseUrl: "", status: "running", runCount: 1 },
-      { taskId: "task-1", id: "TaskReview", opencodeSessionId: "", opencodeAttachBaseUrl: "", status: "idle", runCount: 0 },
-      { taskId: "task-1", id: "BA", opencodeSessionId: "", opencodeAttachBaseUrl: "", status: "completed", runCount: 1 },
+      { id: "Build", opencodeSessionId: "", opencodeAttachBaseUrl: "", status: "running", runCount: 1 },
+      { id: "TaskReview", opencodeSessionId: "", opencodeAttachBaseUrl: "", status: "idle", runCount: 0 },
+      { id: "BA", opencodeSessionId: "", opencodeAttachBaseUrl: "", status: "completed", runCount: 1 },
     ],
     orderedAgentIds: ["BA", "Build", "TaskReview"],
   });

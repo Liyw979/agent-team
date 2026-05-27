@@ -31,7 +31,6 @@ function createAgentFinalMessage(
 ): AgentFinalMessageRecord {
   const base: Omit<AgentFinalMessageRecord, "routingKind" | "trigger"> = {
     id: input.id,
-    taskId: "task-1",
     sender: input.sender,
     timestamp: toUtcIsoTimestamp(input.timestamp),
     content: input.content,
@@ -65,7 +64,6 @@ function createTaskRoundFinishedMessage(input: {
 }): MessageRecord {
   return {
     id: input.id,
-    taskId: "task-1",
     sender: "system",
     timestamp: toUtcIsoTimestamp(input.timestamp),
     content: input.content,
@@ -87,7 +85,6 @@ test("task-round-finished 与更晚的 agent-final 必须纠正滞后的 task/ag
   };
   const agents: TaskAgentRecord[] = [
     {
-      taskId: "task-1",
       id: "BA",
       opencodeSessionId: "",
       opencodeAttachBaseUrl: "",
@@ -95,7 +92,6 @@ test("task-round-finished 与更晚的 agent-final 必须纠正滞后的 task/ag
       runCount: 1,
     },
     {
-      taskId: "task-1",
       id: "Build",
       opencodeSessionId: "",
       opencodeAttachBaseUrl: "",
@@ -103,7 +99,6 @@ test("task-round-finished 与更晚的 agent-final 必须纠正滞后的 task/ag
       runCount: 4,
     },
     {
-      taskId: "task-1",
       id: "CodeReview",
       opencodeSessionId: "",
       opencodeAttachBaseUrl: "",
@@ -154,7 +149,6 @@ test("旧的 task-round-finished 后面出现新的用户消息时，补偿逻�
   };
   const agents: TaskAgentRecord[] = [
     {
-      taskId: "task-1",
       id: "BA",
       opencodeSessionId: "",
       opencodeAttachBaseUrl: "",
@@ -170,7 +164,6 @@ test("旧的 task-round-finished 后面出现新的用户消息时，补偿逻�
     }),
     {
       id: "message-2",
-      taskId: "task-1",
       sender: "user",
       timestamp: toUtcIsoTimestamp("2026-04-21T03:49:00.000Z"),
       content: "@BA 请继续第二轮",

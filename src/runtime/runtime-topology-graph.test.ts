@@ -25,7 +25,6 @@ test("buildEffectiveTopology 不会因为 nodeRecords 只保存局部节点而�
     ],
   };
   const state = createEmptyGraphTaskState({
-    taskId: "task-runtime-topology",
     topology,
   });
 

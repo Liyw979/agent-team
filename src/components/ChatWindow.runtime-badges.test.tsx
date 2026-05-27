@@ -244,8 +244,6 @@ function createWorkspaceAndTask(): {
       { id: "线索发现", prompt: "发现", isWritable: false },
     ],
     topology,
-    messages: [],
-    tasks: [],
   };
 
   const task: TaskSnapshot = {
@@ -262,7 +260,6 @@ function createWorkspaceAndTask(): {
     agents: [
       {
         id: "Build",
-        taskId: "task-chat-window-runtime-badges",
         opencodeSessionId: "session-build",
         opencodeAttachBaseUrl: "http://localhost:4310",
         status: "running",
@@ -270,7 +267,6 @@ function createWorkspaceAndTask(): {
       },
       {
         id: "QA",
-        taskId: "task-chat-window-runtime-badges",
         opencodeSessionId: "session-qa",
         opencodeAttachBaseUrl: "http://localhost:4310",
         status: "failed",
@@ -278,7 +274,6 @@ function createWorkspaceAndTask(): {
       },
       {
         id: "误报论证-1",
-        taskId: "task-chat-window-runtime-badges",
         opencodeSessionId: "session-challenge-1",
         opencodeAttachBaseUrl: "http://localhost:4310",
         status: "failed",
@@ -286,7 +281,6 @@ function createWorkspaceAndTask(): {
       },
       {
         id: "漏洞论证-1",
-        taskId: "task-chat-window-runtime-badges",
         opencodeSessionId: "session-argument-1",
         opencodeAttachBaseUrl: "http://localhost:4310",
         status: "completed",
@@ -296,7 +290,6 @@ function createWorkspaceAndTask(): {
     messages: [
       {
         id: "user-dispatch",
-        taskId: "task-chat-window-runtime-badges",
         sender: "user",
         content: "@Build @QA 请处理本轮问题",
         timestamp: toUtcIsoTimestamp("2026-04-29T10:00:00.000Z"),
@@ -308,7 +301,6 @@ function createWorkspaceAndTask(): {
       },
       {
         id: "clue-final",
-        taskId: "task-chat-window-runtime-badges",
         sender: "线索发现",
         content: "发现第 1 个可疑点：这里需要进入对抗讨论。",
         timestamp: toUtcIsoTimestamp("2026-04-29T10:00:10.000Z"),
@@ -338,7 +330,6 @@ test("ChatWindow 只根据消息流展示运行中面板与最终消息", async 
       ...task.messages,
       {
         id: "build-progress",
-        taskId: task.task.id,
         sender: "Build",
         content: "Build 正在执行中",
         timestamp: toUtcIsoTimestamp("2026-04-29T10:00:01.000Z"),
@@ -352,7 +343,6 @@ test("ChatWindow 只根据消息流展示运行中面板与最终消息", async 
       },
       {
         id: "qa-final",
-        taskId: task.task.id,
         sender: "QA",
         content: "QA 校验失败",
         timestamp: toUtcIsoTimestamp("2026-04-29T10:00:02.000Z"),
