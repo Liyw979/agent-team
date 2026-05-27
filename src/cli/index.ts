@@ -13,7 +13,11 @@ import { buildInjectedConfigFromAgents } from "../runtime/project-agent-source";
 import { launchTerminalCommand } from "../runtime/terminal-launcher";
 import { resolveCliUserDataPath } from "../runtime/user-data-path";
 import { compileTeamDsl, matchesAppliedTeamDsl } from "../runtime/team-dsl";
-import { collectIncrementalChatTranscript, renderChatStreamEntries } from "./chat-stream-printer";
+import {
+  collectIncrementalAgentFinalMessages,
+  collectIncrementalChatTranscript,
+  renderChatStreamEntries,
+} from "./chat-stream-printer";
 import {
   buildCliHelpText,
   parseCliCommand,
@@ -247,14 +251,14 @@ async function renderTaskMessages(
       lastAttachEntries = attachEntries;
     }
 
-    if (printMessages) {
-      const entries = includeHistory
+    const entries = printMessages
+      ? includeHistory
         ? collectIncrementalChatTranscript([], snapshot.messages)
-        : collectIncrementalChatTranscript(lastMessages, snapshot.messages);
+        : collectIncrementalChatTranscript(lastMessages, snapshot.messages)
+      : collectIncrementalAgentFinalMessages(lastMessages, snapshot.messages);
 
-      if (entries.length > 0) {
-        process.stdout.write(renderChatStreamEntries(entries));
-      }
+    if (entries.length > 0) {
+      process.stdout.write(renderChatStreamEntries(entries));
     }
     lastMessages = snapshot.messages;
     includeHistory = false;

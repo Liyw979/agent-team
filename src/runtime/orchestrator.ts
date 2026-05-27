@@ -76,7 +76,7 @@ import {
 } from "./runtime-topology-graph";
 import type { CompiledTeamDsl } from "./team-dsl";
 import { resolveTaskAgentIdsToPrewarm } from "./task-session-prewarm";
-import { bindCurrentTaskLog } from "./app-log";
+import { appendAppLog, bindCurrentTaskLog } from "./app-log";
 import {
   extractDslAgentsFromTopology,
   resolveProjectAgents,
@@ -1664,6 +1664,14 @@ export class Orchestrator {
         } satisfies MessageRecord;
       }
       this.store.insertMessage(taskMessage);
+      // 历史要求：拓扑里渲染的 agent final message 必须同步写入任务日志，每条消息只占一行。
+      appendAppLog("info", "agent.final_message", {
+        agentId: runtimeAgentId,
+        messageId: taskMessage.id,
+        runCount: currentAgent.runCount,
+        routingKind: taskMessage.routingKind,
+        content: taskMessage.content.replace(/\s+/gu, " ").trim(),
+      }, "file-only");
 
       const agentStatus = resolveAgentStatusFromRouting({
         routingKind: resolvedDecision,
