@@ -440,7 +440,6 @@ export interface AgentProgressMessageRecord extends BaseMessageRecord {
 type AgentFinalMessageRecordBase = BaseMessageRecord & {
   kind: "agent-final";
   runCount: number;
-  responseNote: string;
   rawResponse: string;
   status: "completed" | "error";
   senderDisplayName?: string;

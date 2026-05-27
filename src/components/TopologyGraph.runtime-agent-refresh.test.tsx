@@ -128,7 +128,6 @@ function createFinalMessage(input:
     kind: "agent-final" as const,
     runCount: 1,
     status: "completed" as const,
-    responseNote: "",
     rawResponse: input.content,
   } satisfies Omit<Extract<MessageRecord, { kind: "agent-final" }>, "routingKind" | "trigger">;
   if (input.routingKind === "triggered") {
@@ -354,7 +353,6 @@ test("TopologyGraph 会继续展示刚完成的运行实例", async () => {
         status: "completed",
         routingKind: "triggered",
         trigger: "<continue>",
-        responseNote: "",
         rawResponse: "误报论证-1 请求继续论证。",
       },
     ],
@@ -566,7 +564,6 @@ test("TopologyGraph 不再展示节点全屏与详情交互", async () => {
         runCount: 1,
         status: "completed",
         routingKind: "default",
-        responseNote: "",
         rawResponse: "最终结果消息",
       },
     ],
@@ -612,7 +609,6 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
     runCount: 1,
     status: "completed" as const,
     routingKind: "default" as const,
-    responseNote: "",
     rawResponse: `第 ${index + 1} 条最终结果消息 ${"路径/说明 ".repeat(8)}`,
   }));
   const task = createTask({
@@ -648,7 +644,6 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
         runCount: 1,
         status: "completed",
         routingKind: "default",
-        responseNote: "",
         rawResponse: "短消息。",
       },
     ],
@@ -709,7 +704,6 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
             runCount: 1,
             status: "completed",
             routingKind: "default",
-            responseNote: "",
             rawResponse: "第 11 条最终结果消息 路径/说明 路径/说明 路径/说明",
           },
         ],
@@ -749,7 +743,6 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
             runCount: 1,
             status: "completed",
             routingKind: "default",
-            responseNote: "",
             rawResponse: "第 11 条最终结果消息 路径/说明 路径/说明 路径/说明",
           },
           {
@@ -762,7 +755,6 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
             runCount: 1,
             status: "completed",
             routingKind: "default",
-            responseNote: "",
             rawResponse: "第 12 条最终结果消息 路径/说明 路径/说明 路径/说明",
           },
         ],

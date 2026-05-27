@@ -151,7 +151,6 @@ function createAgentFinalMessage() {
       runCount: 1,
       status: "completed" as const,
       routingKind: "default" as const,
-      responseNote: "",
       rawResponse: "挑战结论：这里的消息应当在轮询拿到全量 snapshot 后立即出现。",
     },
   ];

@@ -1628,6 +1628,7 @@ export class Orchestrator {
       if (!displayContent && !(decisionAgent && parsedDecision.kind === "valid")) {
         throw new Error(`${runtimeAgentId} 未返回可展示的结果正文`);
       }
+      // 2026-05-27: 用户要求移除 AgentFinalMessageRecord 中与 content 重复的冗余展示正文字段，agent-final 只保留展示正文与原始回复两类事实。
       const baseTaskMessage: Omit<AgentFinalMessageRecord, "routingKind" | "trigger"> = {
         id: response.messageId,
         taskId: task.id,
@@ -1637,7 +1638,6 @@ export class Orchestrator {
         kind: "agent-final",
         runCount: currentAgent.runCount,
         status: "completed",
-        responseNote: displayContent,
         rawResponse: response.finalMessage,
         senderDisplayName,
       };

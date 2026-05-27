@@ -94,7 +94,6 @@ function createAgentFinalMessage(input: {
     kind: "agent-final",
     runCount: 1,
     status: "completed",
-    responseNote: "",
     rawResponse: input.content,
   };
   return input.routingKind === "invalid"

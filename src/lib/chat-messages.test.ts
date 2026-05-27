@@ -15,7 +15,6 @@ function createAgentFinalMessage(content: string): AgentFinalMessageRecord {
     content,
     kind: "agent-final",
     runCount: 1,
-    responseNote: content,
     status: "completed",
     rawResponse: content,
     routingKind: "default",
