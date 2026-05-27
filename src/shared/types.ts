@@ -74,8 +74,6 @@ export interface AgentRecord {
   isWritable: boolean;
 }
 
-export type TopologyNodeKind = "agent" | "group";
-
 type GroupMemberRole = "pro" | "con" | "summary" | string;
 export type InitialMessageRouting =
   | {
@@ -131,16 +129,26 @@ export type GroupRuleWithoutReport = GroupRuleBase & {
 
 export type GroupRule = GroupRuleWithReport | GroupRuleWithoutReport;
 
-export interface TopologyNodeRecord {
+export interface TopologyAgentNodeRecord {
   id: string;
-  kind: TopologyNodeKind;
+  kind: "agent";
   templateName: string;
   initialMessageRouting: InitialMessageRouting;
-  groupRuleId?: string;
-  groupEnabled?: boolean;
-  prompt?: string;
-  writable?: boolean;
+  prompt: string;
+  writable: boolean;
 }
+
+export interface TopologyGroupNodeRecord {
+  id: string;
+  kind: "group";
+  templateName: string;
+  initialMessageRouting: InitialMessageRouting;
+  groupRuleId: string;
+}
+
+export type TopologyNodeRecord =
+  | TopologyAgentNodeRecord
+  | TopologyGroupNodeRecord;
 
 export interface TaskAgentRecord {
   id: string;
@@ -782,7 +790,6 @@ export function createDefaultTopology(
       templateNameByNodeId: new Map(),
       initialMessageRoutingByNodeId: new Map(),
       groupRuleIdByNodeId: new Map(),
-      groupEnabledNodeIds: new Set(),
       promptByNodeId: new Map(),
       writableNodeIds: new Set(),
     }),
@@ -796,7 +803,6 @@ export function buildTopologyNodeRecords(input: {
   templateNameByNodeId: ReadonlyMap<string, string>;
   initialMessageRoutingByNodeId: ReadonlyMap<string, InitialMessageRouting>;
   groupRuleIdByNodeId: ReadonlyMap<string, string>;
-  groupEnabledNodeIds: ReadonlySet<string>;
   promptByNodeId: ReadonlyMap<string, string>;
   writableNodeIds: ReadonlySet<string>;
 }): TopologyNodeRecord[] {
@@ -805,18 +811,26 @@ export function buildTopologyNodeRecords(input: {
     const initialMessageRouting =
       input.initialMessageRoutingByNodeId.get(nodeId) ?? { mode: "inherit" };
     const isGroupNode = input.groupNodeIds.has(nodeId);
-    const groupRuleId = input.groupRuleIdByNodeId.get(nodeId);
-    const prompt = input.promptByNodeId.get(nodeId);
-
+    if (isGroupNode) {
+      const groupRuleId = input.groupRuleIdByNodeId.get(nodeId);
+      if (typeof groupRuleId !== "string" || groupRuleId.length === 0) {
+        throw new Error(`group 节点缺少 groupRuleId：${nodeId}`);
+      }
+      return {
+        id: nodeId,
+        kind: "group",
+        templateName,
+        initialMessageRouting,
+        groupRuleId,
+      };
+    }
     return {
       id: nodeId,
-      kind: isGroupNode ? "group" : "agent",
+      kind: "agent",
       templateName,
       initialMessageRouting,
-      ...(typeof groupRuleId === "string" ? { groupRuleId } : {}),
-      ...(input.groupEnabledNodeIds.has(nodeId) ? { groupEnabled: true } : {}),
-      ...(typeof prompt === "string" ? { prompt } : {}),
-      ...(input.writableNodeIds.has(nodeId) ? { writable: true } : {}),
+      prompt: input.promptByNodeId.get(nodeId) ?? "",
+      writable: input.writableNodeIds.has(nodeId),
     };
   });
 }
@@ -838,6 +852,18 @@ export function getTopologyNodeRecords(
       throw new Error("拓扑 nodeRecords 存在非法节点记录。");
     }
     assertInitialMessageRouting(node.initialMessageRouting);
+    if (node.kind === "agent") {
+      if (typeof node.prompt !== "string" || typeof node.writable !== "boolean") {
+        throw new Error(`agent 节点记录不完整：${node.id}`);
+      }
+      continue;
+    }
+    if (
+      typeof node.groupRuleId !== "string"
+      || node.groupRuleId.length === 0
+    ) {
+      throw new Error(`group 节点记录不完整：${node.id}`);
+    }
   }
   return topology.nodeRecords;
 }
@@ -899,7 +925,7 @@ export function getGroupRules(topology: TopologyRecord): GroupRule[] {
   const groupNodeNameByRuleId = new Map(
     topology.nodeRecords
       .filter((node) => node.kind === "group")
-      .flatMap((node) => (node.groupRuleId ? [[node.groupRuleId, node.id] as const] : [])),
+      .map((node) => [node.groupRuleId, node.id] as const),
   );
   return (topology.groupRules ?? []).map((rule) =>
     normalizeGroupRule(

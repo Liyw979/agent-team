@@ -36,10 +36,20 @@ function withNodeRecords(
       templateNameByNodeId: new Map(),
       initialMessageRoutingByNodeId: new Map(),
       groupRuleIdByNodeId: new Map(),
-      groupEnabledNodeIds: new Set(),
       promptByNodeId: new Map(),
       writableNodeIds: new Set(),
     }),
+  };
+}
+
+function runtimeAgentNode(id: string, templateName: string) {
+  return {
+    id,
+    kind: "agent" as const,
+    templateName,
+    initialMessageRouting: { mode: "inherit" as const },
+    prompt: "",
+    writable: false,
   };
 }
 
@@ -126,9 +136,9 @@ test("同一 trigger 多入边 triggered 任一来源满足后即可派发", () 
   const scheduler = new GatingScheduler(withNodeRecords({
     nodes: ["漏洞论证-1", "误报论证-1", "讨论总结-1"],
     nodeRecords: [
-      { id: "漏洞论证-1", kind: "agent", templateName: "漏洞论证", initialMessageRouting: { mode: "inherit" } },
-      { id: "误报论证-1", kind: "agent", templateName: "误报论证", initialMessageRouting: { mode: "inherit" } },
-      { id: "讨论总结-1", kind: "agent", templateName: "讨论总结", initialMessageRouting: { mode: "inherit" } },
+      runtimeAgentNode("漏洞论证-1", "漏洞论证"),
+      runtimeAgentNode("误报论证-1", "误报论证"),
+      runtimeAgentNode("讨论总结-1", "讨论总结"),
     ],
     edges: [
       { source: "漏洞论证-1", target: "讨论总结-1", trigger: "<complete>", messageMode: "last", maxTriggerRounds: 4 },
@@ -173,9 +183,9 @@ test("同一 trigger 多入边 triggered 的另一来源同样可以直接派发
   const scheduler = new GatingScheduler(withNodeRecords({
     nodes: ["漏洞论证-1", "误报论证-1", "讨论总结-1"],
     nodeRecords: [
-      { id: "漏洞论证-1", kind: "agent", templateName: "漏洞论证", initialMessageRouting: { mode: "inherit" } },
-      { id: "误报论证-1", kind: "agent", templateName: "误报论证", initialMessageRouting: { mode: "inherit" } },
-      { id: "讨论总结-1", kind: "agent", templateName: "讨论总结", initialMessageRouting: { mode: "inherit" } },
+      runtimeAgentNode("漏洞论证-1", "漏洞论证"),
+      runtimeAgentNode("误报论证-1", "误报论证"),
+      runtimeAgentNode("讨论总结-1", "讨论总结"),
     ],
     edges: [
       { source: "漏洞论证-1", target: "讨论总结-1", trigger: "<complete>", messageMode: "last", maxTriggerRounds: 4 },

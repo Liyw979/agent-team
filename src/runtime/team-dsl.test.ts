@@ -455,6 +455,7 @@ test("compileTeamDsl 支持在 agent 上声明 initialMessage 列表，并按定
       kind: "agent",
       templateName: "总结",
       prompt: "你负责总结。",
+      writable: false,
       initialMessageRouting: {
         mode: "list",
         agentIds: ["甲", "乙"],
@@ -779,7 +780,6 @@ test("matchesAppliedTeamDslAgents 会把 agent 一致但拓扑不同识别为只
           templateNameByNodeId: new Map(),
           initialMessageRoutingByNodeId: new Map(),
           groupRuleIdByNodeId: new Map(),
-          groupEnabledNodeIds: new Set(),
           promptByNodeId: new Map(),
           writableNodeIds: new Set(),
         }),

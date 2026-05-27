@@ -46,7 +46,6 @@ function withNodeRecords(
       templateNameByNodeId: new Map(),
       initialMessageRoutingByNodeId: new Map(),
       groupRuleIdByNodeId: new Map(),
-      groupEnabledNodeIds: new Set(),
       promptByNodeId: new Map(),
       writableNodeIds: new Set(),
     }),
@@ -155,6 +154,17 @@ function driveJudgeReviseLimit(
   });
 }
 
+function runtimeAgentNode(id: string, templateName: string) {
+  return {
+    id,
+    kind: "agent" as const,
+    templateName,
+    initialMessageRouting: { mode: "inherit" as const },
+    prompt: "",
+    writable: false,
+  };
+}
+
 test("isDecisionAgentInTopology 会识别带非 default 出边的节点", () => {
   const topology = withNodeRecords({
     nodes: ["Build", "Judge", "Summary"],
@@ -250,9 +260,9 @@ test("同一 trigger 多入边任一来源完成后会立即派发", () => {
   const topology: TopologyRecord = withNodeRecords({
     nodes: ["漏洞论证-1", "误报论证-1", "讨论总结-1"],
     nodeRecords: [
-      { id: "漏洞论证-1", kind: "agent", templateName: "漏洞论证", initialMessageRouting: { mode: "inherit" } },
-      { id: "误报论证-1", kind: "agent", templateName: "误报论证", initialMessageRouting: { mode: "inherit" } },
-      { id: "讨论总结-1", kind: "agent", templateName: "讨论总结", initialMessageRouting: { mode: "inherit" } },
+      runtimeAgentNode("漏洞论证-1", "漏洞论证"),
+      runtimeAgentNode("误报论证-1", "误报论证"),
+      runtimeAgentNode("讨论总结-1", "讨论总结"),
     ],
     edges: [
       { source: "漏洞论证-1", target: "讨论总结-1", trigger: "<complete>", messageMode: "last", maxTriggerRounds: 4 },

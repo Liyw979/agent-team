@@ -4,7 +4,9 @@ import {
   getTopologyNodeRecords,
   normalizeTopologyEdgeTrigger,
   type GroupRule,
+  type TopologyAgentNodeRecord,
   type TopologyEdge,
+  type TopologyGroupNodeRecord,
   type TopologyRecord,
 } from "@shared/types";
 
@@ -14,6 +16,12 @@ type DownstreamMode =
   | "group"
   | typeof DEFAULT_TOPOLOGY_TRIGGER
   | TopologyEdge["trigger"];
+
+interface AgentNodeMetadata {
+  templateName: string;
+  prompt: string;
+  writable: boolean;
+}
 
 function buildReachableTargets(topology: TopologyRecord, startNodeId: string): string[] {
   const queue = [startNodeId];
@@ -93,18 +101,39 @@ function setGroupNodeState(
   topology: TopologyRecord,
   targetNodeId: string,
   enabled: boolean,
+  agentNodeMetadataById: ReadonlyMap<string, AgentNodeMetadata>,
 ): Pick<TopologyRecord, "nodeRecords" | "groupRules"> {
+  // 要求记录：
+  // 1. agent 与 group 是不同类型，切换时必须重建完整节点对象。
+  // 2. 节点记录禁止可空字段，默认值必须在这里一次性写实。
   const nodeRecords = getTopologyNodeRecords(topology);
   const groupRuleId = `group-rule:${targetNodeId}`;
   const nextNodeRecords = nodeRecords.map((node) =>
     node.id === targetNodeId
       ? (() => {
-          const { groupRuleId: _groupRuleId, groupEnabled: _groupEnabled, ...rest } = node;
-          return {
-            ...rest,
-            kind: enabled ? ("group" as const) : ("agent" as const),
-            ...(enabled ? { groupEnabled: true, groupRuleId } : { groupEnabled: false }),
+          if (enabled) {
+            const nextGroupNode: TopologyGroupNodeRecord = {
+              id: node.id,
+              kind: "group",
+              templateName: node.templateName,
+              initialMessageRouting: node.initialMessageRouting,
+              groupRuleId,
+            };
+            return nextGroupNode;
+          }
+          const nextAgentMetadata = agentNodeMetadataById.get(node.id);
+          if (!nextAgentMetadata) {
+            throw new Error(`缺少 agent 节点元数据：${node.id}`);
+          }
+          const nextAgentNode: TopologyAgentNodeRecord = {
+            id: node.id,
+            kind: "agent",
+            templateName: nextAgentMetadata.templateName,
+            initialMessageRouting: node.initialMessageRouting,
+            prompt: nextAgentMetadata.prompt,
+            writable: nextAgentMetadata.writable,
           };
+          return nextAgentNode;
         })()
       : node,
   );
@@ -129,7 +158,7 @@ export function getDownstreamMode(input: {
     }),
   };
   const targetNode = getTopologyNodeRecords(topology).find((node) => node.id === input.targetNodeId);
-  if (targetNode?.groupEnabled) {
+  if (targetNode?.kind === "group") {
     return "group";
   }
 
@@ -151,6 +180,7 @@ export function setGroupEnabledForDownstream(input: {
   sourceNodeId: string;
   targetNodeId: string;
   enabled: boolean;
+  agentNodeMetadataById: ReadonlyMap<string, AgentNodeMetadata>;
 }): TopologyRecord {
   const nextEdges = input.enabled
     ? clearEdgesForPair(input.topology.edges, input.sourceNodeId, input.targetNodeId)
@@ -163,7 +193,12 @@ export function setGroupEnabledForDownstream(input: {
         })
         .map((edge) => ({ ...edge }))
     : input.topology.edges.map((edge) => ({ ...edge }));
-  const groupState = setGroupNodeState(input.topology, input.targetNodeId, input.enabled);
+  const groupState = setGroupNodeState(
+    input.topology,
+    input.targetNodeId,
+    input.enabled,
+    input.agentNodeMetadataById,
+  );
   const nextGroupRules = input.enabled
     ? (groupState.groupRules ?? []).concat(
         buildGroupRuleFromReachable(input.topology, input.sourceNodeId, input.targetNodeId),
@@ -183,6 +218,7 @@ export function setDownstreamMode(input: {
   sourceNodeId: string;
   targetNodeId: string;
   mode: DownstreamMode | null;
+  agentNodeMetadataById: ReadonlyMap<string, AgentNodeMetadata>;
 }): TopologyRecord {
   if (input.mode === "group") {
     return setGroupEnabledForDownstream({
@@ -190,6 +226,7 @@ export function setDownstreamMode(input: {
       sourceNodeId: input.sourceNodeId,
       targetNodeId: input.targetNodeId,
       enabled: true,
+      agentNodeMetadataById: input.agentNodeMetadataById,
     });
   }
 
@@ -198,7 +235,12 @@ export function setDownstreamMode(input: {
     input.sourceNodeId,
     input.targetNodeId,
   );
-  const groupState = setGroupNodeState(input.topology, input.targetNodeId, false);
+  const groupState = setGroupNodeState(
+    input.topology,
+    input.targetNodeId,
+    false,
+    input.agentNodeMetadataById,
+  );
   const nextEdges =
     input.mode === null
       ? clearedEdges

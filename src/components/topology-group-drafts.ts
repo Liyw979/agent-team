@@ -2,6 +2,8 @@ import {
   DEFAULT_TOPOLOGY_TRIGGER,
   getTopologyNodeRecords,
   type GroupRule,
+  type TopologyAgentNodeRecord,
+  type TopologyGroupNodeRecord,
   type TopologyNodeRecord,
   type TopologyRecord,
 } from "@shared/types";
@@ -87,6 +89,9 @@ export function upsertDebateGroupDraft(
   topology: TopologyRecord,
   input: DebateGroupDraftInput,
 ): TopologyRecord {
+  // 要求记录：
+  // 1. agent 与 group 是不同类型，禁止生成半节点记录。
+  // 2. 节点记录禁止可空字段，默认值必须在草稿写入时补齐。
   const teamName = input.teamName.trim();
   if (!teamName) {
     throw new Error("动态团队名称不能为空。");
@@ -103,21 +108,25 @@ export function upsertDebateGroupDraft(
     input.reportToTemplateName,
   ]) {
     if (!nodeRecords.some((node) => node.id === templateName)) {
-      nodeRecords.push({
+      const nextAgentNode: TopologyAgentNodeRecord = {
         id: templateName,
         kind: "agent",
         templateName,
         initialMessageRouting: { mode: "inherit" },
-      });
+        prompt: "",
+        writable: false,
+      };
+      nodeRecords.push(nextAgentNode);
     }
   }
-  nodeRecords = ensureNodeRecord(nodeRecords, {
+  const nextGroupNode: TopologyGroupNodeRecord = {
     id: groupNodeId,
     kind: "group",
     templateName: input.proTemplateName,
     initialMessageRouting: { mode: "inherit" },
     groupRuleId,
-  });
+  };
+  nodeRecords = ensureNodeRecord(nodeRecords, nextGroupNode);
 
   const nodeIds = topology.nodes.length > 0 ? [...topology.nodes] : nodeRecords
     .filter((node) => node.kind === "agent")

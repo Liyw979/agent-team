@@ -54,7 +54,6 @@ function createTopology(input: {
       templateNameByNodeId: new Map(),
       initialMessageRoutingByNodeId: new Map(),
       groupRuleIdByNodeId: new Map(),
-      groupEnabledNodeIds: new Set(),
       promptByNodeId: new Map(),
       writableNodeIds: new Set(),
     }),

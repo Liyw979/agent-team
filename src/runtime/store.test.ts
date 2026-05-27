@@ -48,7 +48,6 @@ test("StoreService 会在内存里保存 topology / tasks / taskAgents / message
       templateNameByNodeId: new Map(),
       initialMessageRoutingByNodeId: new Map(),
       groupRuleIdByNodeId: new Map(),
-      groupEnabledNodeIds: new Set(),
       promptByNodeId: new Map(),
       writableNodeIds: new Set(),
     }),

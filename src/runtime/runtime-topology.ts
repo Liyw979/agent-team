@@ -54,7 +54,7 @@ export function instantiateGroupBundle(input: {
 
   const topologyNodes = getTopologyNodeRecords(input.topology);
   const effectiveGroupNodeName = rule.groupNodeName
-    || topologyNodes.find((node) => node.groupRuleId === rule.id)?.id
+    || topologyNodes.find((node) => node.kind === "group" && node.groupRuleId === rule.id)?.id
     || "";
   const groupNode = (
     input.sourceRuntimeNodeId
@@ -242,7 +242,7 @@ export function validateGroupRule(topology: TopologyRecord, rule: GroupRule): vo
   const knownTemplateNames = new Set(topologyNodes.map((node) => node.templateName));
   const knownNodeIds = new Set(topologyNodes.map((node) => node.id));
   const effectiveGroupNodeName = rule.groupNodeName
-    || topologyNodes.find((node) => node.groupRuleId === rule.id)?.id
+    || topologyNodes.find((node) => node.kind === "group" && node.groupRuleId === rule.id)?.id
     || "";
   if (!knownNodeIds.has(effectiveGroupNodeName) && !knownTemplateNames.has(effectiveGroupNodeName)) {
     throw new Error(`group rule 对应的 group 节点不存在：${effectiveGroupNodeName || rule.id}`);

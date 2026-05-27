@@ -56,6 +56,9 @@ export function extractDslAgentsFromTopology(
   if (topology.nodes.length === 0) {
     return [];
   }
+  // 要求记录：
+  // 1. agent 与 group 是不同类型，禁止复用字段模型。
+  // 2. 节点记录禁止可空字段，必须在构建阶段写实完整值。
   const nodeRecords = getTopologyNodeRecords(topology).filter((node) => node.kind === "agent");
   const hasDslPromptMetadata = nodeRecords.some((node) =>
     typeof node.prompt === "string" || typeof node.writable === "boolean",
