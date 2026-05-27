@@ -9,6 +9,7 @@ import {
   type AgentFinalMessageRecord,
   type AgentRoutingKind,
   type AgentRecord,
+  type AgentStatus,
   buildTopologyNodeRecords,
   collectTopologyTriggerShapes,
   createDefaultTopology,
@@ -49,7 +50,6 @@ import {
 } from "./decision-parser";
 import { OpenCodeClient } from "./opencode-client";
 import { StoreService } from "./store";
-import { resolveAgentStatusFromRouting } from "./gating-rules";
 import {
   buildDownstreamForwardedContextFromMessages,
   NONE_MODE_PLACEHOLDER_MESSAGE,
@@ -1547,6 +1547,7 @@ export class Orchestrator {
     });
   }
 
+  // 2026-05-27: 用户要求删除仅把 invalid 映射为 failed、其余映射为 completed 的废话状态函数，执行结果状态必须在唯一调用点直接判定，禁止回引无业务语义的中间层。
   private async executeRuntimeAgentOnce(
     task: TaskRecord,
     runtimeAgentId: string,
@@ -1669,9 +1670,9 @@ export class Orchestrator {
         content: taskMessage.content.replace(/\s+/gu, " ").trim(),
       }, "file-only");
 
-      const agentStatus = resolveAgentStatusFromRouting({
-        routingKind: resolvedDecision,
-      });
+      const agentStatus: AgentStatus = resolvedDecision === "invalid"
+        ? "failed"
+        : "completed";
       this.store.updateTaskAgentStatus(
         task.id,
         runtimeAgentId,

@@ -15,7 +15,6 @@ import {
 } from "@shared/types";
 
 import { buildDownstreamForwardedContextFromMessages } from "./message-forwarding";
-import { resolveAgentStatusFromRouting } from "./gating-rules";
 import {
   getPersistedCompletionSeedAgentIds,
   resolveStandaloneTaskStatusAfterAgentRun,
@@ -239,12 +238,6 @@ test("initialMessage 缺少部分来源消息时，不会阻断已有来源与�
       "误报论证认为当前材料已经足够进入总结。",
     ].join("\n"),
   });
-});
-
-test("resolveAgentStatusFromRouting 只区分 invalid 与非 invalid", () => {
-  assert.equal(resolveAgentStatusFromRouting({ routingKind: "default" }), "completed");
-  assert.equal(resolveAgentStatusFromRouting({ routingKind: "triggered" }), "completed");
-  assert.equal(resolveAgentStatusFromRouting({ routingKind: "invalid" }), "failed");
 });
 
 test("单次执行在最新 agent 未失败时会结束为 finished", () => {
