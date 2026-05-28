@@ -15,6 +15,7 @@ import type { OpenCodeInjectedAgentConfig } from "./project-agent-source";
 import { toUtcIsoTimestamp, type UtcIsoTimestamp } from "@shared/types";
 
 export interface ServeHandle {
+  commandName: string;
   process: ChildProcessWithoutNullStreams;
   port: number;
 }
@@ -72,12 +73,39 @@ type RequestOptions =
     };
 
 class RetryableExecutionResultError extends Error {}
+
+export function buildOpenCodeServeSpawnSpec(
+  cwd: string,
+  commandName: string,
+  serverEnv: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+): { command: string; args: string[] } {
+  const launchArgs = ["serve"];
+  if (platform === "win32") {
+    return {
+      command: resolveWindowsCmdPath(serverEnv),
+      args: [
+        "/d",
+        "/s",
+        "/c",
+        `cd /d ${cwd} && ${commandName} ${launchArgs.join(" ")}`,
+      ],
+    };
+  }
+  return {
+    command: commandName,
+    args: launchArgs,
+  };
+}
+
 export class OpenCodeClient {
   readonly host = "127.0.0.1";
+  readonly commandName: string;
   private readonly runningServe: ServeHandle;
 
   constructor(input: { server: ServeHandle }) {
     this.runningServe = input.server;
+    this.commandName = input.server.commandName;
   }
 
   async createSession(
@@ -382,7 +410,12 @@ export class OpenCodeClient {
     });
   }
 
-  static async startServer(cwd: string, agent: Record<string, OpenCodeInjectedAgentConfig>): Promise<ServeHandle> {
+  static async startServer(
+    cwd: string,
+    agent: Record<string, OpenCodeInjectedAgentConfig>,
+    commandName: string,
+  ): Promise<ServeHandle> {
+    // 2026-05-28: 用户要求 CLI 支持通过 --cmd 替换默认命令名，serve 启动与进程回收必须沿用同一个命令名。
     // OpenCode serve must still inherit the real workspace directory as its process cwd.
     const serverEnv = { ...process.env };
     // Isolate the embedded runtime from parent OpenCode config injection.
@@ -396,21 +429,7 @@ export class OpenCodeClient {
     if (Object.keys(agent).length > 0) {
       serverEnv["OPENCODE_CONFIG_CONTENT"] = JSON.stringify({ agent });
     }
-    const launchArgs = ["serve"];
-    const spawnSpec = process.platform === "win32"
-      ? {
-          command: resolveWindowsCmdPath(serverEnv),
-          args: [
-            "/d",
-            "/s",
-            "/c",
-            `cd /d ${cwd} && opencode ${launchArgs.join(" ")}`,
-          ],
-        }
-      : {
-          command: "opencode",
-          args: launchArgs,
-        };
+    const spawnSpec = buildOpenCodeServeSpawnSpec(cwd, commandName, serverEnv);
     const childProcess = spawn(
       spawnSpec.command,
       spawnSpec.args,
@@ -470,6 +489,7 @@ export class OpenCodeClient {
     }
 
     return {
+      commandName,
       process: childProcess,
       port,
     };
@@ -519,14 +539,14 @@ export class OpenCodeClient {
           encoding: "utf8",
           stdio: ["ignore", "pipe", "ignore"],
         });
-        return output.toLowerCase().includes("opencode");
+        return output.toLowerCase().includes(this.commandName.toLowerCase());
       }
 
       const command = execFileSync("ps", ["-o", "command=", "-p", String(pid)], {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
       }).trim();
-      return command.includes("opencode") && command.includes("serve");
+      return command.includes(this.commandName) && command.includes("serve");
     } catch {
       return false;
     }

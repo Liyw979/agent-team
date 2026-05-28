@@ -25,8 +25,12 @@ function collectProcessOutputMessages(outputs: ProcessOutput[]): string[] {
   return outputs.flatMap((output) => output.kind === "present" ? [output.message] : []);
 }
 
-export async function ensureOpencodePreflightPassed() {
-  const result = childProcess.spawnSync("opencode", ["--help"], {
+export async function ensureOpencodePreflightPassed(
+  commandName: string,
+  spawnSyncImpl: typeof childProcess.spawnSync = childProcess.spawnSync,
+) {
+  // 2026-05-28: 用户要求 CLI 支持通过 --cmd 替换默认命令名，预检查必须与 serve/attach 使用同一个命令名。
+  const result = spawnSyncImpl(commandName, ["--help"], {
     encoding: "utf8",
     windowsHide: true,
     shell: true,
@@ -46,5 +50,5 @@ export async function ensureOpencodePreflightPassed() {
     : outputMessages.length > 0
       ? outputMessages.join("\n")
       : `退出码 ${exitStatus}`;
-  throw new Error(`\`opencode --help\` 执行失败（${errorMessage}），说明 opencode 无法正常使用，无法启动本应用`);
+  throw new Error(`\`${commandName} --help\` 执行失败（${errorMessage}），说明 ${commandName} 无法正常使用，无法启动本应用`);
 }

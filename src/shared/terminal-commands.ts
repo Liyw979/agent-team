@@ -11,13 +11,14 @@ function quotePortableShellArg(
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-export function buildCliOpencodeAttachCommand(
+export function buildCliAttachCommand(
+  commandName: string,
   attachBaseUrl: string,
   sessionId: string,
   platform: NodeJS.Platform = process.platform,
 ): string {
   return [
-    "opencode",
+    commandName,
     "attach",
     quotePortableShellArg(attachBaseUrl, platform),
     "--session",

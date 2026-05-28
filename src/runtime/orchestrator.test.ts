@@ -144,7 +144,10 @@ type ConfigureTestOrchestratorDependencies = (
 ) => TestOrchestratorDependencies;
 
 type BaseOrchestratorOptions = ConstructorParameters<typeof Orchestrator>[0];
-type TestOrchestratorOptions = Omit<BaseOrchestratorOptions, "opencodeClient" | "terminalLauncher">;
+type TestOrchestratorOptions = {
+  cwd: string;
+  userDataPath: string;
+};
 
 function requireSingleMessage<T extends MessageRecord>(
   messages: T[],
@@ -172,6 +175,7 @@ function requireSingleTriggeredAgentFinalMessage(
 function createTestOpenCodeClient(): OpenCodeClient {
   const client = new OpenCodeClient({
     server: {
+      commandName: "opencode",
       process: {
         pid: 0,
         killed: true,
@@ -216,6 +220,7 @@ class TestOrchestrator extends Orchestrator {
   ) {
     super({
       ...options,
+      commandName: "opencode",
       opencodeClient: createTestOpenCodeClient(),
       terminalLauncher: async () => {},
     });
@@ -1799,6 +1804,47 @@ test("保存拓扑时会把 target=__end__ 的 trigger 边提升到 flow.end.inc
       },
     ],
   });
+});
+
+test("openAgentTerminal 使用配置的自定义命令名", async () => {
+  class AttachCommandTestOrchestrator extends Orchestrator {
+    constructor(options: TestOrchestratorOptions, terminalLauncher: BaseOrchestratorOptions["terminalLauncher"]) {
+      super({
+        ...options,
+        commandName: "nga",
+        opencodeClient: createTestOpenCodeClient(),
+        terminalLauncher,
+      });
+      activeOrchestrators.add(this);
+    }
+  }
+
+  const userDataPath = createTempDir();
+  const projectPath = createTempDir();
+  let launchedCommand = "";
+  const orchestrator = new AttachCommandTestOrchestrator(
+    {
+      cwd: projectPath,
+      userDataPath,
+    },
+    async (command) => {
+      launchedCommand = command;
+    },
+  );
+  orchestrator.opencodeClient.createSession = async (title: string) => `session:${title}`;
+  orchestrator.opencodeClient.getAttachBaseUrl = async () => "http://127.0.0.1:43127";
+
+  const compiled = compileBuiltinTopology("vulnerability.yaml");
+  await orchestrator.applyTeamDsl({
+    compiled,
+  });
+  await orchestrator.initializeTask();
+  await orchestrator.openAgentTerminal("线索发现");
+
+  assert.equal(
+    launchedCommand,
+    "nga attach 'http://127.0.0.1:43127' --session 'session:线索发现'",
+  );
 });
 
 test("保存拓扑后会把动态 group 团队配置保留在当前运行时快照里", async () => {

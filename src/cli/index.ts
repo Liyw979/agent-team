@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import process from "node:process";
-import { buildCliOpencodeAttachCommand } from "@shared/terminal-commands";
+import { buildCliAttachCommand } from "@shared/terminal-commands";
 import type { TaskSnapshot, WorkspaceSnapshot } from "@shared/types";
 import open from "open";
 import {
@@ -20,6 +20,7 @@ import {
 } from "./chat-stream-printer";
 import {
   buildCliHelpText,
+  isCliCommandNameSupported,
   parseCliCommand,
   type ParsedCliCommand,
 } from "./cli-command";
@@ -125,15 +126,19 @@ async function disposeCliContext(context: CliContext, options: CliDisposeOptions
 
 async function createCliContext(input: {
   cwd: string;
+  commandName: string;
   userDataPath: string;
   compiledTopology: ReturnType<typeof compileTeamDsl>;
 }): Promise<CliContext> {
+  // 2026-05-28: 用户要求 CLI 支持通过 --cmd 替换默认命令名，serve 启动与 attach 文案必须共用同一个命令名。
+  // 2026-05-28: 用户要求 `--cmd` 只表示单个可执行命令名，不支持包含空白字符的复合 shell 前缀。
   const userDataPath = input.userDataPath;
   const cwd = resolveWorkspaceCwdFromFilesystem(input.cwd, process.cwd());
   await ensureRuntimeAssets(userDataPath);
   const server = await OpenCodeClient.startServer(
     cwd,
     buildInjectedConfigFromAgents(input.compiledTopology.agents),
+    input.commandName,
   );
   const opencodeClient = new OpenCodeClient({
     server,
@@ -141,6 +146,7 @@ async function createCliContext(input: {
   try {
     const orchestrator = new Orchestrator({
       cwd,
+      commandName: input.commandName,
       userDataPath,
       opencodeClient,
       terminalLauncher: launchTerminalCommand,
@@ -174,6 +180,9 @@ function validateTaskHeadlessCommand(
 ) {
   const hasFile = command.file.trim().length > 0;
   const hasMessage = command.message.trim().length > 0;
+  if (!isCliCommandNameSupported(command.cmd)) {
+    fail("新建 Task 时传入的 --cmd 必须是单个命令名，只允许字母、数字、_、.、/、\\、:、-。");
+  }
   if (!hasFile) {
     fail("新建 Task 时必须传 --file <topology-file>。");
   }
@@ -191,6 +200,9 @@ function validateTaskUiCommand(
   const hasFile = command.file.trim().length > 0;
   const hasMessage = command.message.trim().length > 0;
 
+  if (!isCliCommandNameSupported(command.cmd)) {
+    fail("新建 Task 打开网页界面时传入的 --cmd 必须是单个命令名，只允许字母、数字、_、.、/、\\、:、-。");
+  }
   if (!hasFile) {
     fail("新建 Task 打开网页界面时必须传 --file <topology-file>。");
   }
@@ -202,13 +214,15 @@ function validateTaskUiCommand(
   }
 }
 
-function buildTaskAttachEntries(task: TaskSnapshot): TaskAttachCommandEntry[] {
+function buildTaskAttachEntries(task: TaskSnapshot, commandName: string): TaskAttachCommandEntry[] {
+  // 2026-05-28: 用户要求 CLI 支持通过 --cmd 替换默认 opencode 命令，打印出的 attach 调试命令必须与 serve 启动命令一致。
   return task.agents.map((agent) => {
     if (agent.opencodeAttachBaseUrl && agent.opencodeSessionId) {
       return {
         kind: "attached",
         agentId: agent.id,
-        opencodeAttachCommand: buildCliOpencodeAttachCommand(
+        opencodeAttachCommand: buildCliAttachCommand(
+          commandName,
           agent.opencodeAttachBaseUrl,
           agent.opencodeSessionId,
         ),
@@ -223,6 +237,7 @@ function buildTaskAttachEntries(task: TaskSnapshot): TaskAttachCommandEntry[] {
 
 async function renderTaskMessages(
   context: CliContext,
+  commandName: string,
   previousMessages: TaskSnapshot["messages"],
   options: RenderTaskMessagesOptions,
 ) {
@@ -234,7 +249,7 @@ async function renderTaskMessages(
 
   while (true) {
     const snapshot = await context.orchestrator.getTaskSnapshot();
-    const attachEntries = buildTaskAttachEntries(snapshot);
+    const attachEntries = buildTaskAttachEntries(snapshot, commandName);
 
     if (!attachPrinted) {
       const attachCommands = renderTaskAttachCommands(attachEntries);
@@ -366,7 +381,7 @@ async function handleTaskHeadlessCommand(
     return;
   }
 
-  await renderTaskMessages(context, [], {
+  await renderTaskMessages(context, command.cmd, [], {
     includeHistory: streamingPlan.includeHistory,
     printAttach: streamingPlan.printAttach,
     printMessages: streamingPlan.printMessages,
@@ -407,7 +422,7 @@ async function handleTaskUiCommand(
   );
   await open(url);
   if (streamingPlan.enabled) {
-    await renderTaskMessages(context, [], {
+    await renderTaskMessages(context, command.cmd, [], {
       includeHistory: streamingPlan.includeHistory,
       printAttach: streamingPlan.printAttach,
       printMessages: streamingPlan.printMessages,
@@ -435,10 +450,11 @@ async function run() {
   activeRunFailureContextForCrash = WITHOUT_TASK_RUN_FAILURE_CONTEXT;
   didPrintTaskDiagnosticsForCrash = false;
 
-  await ensureOpencodePreflightPassed();
+  await ensureOpencodePreflightPassed(command.cmd);
 
   const context = await createCliContext({
     cwd: resolveCommandCwd(command),
+    commandName: command.cmd,
     userDataPath,
     compiledTopology,
   });
