@@ -299,7 +299,26 @@ test("renderChatStreamEntries 会把 agent final 正文限制为前 30 个字符
 
   assert.match(
     output,
-    /^\[2026\/04\/19 \d{2}:00:00\] 漏洞论证-1: 我同意你这次的结论：就当前代码证据看，把 o\n\n$/u,
+    /^\[2026\/04\/19 \d{2}:00:00\] 漏洞论证-1: 我同意你这次的结论：就当前代码证据看，把 os\.Create\.\.\.\n\n$/u,
+  );
+});
+
+test("renderChatStreamEntries 未截断的 agent final 正文不会追加省略号", () => {
+  const output = renderChatStreamEntries([
+    {
+      id: "m1",
+      sender: "Build",
+      senderDisplayName: "Build",
+      timestamp: toUtcIsoTimestamp("2026-04-19T10:00:00.000Z"),
+      content: "123456789012345678901234567890",
+      kinds: ["agent-final"],
+      messageChain: [],
+    },
+  ]);
+
+  assert.match(
+    output,
+    /^\[2026\/04\/19 \d{2}:00:00\] Build: 123456789012345678901234567890\n\n$/u,
   );
 });
 
