@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { withOptionalString } from "@shared/object-utils";
 import { resolveTaskSubmissionTarget } from "@shared/task-submission";
-import { buildCliOpencodeAttachCommand } from "@shared/terminal-commands";
+import { buildCliAttachCommand } from "@shared/terminal-commands";
 import {
   type AgentFinalMessageRecord,
   type AgentRoutingKind,
@@ -140,6 +140,7 @@ function getTopologyEndIncoming(
 
 interface OrchestratorOptions {
   cwd: string;
+  commandName: string;
   userDataPath: string;
   opencodeClient: OpenCodeClient;
   terminalLauncher: (command: string) => Promise<void>;
@@ -243,6 +244,7 @@ export class Orchestrator {
   readonly store: StoreService;
   readonly opencodeClient: OpenCodeClient;
   readonly cwd: string;
+  readonly commandName: string;
   private readonly runtime = new TaskRuntime({
     host: {
       createBatchRunners: async ({ state, batch }) =>
@@ -257,6 +259,7 @@ export class Orchestrator {
 
   constructor(options: OrchestratorOptions) {
     this.cwd = path.resolve(options.cwd);
+    this.commandName = options.commandName;
     // A single orchestrator process is bound to one workspace root for its whole lifetime.
     acquireProcessWorkspaceCwd(this.cwd);
     this.store = new StoreService();
@@ -992,10 +995,12 @@ export class Orchestrator {
     opencodeSessionId: string,
     sessionAttachBaseUrl: string,
   ) {
+    // 2026-05-28: 用户要求 CLI 支持通过 --cmd 替换默认命令名，UI 中打开 attach 终端必须使用同一个命令名。
     if (!sessionAttachBaseUrl) {
       throw new Error("当前 Agent 还没有可 attach 的 OpenCode 地址。");
     }
-    const attachCommand = buildCliOpencodeAttachCommand(
+    const attachCommand = buildCliAttachCommand(
+      this.commandName,
       sessionAttachBaseUrl,
       opencodeSessionId,
     );

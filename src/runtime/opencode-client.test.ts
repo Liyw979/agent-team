@@ -9,7 +9,12 @@ import os from "node:os";
 import path from "node:path";
 
 import { bindCurrentTaskLog, buildTaskLogFilePath, initAppFileLogger } from "./app-log";
-import { OpenCodeClient, type OpenCodeSessionActivity, type ServeHandle } from "./opencode-client";
+import {
+  buildOpenCodeServeSpawnSpec,
+  OpenCodeClient,
+  type OpenCodeSessionActivity,
+  type ServeHandle,
+} from "./opencode-client";
 
 class TestOpenCodeClient extends OpenCodeClient {
   declare request: OpenCodeClient["request"];
@@ -25,6 +30,7 @@ function createTempDir() {
 
 function createDetachedServeHandle(port: number) {
   return {
+    commandName: "opencode",
     process: {
       pid: 0,
       killed: true,
@@ -925,4 +931,27 @@ test("getAttachBaseUrl 只读取已经启动的 serve 地址", async () => {
   const baseUrl = await client.getAttachBaseUrl();
 
   assert.equal(baseUrl, "http://127.0.0.1:43128");
+});
+
+test("buildOpenCodeServeSpawnSpec 在 POSIX 下使用自定义命令名启动 serve", () => {
+  const spec = buildOpenCodeServeSpawnSpec("/tmp/project", "nga", {}, "darwin");
+
+  assert.deepEqual(spec, {
+    command: "nga",
+    args: ["serve"],
+  });
+});
+
+test("buildOpenCodeServeSpawnSpec 在 Windows 下使用自定义命令名启动 serve", () => {
+  const spec = buildOpenCodeServeSpawnSpec(
+    "C:\\project",
+    "nga",
+    { ComSpec: "C:\\Windows\\System32\\cmd.exe" },
+    "win32",
+  );
+
+  assert.deepEqual(spec, {
+    command: "C:\\Windows\\System32\\cmd.exe",
+    args: ["/d", "/s", "/c", "cd /d C:\\project && nga serve"],
+  });
 });
