@@ -13,8 +13,18 @@ function formatSingleLineMessageContent(value: string) {
   return value.replace(/\s+/gu, " ").trim();
 }
 
+/**
+ * 要求记录：
+ * 1. CLI 中 agent final 的预览仍然只展示前 30 个字符。
+ * 2. 预览发生截断时必须显式追加省略号，避免把截断内容误读为完整消息。
+ * 3. 未发生截断时保持原始单行内容，禁止为完整消息追加额外标记。
+ */
 function formatAgentFinalPreview(value: string) {
-  return formatSingleLineMessageContent(value).slice(0, AGENT_FINAL_PREVIEW_LENGTH);
+  const singleLineContent = formatSingleLineMessageContent(value);
+  const preview = singleLineContent.slice(0, AGENT_FINAL_PREVIEW_LENGTH);
+  return preview.length === singleLineContent.length
+    ? preview
+    : `${preview}...`;
 }
 
 function formatTimestamp(value: string) {
