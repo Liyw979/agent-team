@@ -1,3 +1,5 @@
+import { extractMentionAgentId, normalizeAgentId } from "./agent-id";
+
 type TaskSubmissionResolution =
   | {
       ok: true;
@@ -11,11 +13,11 @@ type TaskSubmissionResolution =
 
 export function resolveTaskSubmissionTarget(input: {
   content: string;
-  mentionAgentId?: string;
   availableAgents: string[];
   defaultTargetAgentId?: string;
 }): TaskSubmissionResolution {
-  const explicitMention = normalizeAgentId(input.mentionAgentId) ?? extractMention(input.content);
+  // 2026-05-29: 用户要求提交入口直接消灭 mention 缺失态二义性；只允许确定的 agentId 继续参与路由。
+  const explicitMention = extractMentionAgentId(input.content);
   if (explicitMention) {
     if (input.availableAgents.includes(explicitMention)) {
       return {
@@ -55,14 +57,4 @@ export function resolveTaskSubmissionTarget(input: {
     code: "missing_start_agent",
     message: "当前拓扑缺少 start node，请使用 @ 指定一个已写入 Agent 后再发送。",
   };
-}
-
-function extractMention(content: string): string | undefined {
-  const match = content.match(/@([^\s]+)/u);
-  return normalizeAgentId(match?.[1]);
-}
-
-function normalizeAgentId(value: string | undefined): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : undefined;
 }

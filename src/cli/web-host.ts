@@ -72,20 +72,8 @@ function parseSubmitTaskPayload(body: unknown): SubmitTaskPayload {
   if (typeof content !== "string" || content.trim() === "") {
     throw new Error("非法请求：content 必须是非空字符串");
   }
-  if (!Object.hasOwn(body, "mentionAgentId")) {
-    return {
-      content,
-    };
-  }
-  const mentionAgentId = body["mentionAgentId"];
-  if (
-    typeof mentionAgentId !== "string" || mentionAgentId.trim() === ""
-  ) {
-    throw new Error("非法请求：mentionAgentId 必须是非空字符串");
-  }
   return {
     content,
-    mentionAgentId,
   };
 }
 

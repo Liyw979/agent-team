@@ -583,7 +583,6 @@ export type UiSnapshotPayload =
 
 export interface SubmitTaskPayload {
   content: string;
-  mentionAgentId?: string;
 }
 
 export function normalizeTopologyEdgeTrigger(value: unknown): TopologyTrigger {

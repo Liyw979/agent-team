@@ -3,11 +3,15 @@ import type { ChatMessageItem } from "./chat-messages";
 
 const SYSTEM_SENDER_LABEL = "Orchestrator";
 
+interface TranscriptHeaderLine {
+  label: "日志" | "网页";
+  value: string;
+}
+
 interface FormatChatTranscriptOptions {
   locale?: string;
   timeZone?: string;
-  logFilePath?: string | null;
-  taskUrl?: string | null;
+  headerLines: TranscriptHeaderLine[];
 }
 
 export function getChatSenderLabel(sender: string) {
@@ -19,7 +23,7 @@ export function getChatSenderLabel(sender: string) {
 
 function formatChatTranscriptTimestamp(
   timestamp: UtcIsoTimestamp,
-  options: FormatChatTranscriptOptions = {},
+  options: Pick<FormatChatTranscriptOptions, "locale" | "timeZone">,
 ) {
   return new Intl.DateTimeFormat(options.locale ?? "zh-CN", {
     year: "numeric",
@@ -35,7 +39,7 @@ function formatChatTranscriptTimestamp(
 
 export function formatChatTranscript(
   messages: ChatMessageItem[],
-  options: FormatChatTranscriptOptions = {},
+  options: FormatChatTranscriptOptions,
 ) {
   const transcriptBody = messages
     .map((message) =>
@@ -53,10 +57,8 @@ export function formatChatTranscript(
     return "";
   }
 
-  const headerLines = [
-    options.logFilePath ? `日志：${options.logFilePath}` : null,
-    options.taskUrl ? `网页：${options.taskUrl}` : null,
-  ].filter((line): line is string => Boolean(line));
+  // 2026-05-29: 用户要求展示层边界先完成确定性标准化，不再向格式化函数传递可空展示字段。
+  const headerLines = options.headerLines.map((item) => `${item.label}：${item.value}`);
 
   if (headerLines.length === 0) {
     return transcriptBody;

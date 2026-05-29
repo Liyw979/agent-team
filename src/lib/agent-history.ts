@@ -5,7 +5,6 @@ import type {
   TopologyRecord,
   UtcIsoTimestamp,
 } from "@shared/types";
-import { withOptionalValue } from "@shared/object-utils";
 import {
   getTopologyNodeRecords,
   isAgentFinalMessageRecord,
@@ -365,18 +364,32 @@ export function buildAgentExecutionHistoryItems(input: {
   finalMessageId?: string;
   completedAt?: UtcIsoTimestamp;
 }) {
+  // 2026-05-29: 用户要求历史范围对象只在边界写入确定字段，禁止通过共享 helper 传播可空 completedAt/finalMessageId 语义。
   const allowedTriggers = isHistoryDecisionAgent(input.topology, input.agentId)
     ? getAgentAllowedTriggers(input.topology, input.agentId)
     : [];
-  const range = withOptionalValue({
-    startedAt: input.startedAt,
-  }, "endedAt", input.completedAt) satisfies AgentHistoryRange;
-  const finalHistoryItems = buildFilteredAgentFinalHistoryItems(withOptionalValue({
-    agentId: input.agentId,
-    messages: input.messages,
-    topology: input.topology,
-    range,
-  }, "finalMessageId", input.finalMessageId));
+  const range = input.completedAt
+    ? {
+        startedAt: input.startedAt,
+        endedAt: input.completedAt,
+      }
+    : {
+        startedAt: input.startedAt,
+      } satisfies AgentHistoryRange;
+  const finalHistoryItems = buildFilteredAgentFinalHistoryItems(input.finalMessageId
+    ? {
+        agentId: input.agentId,
+        messages: input.messages,
+        topology: input.topology,
+        range,
+        finalMessageId: input.finalMessageId,
+      }
+    : {
+      agentId: input.agentId,
+      messages: input.messages,
+      topology: input.topology,
+      range,
+    });
 
   return [
     ...buildProgressHistoryItems({

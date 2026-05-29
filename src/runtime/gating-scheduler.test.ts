@@ -241,5 +241,71 @@ test("default handoff 不会被未满足的自定义 trigger 入边阻塞", () =
     { id: "Judge", status: "idle" },
   ]);
 
-  assert.deepEqual(plan?.readyTargets, ["Build"]);
+  assert.deepEqual(plan.readyTargets, ["Build"]);
+});
+
+test("handoff 在没有选中任何下游时返回空计划而不是空值", () => {
+  const scheduler = new GatingScheduler(withNodeRecords({
+    nodes: ["BA", "Build"],
+    edges: [],
+  }), createGatingSchedulerRuntimeState());
+
+  const plan = scheduler.planHandoffDispatch("BA", "需求已澄清", [
+    { id: "BA", status: "completed" },
+    { id: "Build", status: "idle" },
+  ]);
+
+  assert.deepEqual(plan, {
+    sourceAgentId: "BA",
+    sourceContent: "需求已澄清",
+    triggerTargets: [],
+    readyTargets: [],
+    queuedTargets: [],
+  });
+});
+
+test("handoff 对同一签名重复规划时不会二次放行下游", () => {
+  const runtime = createGatingSchedulerRuntimeState();
+  const scheduler = new GatingScheduler(withNodeRecords({
+    nodes: ["BA", "Build"],
+    edges: [
+      { source: "BA", target: "Build", trigger: "<default>", messageMode: "last", maxTriggerRounds: 4 },
+    ],
+  }), runtime);
+
+  const firstPlan = scheduler.planHandoffDispatch("BA", "需求已澄清", [
+    { id: "BA", status: "completed" },
+    { id: "Build", status: "idle" },
+  ]);
+  const secondPlan = scheduler.planHandoffDispatch("BA", "需求已澄清", [
+    { id: "BA", status: "completed" },
+    { id: "Build", status: "idle" },
+  ]);
+
+  assert.deepEqual(firstPlan.readyTargets, ["Build"]);
+  assert.deepEqual(secondPlan.readyTargets, []);
+  assert.deepEqual(secondPlan.queuedTargets, []);
+});
+
+test("triggered 在命中边但无可执行目标时返回空计划而不是空值", () => {
+  const scheduler = new GatingScheduler(withNodeRecords({
+    nodes: ["Judge", "Build"],
+    edges: [
+      { source: "Judge", target: "Build", trigger: "<revise>", messageMode: "last", maxTriggerRounds: 2 },
+    ],
+  }), createGatingSchedulerRuntimeState());
+
+  const plan = scheduler.planTriggeredDispatch("Judge", "请继续修订", [
+    { id: "Judge", status: "completed" },
+  ], {
+    trigger: "<revise>",
+  });
+
+  assert.deepEqual(plan, {
+    sourceAgentId: "Judge",
+    sourceContent: "请继续修订",
+    triggerTargets: [],
+    readyTargets: [],
+    queuedTargets: [],
+  });
 });
