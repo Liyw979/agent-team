@@ -72,7 +72,14 @@ type RequestOptions =
       body: string;
     };
 
-class RetryableExecutionResultError extends Error {}
+class RetryableExecutionResultError extends Error {
+  readonly evidence: string;
+
+  constructor(message: string, evidence: string) {
+    super(message);
+    this.evidence = evidence;
+  }
+}
 
 export function buildOpenCodeServeSpawnSpec(
   cwd: string,
@@ -138,6 +145,7 @@ export class OpenCodeClient {
     sessionId: string,
     payload: SubmitMessagePayload,
   ): Promise<OpenCodeExecutionResult> {
+    // 2026-05-29: 用户要求异常请求必须把响应体写入任务日志和控制台，便于分析 trigger 缺失、最终消息错误等 OpenCode 异常。
     const opencodeAgent = toOpenCodeAgentId(payload.agent);
     const runtimeAgent = payload.runtimeAgent;
     const attempt = async (
@@ -158,7 +166,10 @@ export class OpenCodeClient {
             ],
           }),
         }, "OpenCode 请求失败").catch((error) => {
-          throw new RetryableExecutionResultError(error instanceof Error ? error.message : String(error));
+          throw new RetryableExecutionResultError(
+            error instanceof Error ? error.message : String(error),
+            "",
+          );
         });
         const message = await this.readJsonResponse(response)
           .then((raw) => this.parseMessageEnvelope(raw, opencodeAgent, "OpenCode 提交消息响应"))
@@ -172,7 +183,10 @@ export class OpenCodeClient {
             payload.allowedDecisionTriggers,
           );
           if (parsedDecision.kind !== "valid") {
-            throw new RetryableExecutionResultError("OpenCode 未返回需要的 trigger");
+            throw new RetryableExecutionResultError(
+              "OpenCode 未返回需要的 trigger",
+              OpenCodeClient.truncateLogPayload(result.finalMessage),
+            );
           }
         }
         return result;
@@ -182,7 +196,15 @@ export class OpenCodeClient {
         }
         const retryReason = error.message;
         const nextContent = "生成完整回复";
-        this.logRetriedMessageResend(sessionId, opencodeAgent, runtimeAgent, retryReason, retryCount, nextContent);
+        this.logRetriedMessageResend(
+          sessionId,
+          opencodeAgent,
+          runtimeAgent,
+          retryReason,
+          error.evidence,
+          retryCount,
+          nextContent,
+        );
         if (retryCount > 0) {
           await new Promise((resolve) => setTimeout(resolve, RETRYABLE_CLIENT_INTERVAL_MS));
         }
@@ -214,14 +236,23 @@ export class OpenCodeClient {
     sessionId: string,
     message: OpenCodeNormalizedMessage,
   ): OpenCodeExecutionResult {
+    // 2026-05-29: 用户要求空 assistant 结果也必须保留原始响应体证据，禁止只记录空字符串导致无法排查。
     const finalMessage = this.messageHasError(message.raw)
       ? this.readMessageError(message.raw, `OpenCode session ${sessionId} 最终消息`)
       : message.content;
     if (!finalMessage.trim()) {
-      throw new RetryableExecutionResultError("OpenCode 返回了空的 assistant 结果");
+      throw new RetryableExecutionResultError(
+        "OpenCode 返回了空的 assistant 结果",
+        OpenCodeClient.truncateLogPayload(
+          JSON.stringify(this.expectRecord(message.raw, `OpenCode session ${sessionId} 最终消息.raw`)),
+        ),
+      );
     }
     if (this.messageHasError(message.raw)) {
-      throw new RetryableExecutionResultError("OpenCode 最终消息包含错误");
+      throw new RetryableExecutionResultError(
+        "OpenCode 最终消息包含错误",
+        OpenCodeClient.truncateLogPayload(finalMessage),
+      );
     }
 
     return {
@@ -237,6 +268,7 @@ export class OpenCodeClient {
     agent: string,
     runtimeAgent: string,
     reason: string,
+    responseBody: string,
     retryCount: number,
     nextContent: string,
     ) {
@@ -249,6 +281,7 @@ export class OpenCodeClient {
       nextRetryCount: retryCount + 1,
       nextContent,
       reason,
+      responseBody,
       message,
     });
   }
@@ -593,6 +626,7 @@ export class OpenCodeClient {
     options: RequestOptions,
     errorPrefix = "OpenCode 请求失败",
   ): Promise<Response> {
+    // 2026-05-29: 用户要求非 2xx 的异常请求必须记录响应体，并同步输出到控制台，便于定位 OpenCode 服务端异常。
     const headers: Record<string, string> = {};
     if (options.method === "POST" && options.body.length > 0) {
       headers["content-type"] = "application/json";
@@ -624,12 +658,16 @@ export class OpenCodeClient {
     if (response.ok) {
       return response;
     }
+    const responseBody = OpenCodeClient.truncateLogPayload(await response.text());
     const message = `${errorPrefix}: ${response.status}`;
     appendAppLog("error", "opencode.request_failed", {
+      method: options.method,
+      url,
       status: response.status,
       statusText: response.statusText,
+      responseBody,
       message,
-    }, "file-only");
+    });
     throw new Error(message);
   }
 
