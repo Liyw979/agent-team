@@ -6,7 +6,7 @@ import { resolveTaskSubmissionTarget } from "@shared/task-submission";
 import { buildCliAttachCommand } from "@shared/terminal-commands";
 import {
   type AgentFinalMessageRecord,
-  type AgentRoutingKind,
+  type AgentRouting,
   type AgentRecord,
   type AgentStatus,
   buildTopologyNodeRecords,
@@ -840,12 +840,13 @@ export class Orchestrator {
     decisionAgent: boolean;
     topology: Pick<TopologyRecord, "edges" | "flow">;
     sourceAgentIds: string[];
-  }): AgentRoutingKind {
+  }): AgentRouting {
+    // 2026-05-29: 用户明确要求路由结果在编排链路里只保留单一 routing 联合值，禁止再拆回 routingKind + trigger 双字段。
     if (input.parsedDecision.kind === "invalid") {
-      return "invalid";
+      return { kind: "invalid" };
     }
     if (!input.decisionAgent) {
-      return "default";
+      return { kind: "default" };
     }
 
     for (const sourceAgentId of input.sourceAgentIds) {
@@ -855,11 +856,14 @@ export class Orchestrator {
         input.parsedDecision.trigger,
       );
       if (resolved.kind === "triggered") {
-        return "triggered";
+        return {
+          kind: "triggered",
+          trigger: input.parsedDecision.trigger,
+        };
       }
     }
 
-    return "invalid";
+    return { kind: "invalid" };
   }
 
   private ensureTaskRuntimeOverlay(): TaskRuntimeOverlay {
@@ -1419,9 +1423,9 @@ export class Orchestrator {
           topology,
           sourceAgentId,
           job.agentId,
-          batch.routingKind === "default"
+          batch.routing.kind === "default"
             ? DEFAULT_TOPOLOGY_TRIGGER
-            : batch.trigger,
+            : batch.routing.trigger,
         );
         // 历史要求：读取 Task Agent 运行次数前必须显式证明记录存在，不得用 0 兜底掩盖状态缺失。
         const taskAgent = this.store
@@ -1526,7 +1530,7 @@ export class Orchestrator {
         messageId: missingAgentMessage.id,
         status: "failed",
         decisionAgent: false,
-        routingKind: "invalid",
+        routing: { kind: "invalid" },
         agentStatus: "failed",
         agentContextContent: "",
         forwardedAgentMessage: "",
@@ -1575,7 +1579,7 @@ export class Orchestrator {
         throw new Error(`${runtimeAgentId} 未返回可展示的结果正文`);
       }
       // 2026-05-27: 用户要求移除 AgentFinalMessageRecord 中与 content 重复的冗余展示正文字段，agent-final 只保留展示正文与原始回复两类事实。
-      const baseTaskMessage: Omit<AgentFinalMessageRecord, "routingKind" | "trigger"> = {
+      const baseTaskMessage: Omit<AgentFinalMessageRecord, "routing"> = {
         id: response.messageId,
         content: displayContent,
         sender: runtimeAgentId,
@@ -1586,35 +1590,21 @@ export class Orchestrator {
         rawResponse: response.finalMessage,
         senderDisplayName,
       };
-      let taskMessage: MessageRecord;
-      if (resolvedDecision === "triggered" && parsedDecision.kind === "valid") {
-        taskMessage = {
-          ...baseTaskMessage,
-          routingKind: "triggered",
-          trigger: parsedDecision.trigger,
-        } satisfies MessageRecord;
-      } else if (resolvedDecision === "default") {
-        taskMessage = {
-          ...baseTaskMessage,
-          routingKind: "default",
-        } satisfies MessageRecord;
-      } else {
-        taskMessage = {
-          ...baseTaskMessage,
-          routingKind: "invalid",
-        } satisfies MessageRecord;
-      }
+      const taskMessage: MessageRecord = {
+        ...baseTaskMessage,
+        routing: resolvedDecision,
+      } satisfies MessageRecord;
       this.store.insertMessage(taskMessage);
       // 历史要求：拓扑里渲染的 agent final message 必须同步写入任务日志，每条消息只占一行。
       appendAppLog("info", "agent.final_message", {
         agentId: runtimeAgentId,
         messageId: taskMessage.id,
         runCount: currentAgent.runCount,
-        routingKind: taskMessage.routingKind,
+        routingKind: taskMessage.routing.kind,
         content: taskMessage.content.replace(/\s+/gu, " ").trim(),
       }, "file-only");
 
-      const agentStatus: AgentStatus = resolvedDecision === "invalid"
+      const agentStatus: AgentStatus = resolvedDecision.kind === "invalid"
         ? "failed"
         : "completed";
       this.store.updateTaskAgentStatus(
@@ -1638,26 +1628,11 @@ export class Orchestrator {
         forwardedAgentMessage,
         signalDone,
       };
-      if (resolvedDecision === "triggered" && parsedDecision.kind === "valid") {
-        const triggeredResult: GraphAgentResult = {
-          ...baseGraphAgentResult,
-          routingKind: "triggered",
-          trigger: parsedDecision.trigger,
-        };
-        return triggeredResult;
-      }
-      if (resolvedDecision === "default") {
-        const defaultResult: GraphAgentResult = {
-          ...baseGraphAgentResult,
-          routingKind: "default",
-        };
-        return defaultResult;
-      }
-      const invalidResult: GraphAgentResult = {
+      const result: GraphAgentResult = {
         ...baseGraphAgentResult,
-        routingKind: "invalid",
+        routing: resolvedDecision,
       };
-      return invalidResult;
+      return result;
     } catch (error) {
       this.store.updateTaskAgentStatus(
         runtimeAgentId,
@@ -1678,7 +1653,7 @@ export class Orchestrator {
         messageId: failedMessage.id,
         status: "failed",
         decisionAgent,
-        routingKind: "invalid",
+        routing: { kind: "invalid" },
         agentStatus: "failed",
         agentContextContent: "",
         forwardedAgentMessage: "",

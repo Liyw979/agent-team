@@ -1,9 +1,11 @@
 import {
   getTriggerEdgeLoopLimit,
   getGroupRules,
+  isTriggeredAgentRouting,
   isDefaultTopologyTrigger,
   normalizeTopologyEdgeTrigger,
   resolveTriggerRoutingKindForSource,
+  type AgentRouting,
   type AgentStatus,
   type TopologyFlowEndIncoming,
   type TopologyRecord,
@@ -81,7 +83,8 @@ type GraphDispatchBatchSource =
     };
 
 interface GraphDispatchBatchBase {
-  routingKind: "default" | "triggered";
+  // 2026-05-29: 用户要求调度批次只接受单一 routing 联合语义，禁止回退为 routingKind + trigger 双字段组合。
+  routing: Extract<AgentRouting, { kind: "default" | "triggered" }>;
   source: GraphDispatchBatchSource;
   sourceContent: string;
   displayContent: string;
@@ -89,14 +92,7 @@ interface GraphDispatchBatchBase {
   triggerTargets: string[];
 }
 
-export type GraphDispatchBatch =
-  | (GraphDispatchBatchBase & {
-      routingKind: "default";
-    })
-  | (GraphDispatchBatchBase & {
-      routingKind: "triggered";
-      trigger: string;
-    });
+export type GraphDispatchBatch = GraphDispatchBatchBase;
 
 export type GraphRoutingDecision =
   | {
@@ -134,21 +130,12 @@ interface GraphAgentResultBase {
 export type GraphAgentResult =
   | (GraphAgentResultBase & {
       status: "failed";
-      routingKind: "invalid";
+      routing: Extract<AgentRouting, { kind: "invalid" }>;
       errorMessage: string;
     })
   | (GraphAgentResultBase & {
       status: "completed";
-      routingKind: "default";
-    })
-  | (GraphAgentResultBase & {
-      status: "completed";
-      routingKind: "invalid";
-    })
-  | (GraphAgentResultBase & {
-      status: "completed";
-      routingKind: "triggered";
-      trigger: string;
+      routing: AgentRouting;
     });
 
 export function createUserDispatchDecision(
@@ -176,7 +163,7 @@ export function createUserDispatchDecision(
       return {
         type: "execute_batch",
         batch: {
-          routingKind: "default",
+          routing: { kind: "default" },
           source: { kind: "user" },
           sourceContent: input.content,
           displayContent: input.content,
@@ -201,7 +188,7 @@ export function createUserDispatchDecision(
   return {
     type: "execute_batch",
     batch: {
-      routingKind: "default",
+      routing: { kind: "default" },
       source: { kind: "user" },
       sourceContent: input.content,
       displayContent: input.content,
@@ -222,13 +209,13 @@ function resolveGraphAgentResultTriggerRouteKind(
   topology: TopologyRecord,
   result: GraphAgentResult,
 ): "default" | "triggered" | "invalid" {
-  switch (result.routingKind) {
+  switch (result.routing.kind) {
     case "invalid":
       return "invalid";
     case "default":
       return "default";
     case "triggered":
-      return resolveTriggeredRouteKind(topology, result.agentId, result.trigger);
+      return resolveTriggeredRouteKind(topology, result.agentId, result.routing.trigger);
   }
 }
 
@@ -296,14 +283,14 @@ export function applyAgentResultToGraphState(
     };
   }
 
-  const primaryDecision = result.routingKind === "triggered"
+  const primaryDecision = isTriggeredAgentRouting(result.routing)
     ? triggerTriggeredDownstream(
         nextState,
         result.agentId,
         result.messageId,
         result.agentContextContent,
         result.agentContextContent,
-        result.trigger,
+        result.routing.trigger,
         new Set<string>(),
       )
     : triggerHandoffDownstream(nextState, result.agentId, result.agentContextContent);
@@ -496,7 +483,7 @@ function createTransferBatchDecision(
   return createExecuteBatchDecision({
     state,
     plan,
-    routingKind: "default",
+    routing: { kind: "default" },
     displayContent: plan.sourceContent,
     createJob: (targetName, sourceAgentId, sourceContent, displayContent) => ({
       agentId: targetName,
@@ -518,8 +505,7 @@ function createTriggeredBatchDecision(
   return createExecuteBatchDecision({
     state,
     plan,
-    routingKind: "triggered",
-    trigger,
+    routing: { kind: "triggered", trigger },
     displayContent,
     createJob: (targetName, sourceAgentId, sourceContent, batchDisplayContent) => ({
       agentId: targetName,
@@ -546,11 +532,10 @@ type ExecuteBatchDecisionInputBase = {
 
 type ExecuteBatchDecisionInput =
   | (ExecuteBatchDecisionInputBase & {
-      routingKind: "default";
+      routing: Extract<AgentRouting, { kind: "default" }>;
     })
   | (ExecuteBatchDecisionInputBase & {
-      routingKind: "triggered";
-      trigger: string;
+      routing: Extract<AgentRouting, { kind: "triggered" }>;
     });
 
 function createExecuteBatchDecision(input: ExecuteBatchDecisionInput): GraphRoutingDecision {
@@ -575,15 +560,14 @@ function createExecuteBatchDecision(input: ExecuteBatchDecisionInput): GraphRout
   };
   return {
     type: "execute_batch",
-    batch: input.routingKind === "triggered"
+    batch: isTriggeredAgentRouting(input.routing)
       ? {
           ...batchBase,
-          routingKind: "triggered",
-          trigger: input.trigger,
+          routing: input.routing,
         }
       : {
           ...batchBase,
-          routingKind: "default",
+          routing: input.routing,
         },
   };
 }
@@ -1108,8 +1092,8 @@ function endTriggerMatchesResult(
     return !result.decisionAgent;
   }
   return result.decisionAgent
-    && result.routingKind === "triggered"
-    && result.trigger === edgeTrigger;
+    && isTriggeredAgentRouting(result.routing)
+    && result.routing.trigger === edgeTrigger;
 }
 
 function collectReachableNodeNames(

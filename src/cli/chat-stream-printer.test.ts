@@ -62,7 +62,7 @@ function createMessage(input: TestMessageInput): MessageRecord {
       kind: "agent-final",
       runCount: 1,
       status: "completed",
-      routingKind: "default",
+      routing: { kind: "default" },
       rawResponse: input.content,
       senderDisplayName: input.sender,
     };
@@ -221,7 +221,7 @@ test("renderChatStreamEntries 输出的是群聊文本，不包含 agent runtime
           kind: "agent-final",
           runCount: 1,
           status: "completed",
-          routingKind: "default",
+          routing: { kind: "default" },
           rawResponse: "Build 已完成。",
           senderDisplayName: "Build",
         },

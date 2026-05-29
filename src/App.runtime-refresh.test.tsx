@@ -144,7 +144,7 @@ function createAgentFinalMessage() {
       kind: "agent-final" as const,
       runCount: 1,
       status: "completed" as const,
-      routingKind: "default" as const,
+      routing: { kind: "default" as const },
       rawResponse: "挑战结论：这里的消息应当在轮询拿到全量 snapshot 后立即出现。",
       senderDisplayName: "误报论证-1",
     },

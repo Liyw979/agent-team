@@ -6,6 +6,7 @@ import { act } from "react";
 import {
   createTopologyFlowRecord,
   type MessageRecord,
+  type AgentRouting,
   type TaskSnapshot,
   type TopologyRecord,
 } from "@shared/types";
@@ -108,15 +109,14 @@ function createFinalMessage(input:
       sender: string;
       content: string;
       timestamp: string;
-      routingKind: "default" | "invalid";
+      routing: Extract<AgentRouting, { kind: "default" | "invalid" }>;
     }
   | {
       id: string;
       sender: string;
       content: string;
       timestamp: string;
-      routingKind: "triggered";
-      trigger: "<continue>" | "<complete>" | "<default>";
+      routing: Extract<AgentRouting, { kind: "triggered" }>;
     }): Extract<MessageRecord, { kind: "agent-final" }> {
   const base = {
     id: input.id,
@@ -128,17 +128,16 @@ function createFinalMessage(input:
     runCount: 1,
     status: "completed" as const,
     rawResponse: input.content,
-  } satisfies Omit<Extract<MessageRecord, { kind: "agent-final" }>, "routingKind" | "trigger">;
-  if (input.routingKind === "triggered") {
+  } satisfies Omit<Extract<MessageRecord, { kind: "agent-final" }>, "routing">;
+  if (input.routing.kind === "triggered") {
     return {
       ...base,
-      routingKind: "triggered" as const,
-      trigger: input.trigger,
+      routing: input.routing,
     };
   }
   return {
     ...base,
-    routingKind: input.routingKind,
+    routing: input.routing,
   };
 }
 
@@ -342,8 +341,7 @@ test("TopologyGraph 会继续展示刚完成的运行实例", async () => {
         kind: "agent-final",
         runCount: 1,
         status: "completed",
-        routingKind: "triggered",
-        trigger: "<continue>",
+        routing: { kind: "triggered", trigger: "<continue>" },
         rawResponse: "误报论证-1 请求继续论证。",
         senderDisplayName: "误报论证-1",
       },
@@ -405,14 +403,14 @@ test("TopologyGraph 展示最终多条历史，不展示过程消息，任务结
         sender: "线索发现",
         content: "第一条最终结果消息",
         timestamp: offsetTimestamp(-1),
-        routingKind: "default",
+        routing: { kind: "default" },
       }),
       createFinalMessage({
         id: "runtime-final-last",
         sender: "线索发现",
         content: "最后一条最终结果消息",
         timestamp: offsetTimestamp(0),
-        routingKind: "default",
+        routing: { kind: "default" },
       }),
     ],
   });
@@ -549,7 +547,7 @@ test("TopologyGraph 不再展示节点全屏与详情交互", async () => {
         kind: "agent-final",
         runCount: 1,
         status: "completed",
-        routingKind: "default",
+        routing: { kind: "default" },
         rawResponse: "最终结果消息",
         senderDisplayName: "线索发现",
       },
@@ -594,7 +592,7 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
     kind: "agent-final" as const,
     runCount: 1,
     status: "completed" as const,
-    routingKind: "default" as const,
+    routing: { kind: "default" as const },
     rawResponse: `第 ${index + 1} 条最终结果消息 ${"路径/说明 ".repeat(8)}`,
     senderDisplayName: "线索发现",
   }));
@@ -627,7 +625,7 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
         kind: "agent-final",
         runCount: 1,
         status: "completed",
-        routingKind: "default",
+        routing: { kind: "default" },
         rawResponse: "短消息。",
         senderDisplayName: "误报论证",
       },
@@ -687,7 +685,7 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
             kind: "agent-final",
             runCount: 1,
             status: "completed",
-            routingKind: "default",
+            routing: { kind: "default" },
             rawResponse: "第 11 条最终结果消息 路径/说明 路径/说明 路径/说明",
             senderDisplayName: "线索发现",
           },
@@ -726,7 +724,7 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
             kind: "agent-final",
             runCount: 1,
             status: "completed",
-            routingKind: "default",
+            routing: { kind: "default" },
             rawResponse: "第 11 条最终结果消息 路径/说明 路径/说明 路径/说明",
             senderDisplayName: "线索发现",
           },
@@ -738,7 +736,7 @@ test("TopologyGraph 初始展示最终历史的最后一屏，并在后续刷新
             kind: "agent-final",
             runCount: 1,
             status: "completed",
-            routingKind: "default",
+            routing: { kind: "default" },
             rawResponse: "第 12 条最终结果消息 路径/说明 路径/说明 路径/说明",
             senderDisplayName: "线索发现",
           },
@@ -834,14 +832,14 @@ test("TopologyGraph 的单条最终历史消息按文字自然撑高，滚动发
           sender: "线索发现",
           content: "很长的最终结果消息 ".repeat(40),
           timestamp: "2026-04-29T10:00:30.000Z",
-          routingKind: "default",
+          routing: { kind: "default" },
         }),
         createFinalMessage({
           id: "runtime-final-next",
           sender: "线索发现",
           content: "第二条最终结果消息",
           timestamp: "2026-04-29T10:00:31.000Z",
-          routingKind: "default",
+          routing: { kind: "default" },
         }),
       ],
     }),
@@ -964,14 +962,14 @@ test("TopologyGraph 遇到相同最终时间戳的多条最终消息时保留全
           sender: "线索发现",
           content: "最终结果一",
           timestamp: "2026-04-29T10:00:30.000Z",
-          routingKind: "default",
+          routing: { kind: "default" },
         }),
         createFinalMessage({
           id: "runtime-final-2",
           sender: "线索发现",
           content: "最终结果二",
           timestamp: "2026-04-29T10:00:30.000Z",
-          routingKind: "default",
+          routing: { kind: "default" },
         }),
       ],
     }),

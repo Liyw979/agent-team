@@ -12,8 +12,6 @@ export type TaskStatus =
   | "finished"
   | "failed";
 
-export type AgentRoutingKind = "default" | "triggered" | "invalid";
-
 export type PermissionMode = "allow" | "ask" | "deny";
 export type AgentIdResolution =
   | {
@@ -161,6 +159,18 @@ export interface TaskAgentRecord {
 export type TopologyTrigger = string;
 export type TopologyEdgeTrigger = TopologyTrigger;
 export type TopologyEdgeMessageMode = "none" | "last";
+// 2026-05-29: 用户要求路由结果只保留单一联合表达，禁止回退为 routingKind + trigger 两个顶层字段并行描述同一语义。
+export type AgentRouting =
+  | {
+      kind: "default";
+    }
+  | {
+      kind: "invalid";
+    }
+  | {
+      kind: "triggered";
+      trigger: TopologyTrigger;
+    };
 
 const DEFAULT_MAX_TRIGGER_ROUNDS = 4;
 const DEFAULT_TOPOLOGY_EDGE_MESSAGE_MODE: TopologyEdgeMessageMode =
@@ -451,14 +461,9 @@ type AgentFinalMessageRecordBase = BaseMessageRecord & {
   senderDisplayName: string;
 };
 
-export type AgentFinalMessageRecord =
-  | (AgentFinalMessageRecordBase & {
-      routingKind: "default" | "invalid";
-    })
-  | (AgentFinalMessageRecordBase & {
-      routingKind: "triggered";
-      trigger: TopologyTrigger;
-    });
+export type AgentFinalMessageRecord = AgentFinalMessageRecordBase & {
+  routing: AgentRouting;
+};
 
 export interface AgentDispatchMessageRecord extends BaseMessageRecord {
   kind: "agent-dispatch";
@@ -500,6 +505,12 @@ export function isAgentFinalMessageRecord(
   message: MessageRecord,
 ): message is AgentFinalMessageRecord {
   return message.kind === "agent-final";
+}
+
+export function isTriggeredAgentRouting(
+  routing: AgentRouting,
+): routing is Extract<AgentRouting, { kind: "triggered" }> {
+  return routing.kind === "triggered";
 }
 
 export function isAgentProgressMessageRecord(

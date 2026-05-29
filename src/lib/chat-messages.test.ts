@@ -17,7 +17,7 @@ function createAgentFinalMessage(content: string): AgentFinalMessageRecord {
     status: "completed",
     rawResponse: content,
     senderDisplayName: "Build",
-    routingKind: "default",
+    routing: { kind: "default" },
   };
 }
 
@@ -89,8 +89,7 @@ test("mergeTaskChatMessages 会展示已清理正文并保留尾部分隔线", (
   const messages = mergeTaskChatMessages([
     {
       ...createAgentFinalMessage("正文\n\n继续处理。\n\n如果你愿意，我可以继续补测试。\n---"),
-      routingKind: "triggered" as const,
-      trigger: "<continue>" as const,
+      routing: { kind: "triggered", trigger: "<continue>" as const },
       rawResponse: "<continue>正文\n\n继续处理。</continue>",
     },
   ]);

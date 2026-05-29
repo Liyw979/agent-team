@@ -6,6 +6,8 @@ import {
   buildTopologyNodeRecords,
   createTopologyFlowRecord,
   isDecisionAgentInTopology,
+  isTriggeredAgentRouting,
+  type AgentRouting,
   type TopologyRecord,
 } from "@shared/types";
 
@@ -18,9 +20,10 @@ import { createEmptyGraphTaskState } from "./gating-state";
 
 type TestGraphAgentResult =
   | Omit<Extract<GraphAgentResult, { status: "failed" }>, "messageId" | "forwardedAgentMessage">
-  | Omit<Extract<GraphAgentResult, { status: "completed"; routingKind: "default" }>, "messageId" | "forwardedAgentMessage">
-  | Omit<Extract<GraphAgentResult, { status: "completed"; routingKind: "invalid" }>, "messageId" | "forwardedAgentMessage">
-  | Omit<Extract<GraphAgentResult, { status: "completed"; routingKind: "triggered" }>, "messageId" | "forwardedAgentMessage">;
+  | ({
+      status: "completed";
+      routing: AgentRouting;
+    } & Omit<Extract<GraphAgentResult, { status: "completed" }>, "messageId" | "forwardedAgentMessage" | "routing">);
 
 function withNodeRecords(
   topology: Omit<TopologyRecord, "flow" | "nodeRecords"> &
@@ -63,7 +66,7 @@ function applyResult(
     agentStatus: result.agentStatus,
     agentContextContent: result.agentContextContent,
     forwardedAgentMessage: ("forwardedAgentMessage" in result
-      ? result.forwardedAgentMessage
+      ? result["forwardedAgentMessage"]
       : "") as string,
     signalDone: result.signalDone,
   };
@@ -72,32 +75,31 @@ function applyResult(
     return applyAgentResultToGraphStateInternal(state, {
       ...baseResult,
       status: "failed",
-      routingKind: "invalid",
+      routing: { kind: "invalid" },
       errorMessage: result.errorMessage,
     });
   }
 
-  if (result.routingKind === "triggered") {
+  if (isTriggeredAgentRouting(result.routing)) {
     return applyAgentResultToGraphStateInternal(state, {
       ...baseResult,
       status: "completed",
-      routingKind: "triggered",
-      trigger: result.trigger,
+      routing: result.routing,
     });
   }
 
-  if (result.routingKind === "invalid") {
+  if (result.routing.kind === "invalid") {
     return applyAgentResultToGraphStateInternal(state, {
       ...baseResult,
       status: "completed",
-      routingKind: "invalid",
+      routing: result.routing,
     });
   }
 
   return applyAgentResultToGraphStateInternal(state, {
     ...baseResult,
     status: "completed",
-    routingKind: "default",
+    routing: result.routing,
   });
 }
 
@@ -114,7 +116,7 @@ function driveJudgeReviseLimit(
     agentId: "Build",
     status: "completed",
     decisionAgent: false,
-    routingKind: "default",
+    routing: { kind: "default" },
     agentStatus: "completed",
     agentContextContent: "Build 第 1 轮完成",
     signalDone: false,
@@ -124,8 +126,7 @@ function driveJudgeReviseLimit(
     agentId: "Judge",
     status: "completed",
     decisionAgent: true,
-    routingKind: "triggered",
-    trigger: judgeRound1Trigger,
+    routing: { kind: "triggered", trigger: judgeRound1Trigger },
     agentStatus: "completed",
     agentContextContent: "请继续修订",
     signalDone: false,
@@ -135,7 +136,7 @@ function driveJudgeReviseLimit(
     agentId: "Build",
     status: "completed",
     decisionAgent: false,
-    routingKind: "default",
+    routing: { kind: "default" },
     agentStatus: "completed",
     agentContextContent: "Build 第 2 轮完成",
     signalDone: false,
@@ -145,8 +146,7 @@ function driveJudgeReviseLimit(
     agentId: "Judge",
     status: "completed",
     decisionAgent: true,
-    routingKind: "triggered",
-    trigger: judgeRound2Trigger,
+    routing: { kind: "triggered", trigger: judgeRound2Trigger },
     agentStatus: "completed",
     agentContextContent: "仍需修订",
     signalDone: false,
@@ -202,7 +202,7 @@ test("default handoff 会派发到所有 default 下游", () => {
     agentId: "BA",
     status: "completed",
     decisionAgent: false,
-    routingKind: "default",
+    routing: { kind: "default" },
     agentStatus: "completed",
     agentContextContent: "需求已整理",
     signalDone: false,
@@ -214,7 +214,7 @@ test("default handoff 会派发到所有 default 下游", () => {
     agentId: "Build",
     status: "completed",
     decisionAgent: false,
-    routingKind: "default",
+    routing: { kind: "default" },
     agentStatus: "completed",
     agentContextContent: "Build 已完成",
     signalDone: false,
@@ -240,16 +240,15 @@ test("triggered 会按 trigger 字面值派发到匹配边", () => {
     agentId: "Judge",
     status: "completed",
     decisionAgent: true,
-    routingKind: "triggered",
-    trigger: "<revise>",
+    routing: { kind: "triggered", trigger: "<revise>" },
     agentStatus: "completed",
     agentContextContent: "请继续修订",
     signalDone: false,
   });
 
   assert.equal(afterJudge.decision.type, "execute_batch");
-  assert.equal(afterJudge.decision.batch.routingKind, "triggered");
-  assert.equal(afterJudge.decision.batch.trigger, "<revise>");
+  assert.equal(afterJudge.decision.batch.routing.kind, "triggered");
+  assert.equal(afterJudge.decision.batch.routing.trigger, "<revise>");
   assert.deepEqual(afterJudge.decision.batch.jobs.map((job) => job.agentId).sort(), ["Build", "Doc"]);
 });
 
@@ -291,8 +290,7 @@ test("同一 trigger 多入边任一来源完成后会立即派发", () => {
     agentId: "漏洞论证-1",
     status: "completed",
     decisionAgent: true,
-    routingKind: "triggered",
-    trigger: "<complete>",
+    routing: { kind: "triggered", trigger: "<complete>" },
     agentStatus: "completed",
     agentContextContent: "同意进入总结",
     signalDone: false,
@@ -327,8 +325,8 @@ test("trigger 边达到 maxTriggerRounds 后会改走其他 trigger，避免团�
   const afterJudgeRound2 = driveJudgeReviseLimit(topology);
 
   assert.equal(afterJudgeRound2.decision.type, "execute_batch");
-  assert.equal(afterJudgeRound2.decision.batch.routingKind, "triggered");
-  assert.equal(afterJudgeRound2.decision.batch.trigger, "<complete>");
+  assert.equal(afterJudgeRound2.decision.batch.routing.kind, "triggered");
+  assert.equal(afterJudgeRound2.decision.batch.routing.trigger, "<complete>");
   assert.equal(afterJudgeRound2.decision.batch.displayContent, "Judge -> Build 已连续交流 1 次");
   assert.deepEqual(afterJudgeRound2.decision.batch.jobs.map((job) => job.agentId), ["Summary"]);
 });
@@ -345,8 +343,8 @@ test("trigger 边超限后会改走同一 target 的其他 trigger", () => {
   const afterJudgeRound2 = driveJudgeReviseLimit(topology);
 
   assert.equal(afterJudgeRound2.decision.type, "execute_batch");
-  assert.equal(afterJudgeRound2.decision.batch.routingKind, "triggered");
-  assert.equal(afterJudgeRound2.decision.batch.trigger, "<complete>");
+  assert.equal(afterJudgeRound2.decision.batch.routing.kind, "triggered");
+  assert.equal(afterJudgeRound2.decision.batch.routing.trigger, "<complete>");
   assert.deepEqual(afterJudgeRound2.decision.batch.jobs.map((job) => job.agentId), ["Build"]);
 });
 
@@ -369,8 +367,7 @@ test("多个可转派 trigger 都已超限时，不会无限递归，而是直�
     agentId: "Judge",
     status: "completed",
     decisionAgent: true,
-    routingKind: "triggered",
-    trigger: "<revise>",
+    routing: { kind: "triggered", trigger: "<revise>" },
     agentStatus: "completed",
     agentContextContent: "仍需修订",
     signalDone: false,
@@ -423,7 +420,7 @@ test("maxTriggerRounds=-1 表示无限次，不会触发上限失败", () => {
       agentId: "Build",
       status: "completed",
       decisionAgent: false,
-      routingKind: "default",
+      routing: { kind: "default" },
       agentStatus: "completed",
       agentContextContent: `Build 第 ${round + 1} 轮完成`,
       signalDone: false,
@@ -434,8 +431,7 @@ test("maxTriggerRounds=-1 表示无限次，不会触发上限失败", () => {
       agentId: "Judge",
       status: "completed",
       decisionAgent: true,
-      routingKind: "triggered",
-      trigger: "<revise>",
+      routing: { kind: "triggered", trigger: "<revise>" },
       agentStatus: "completed",
       agentContextContent: `Judge 第 ${round + 1} 轮要求修订`,
       signalDone: false,

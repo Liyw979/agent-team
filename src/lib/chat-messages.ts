@@ -3,6 +3,7 @@ import {
   getMessageSenderDisplayName,
   isAgentDispatchMessageRecord,
   isAgentFinalMessageRecord,
+  isTriggeredAgentRouting,
 } from "@shared/types";
 import {
   buildMentionSuffix,
@@ -76,8 +77,8 @@ function extractTrailingMentionAgentIds(content: string): string[] {
 }
 
 function getMessageAllowedDecisionTriggers(message: MessageRecord): string[] {
-  if (message.kind === "agent-final" && message.routingKind === "triggered") {
-    return [message.trigger];
+  if (message.kind === "agent-final" && isTriggeredAgentRouting(message.routing)) {
+    return [message.routing.trigger];
   }
   return [];
 }

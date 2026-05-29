@@ -5,8 +5,8 @@ import {
   buildTopologyNodeRecords,
   createTopologyFlowRecord,
   type AgentFinalMessageRecord,
+  type AgentRouting,
   type MessageRecord,
-  type TopologyTrigger,
   type TopologyRecord,
   toUtcIsoTimestamp,
 } from "@shared/types";
@@ -38,20 +38,16 @@ type TestMessageInput =
       response:
         | { kind: "content" }
         | { kind: "raw"; rawResponse: string };
-    } & (
-      | { routingKind: "default" | "invalid" }
-      | { routingKind: "triggered"; trigger: TopologyTrigger }
-    ))
+      routing: AgentRouting;
+    })
   | (TestMessageBase & {
       kind: "agent-final-with-run";
       runCount: number;
       response:
         | { kind: "content" }
         | { kind: "raw"; rawResponse: string };
-    } & (
-      | { routingKind: "default" | "invalid" }
-      | { routingKind: "triggered"; trigger: TopologyTrigger }
-    ))
+      routing: AgentRouting;
+    })
   | (TestMessageBase & {
       kind: "agent-dispatch";
       targetAgentIds: string[];
@@ -94,7 +90,7 @@ function createMessage(input: TestMessageInput): MessageRecord {
         runCount: input.runCount,
       };
     case "agent-final": {
-      const base: Omit<AgentFinalMessageRecord, "routingKind" | "trigger"> = {
+      const base: Omit<AgentFinalMessageRecord, "routing"> = {
         id: input.id,
         content: input.content,
         sender: input.sender,
@@ -105,24 +101,23 @@ function createMessage(input: TestMessageInput): MessageRecord {
         rawResponse: input.response.kind === "raw" ? input.response.rawResponse : input.content,
         senderDisplayName: input.sender,
       };
-      return input.routingKind === "triggered"
+      return input.routing.kind === "triggered"
         ? {
             ...base,
-            routingKind: "triggered" as const,
-            trigger: input.trigger,
+            routing: input.routing,
           } satisfies AgentFinalMessageRecord
-        : input.routingKind === "invalid"
+        : input.routing.kind === "invalid"
           ? {
               ...base,
-              routingKind: "invalid",
+              routing: input.routing,
             } satisfies AgentFinalMessageRecord
         : {
             ...base,
-            routingKind: "default",
+            routing: input.routing,
           } satisfies AgentFinalMessageRecord;
     }
     case "agent-final-with-run": {
-      const base: Omit<AgentFinalMessageRecord, "routingKind" | "trigger"> = {
+      const base: Omit<AgentFinalMessageRecord, "routing"> = {
         id: input.id,
         content: input.content,
         sender: input.sender,
@@ -133,20 +128,19 @@ function createMessage(input: TestMessageInput): MessageRecord {
         rawResponse: input.response.kind === "raw" ? input.response.rawResponse : input.content,
         senderDisplayName: input.sender,
       };
-      return input.routingKind === "triggered"
+      return input.routing.kind === "triggered"
         ? {
             ...base,
-            routingKind: "triggered" as const,
-            trigger: input.trigger,
+            routing: input.routing,
           } satisfies AgentFinalMessageRecord
-        : input.routingKind === "invalid"
+        : input.routing.kind === "invalid"
           ? {
               ...base,
-              routingKind: "invalid",
+              routing: input.routing,
             } satisfies AgentFinalMessageRecord
         : {
             ...base,
-            routingKind: "default",
+            routing: input.routing,
           } satisfies AgentFinalMessageRecord;
     }
     case "agent-dispatch":
@@ -369,8 +363,7 @@ test("buildChatExecutionWindows 会把 trigger 派发指向的目标变成执行
       kind: "agent-final",
       content: "请补充测试说明。",
       response: { kind: "content" },
-      routingKind: "triggered",
-      trigger: "<continue>",
+      routing: { kind: "triggered", trigger: "<continue>" },
       timestamp: toUtcIsoTimestamp("2026-04-25T08:00:10.000Z"),
     }),
     createMessage({
@@ -495,8 +488,7 @@ test("buildChatFeedItems 会在 final 出现后立即用普通消息替换动态
       sender: "误报论证-1",
       kind: "agent-final",
       content: "当前证据不足以证明这里一定能越界写入。",
-      routingKind: "triggered",
-      trigger: "<continue>",
+      routing: { kind: "triggered", trigger: "<continue>" },
       response: {
         kind: "raw",
         rawResponse: "<continue> 当前证据不足以证明这里一定能越界写入。",
@@ -591,8 +583,7 @@ test("buildChatFeedItems 会剥离重复 trigger，但保留 final 正文与回�
       sender: "误报论证-1",
       kind: "agent-final",
       content: "当前证据不足以证明这里一定能越界写入。",
-      routingKind: "triggered",
-      trigger: "<continue>",
+      routing: { kind: "triggered", trigger: "<continue>" },
       response: {
         kind: "raw",
         rawResponse: "<continue>\n当前证据不足以证明这里一定能越界写入。\n\n<continue>",
@@ -652,8 +643,7 @@ test("buildChatFeedItems 会保证 误报论证 final 先于 漏洞论证 progre
       sender: "误报论证-1",
       kind: "agent-final",
       content: "误报论证最终结论",
-      routingKind: "triggered",
-      trigger: "<continue>",
+      routing: { kind: "triggered", trigger: "<continue>" },
       response: {
         kind: "raw",
         rawResponse: "<continue> 误报论证最终结论",
@@ -733,8 +723,7 @@ test("buildChatFeedItems 会在 challenge final 后让后继 argument 进入唯�
       sender: "误报论证-1",
       kind: "agent-final",
       content: "误报论证最终结论",
-      routingKind: "triggered",
-      trigger: "<continue>",
+      routing: { kind: "triggered", trigger: "<continue>" },
       response: {
         kind: "raw",
         rawResponse: "<continue> 误报论证最终结论",
@@ -882,7 +871,7 @@ test("buildChatExecutionWindows 会用 runCount 精确把 final 绑定到同一 
       sender: "Build",
       kind: "agent-final-with-run",
       content: "Build 第二次执行完成",
-      routingKind: "default",
+      routing: { kind: "default" },
       response: { kind: "content" },
       runCount: 2,
       timestamp: toUtcIsoTimestamp("2026-04-30T10:00:03.000Z"),

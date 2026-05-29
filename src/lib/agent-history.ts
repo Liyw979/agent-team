@@ -9,6 +9,7 @@ import {
   getTopologyNodeRecords,
   isAgentFinalMessageRecord,
   isAgentProgressMessageRecord,
+  isTriggeredAgentRouting,
   normalizeTopologyEdgeTrigger,
 } from "@shared/types";
 import { stripDecisionResponseMarkup } from "@shared/decision-response";
@@ -200,7 +201,9 @@ function getFinalItemPresentation(input: {
   }
 
   return {
-    label: input.message.routingKind === "triggered" ? input.message.trigger : "已完成",
+    label: isTriggeredAgentRouting(input.message.routing)
+      ? input.message.routing.trigger
+      : "已完成",
     tone: "success" as const,
   };
 }

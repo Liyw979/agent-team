@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 
 import type {
   AgentFinalMessageRecord,
+  AgentRouting,
   MessageRecord,
   TaskAgentRecord,
   TaskRecord,
-  TopologyTrigger,
 } from "@shared/types";
 import { reconcileTaskSnapshotFromMessages } from "./task-lifecycle-rules";
 import { toUtcIsoTimestamp } from "@shared/types";
@@ -19,17 +19,10 @@ function createAgentFinalMessage(
     content: string;
     runCount?: number;
     status?: "completed" | "error";
-  } & (
-    | {
-        routingKind: "default" | "invalid";
-      }
-    | {
-        routingKind: "triggered";
-        trigger: TopologyTrigger;
-      }
-  ),
+    routing: AgentRouting;
+  },
 ): AgentFinalMessageRecord {
-  const base: Omit<AgentFinalMessageRecord, "routingKind" | "trigger"> = {
+  const base: Omit<AgentFinalMessageRecord, "routing"> = {
     id: input.id,
     sender: input.sender,
     timestamp: toUtcIsoTimestamp(input.timestamp),
@@ -40,20 +33,19 @@ function createAgentFinalMessage(
     rawResponse: input.content,
     senderDisplayName: input.sender,
   };
-  return input.routingKind === "triggered"
+  return input.routing.kind === "triggered"
     ? {
         ...base,
-        routingKind: "triggered" as const,
-        trigger: input.trigger,
+        routing: input.routing,
       } satisfies AgentFinalMessageRecord
-    : input.routingKind === "invalid"
+    : input.routing.kind === "invalid"
       ? {
           ...base,
-          routingKind: "invalid",
+          routing: input.routing,
         } satisfies AgentFinalMessageRecord
     : {
         ...base,
-        routingKind: "default",
+        routing: input.routing,
       } satisfies AgentFinalMessageRecord;
 }
 
@@ -112,8 +104,7 @@ test("task-round-finished 与更晚的 agent-final 必须纠正滞后的 task/ag
       sender: "CodeReview",
       timestamp: toUtcIsoTimestamp("2026-04-21T03:48:00.819Z"),
       content: "<complete>通过</complete>",
-      routingKind: "triggered",
-      trigger: "<complete>",
+      routing: { kind: "triggered", trigger: "<complete>" },
     }),
     createTaskRoundFinishedMessage({
       id: "message-2",

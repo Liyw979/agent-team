@@ -5,6 +5,7 @@ import {
   FLOW_END_NODE_ID,
   collectTopologyTriggerShapes,
   isDecisionAgentInTopology,
+  type AgentRouting,
   type TopologyRecord,
 } from "@shared/types";
 
@@ -30,17 +31,6 @@ import {
 } from "./scheduler-script-dsl";
 
 type ParsedScriptLine = ParsedSchedulerScriptLine;
-type ScriptRoutingMeta =
-  | {
-      routingKind: "default";
-    }
-  | {
-      routingKind: "invalid";
-    }
-  | {
-      routingKind: "triggered";
-      trigger: string;
-    };
 
 type ExplicitDecisionTrigger =
   | {
@@ -305,7 +295,8 @@ export function shouldRequireSourceDispatchAssertion(input: {
 }
 
 function collectActualTransitionTargets(input: {
-  transitions: Array<ScriptRoutingMeta & {
+  transitions: Array<{
+    routing: AgentRouting;
     state: ReturnType<typeof createEmptyGraphTaskState>;
     decision: GraphRoutingDecision;
   }>;
@@ -319,7 +310,7 @@ function collectActualTransitionTargets(input: {
               transition.state,
               transition.decision,
               input.senderId,
-              transition,
+              transition.routing,
             )
           : []
       )),
@@ -566,18 +557,7 @@ async function runSchedulerScriptInternal(
 
     state = decisionResolution.state;
     currentDecision = decisionResolution.decision;
-    const decisionRouting: ScriptRoutingMeta = decisionResolution.routingKind === "triggered"
-      ? {
-          routingKind: "triggered",
-          trigger: decisionResolution.trigger,
-        }
-      : decisionResolution.routingKind === "invalid"
-        ? {
-            routingKind: "invalid",
-          }
-        : {
-            routingKind: "default",
-          };
+    const decisionRouting = decisionResolution.routing;
     const explicitTargets = ensuredLine.targets.length > 0
       ? resolveActualTransitionTargets(
         decisionResolution.state,
@@ -1018,7 +998,8 @@ function applyMessageLineAndMatchDecision(input: {
 }): {
   state: ReturnType<typeof createEmptyGraphTaskState>;
   decision: GraphRoutingDecision;
-} & ScriptRoutingMeta {
+  routing: AgentRouting;
+} {
   const decisionAgent = isDecisionAgentInTopology(
     buildEffectiveTopology(input.state),
     input.senderId,
@@ -1035,31 +1016,32 @@ function applyMessageLineAndMatchDecision(input: {
     state: ReturnType<typeof createEmptyGraphTaskState>;
     decision: GraphRoutingDecision;
   }> = [];
-  const attemptedTransitions: Array<ScriptRoutingMeta & {
+  const attemptedTransitions: Array<{
+    routing: AgentRouting;
     state: ReturnType<typeof createEmptyGraphTaskState>;
     decision: GraphRoutingDecision;
   }> = [];
   const attemptedDecisions: string[] = [];
 
   const candidateTransitions = explicitDecisionTrigger.kind === "matched"
-    ? [{ routingKind: "triggered" as const, trigger: explicitDecisionTrigger.trigger }]
+    ? [{ routing: { kind: "triggered", trigger: explicitDecisionTrigger.trigger } as const }]
     : decisionAgent
       ? resolveCandidateDecisionTriggers(input.state, input.senderId).map((trigger) => ({
-        routingKind: "triggered" as const,
-        trigger,
+        routing: { kind: "triggered", trigger } as const,
       }))
-      : [{ routingKind: "default" as const }];
+      : [{ routing: { kind: "default" } as const }];
 
   for (const candidateTransition of candidateTransitions) {
-    const messageIdSuffix = "trigger" in candidateTransition ? candidateTransition.trigger : "<default>";
-    const result: GraphAgentResult = candidateTransition.routingKind === "triggered"
+    const messageIdSuffix = candidateTransition.routing.kind === "triggered"
+      ? candidateTransition.routing.trigger
+      : "<default>";
+    const result: GraphAgentResult = candidateTransition.routing.kind === "triggered"
       ? {
           agentId: input.senderId,
           messageId: `script:${input.senderId}:${messageIdSuffix}`,
           status: "completed",
           decisionAgent,
-          routingKind: "triggered",
-          trigger: candidateTransition.trigger,
+          routing: candidateTransition.routing,
           agentStatus: "completed",
           agentContextContent: input.line.body,
           forwardedAgentMessage: "",
@@ -1070,29 +1052,23 @@ function applyMessageLineAndMatchDecision(input: {
           messageId: `script:${input.senderId}:${messageIdSuffix}`,
           status: "completed",
           decisionAgent,
-          routingKind: "default",
+          routing: { kind: "default" },
           agentStatus: "completed",
           agentContextContent: input.line.body,
           forwardedAgentMessage: "",
           signalDone: false,
         };
     const reduced = applyAgentResultToGraphState(input.state, result);
-    const candidateRouting: ScriptRoutingMeta = candidateTransition.routingKind === "triggered"
-      ? {
-          routingKind: "triggered",
-          trigger: candidateTransition.trigger,
-        }
-      : {
-          routingKind: "default",
-        };
     attemptedTransitions.push({
-      ...candidateRouting,
+      routing: candidateTransition.routing,
       state: reduced.state,
       decision: reduced.decision,
     });
     attemptedDecisions.push(
-      `${candidateTransition.routingKind}${
-        "trigger" in candidateTransition ? `(${candidateTransition.trigger})` : ""
+      `${candidateTransition.routing.kind}${
+        candidateTransition.routing.kind === "triggered"
+          ? `(${candidateTransition.routing.trigger})`
+          : ""
       }:${describeDecisionWithVisibleTargets(reduced.state, reduced.decision)}`,
     );
     if (!matchesExpectedTransition({
@@ -1101,7 +1077,7 @@ function applyMessageLineAndMatchDecision(input: {
       state: reduced.state,
       routingDecision: reduced.decision,
       senderId: input.senderId,
-      ...candidateRouting,
+      routing: candidateTransition.routing,
       decisionAgent,
     })) {
       continue;
@@ -1138,7 +1114,7 @@ function applyMessageLineAndMatchDecision(input: {
             transition.state,
             transition.decision,
             input.senderId,
-            transition,
+            transition.routing,
           ),
           expectedTargets,
         )
@@ -1201,14 +1177,11 @@ function applyMessageLineAndMatchDecision(input: {
     );
     const actualTargets = chosen.decision.type === "execute_batch"
       ? getScriptVisibleDecisionTargets(chosen.state, chosen.decision)
-      : chosen.result.routingKind === "triggered"
+      : chosen.result.routing.kind === "triggered"
         ? resolveDeferredDecisionTargets(
           chosen.state,
           input.senderId,
-          {
-            routingKind: "triggered",
-            trigger: chosen.result.trigger,
-          },
+          chosen.result.routing,
         )
         : [];
     assert.equal(
@@ -1222,30 +1195,18 @@ function applyMessageLineAndMatchDecision(input: {
     );
   }
 
-  const chosenRouting: ScriptRoutingMeta = chosen.result.routingKind === "triggered"
-    ? {
-        routingKind: "triggered",
-        trigger: chosen.result.trigger,
-      }
-    : chosen.result.routingKind === "invalid"
-      ? {
-          routingKind: "invalid",
-        }
-      : {
-          routingKind: "default",
-        };
   if (chosen.decision.type === "execute_batch") {
     return {
       state: chosen.state,
       decision: chosen.decision,
-      ...chosenRouting,
+      routing: chosen.result.routing,
     };
   }
 
   return {
     state: chosen.state,
     decision: chosen.decision,
-    ...chosenRouting,
+    routing: chosen.result.routing,
   };
 }
 
@@ -1303,32 +1264,21 @@ function disambiguateDecisionCandidates<T extends {
   }
 
   if (line.targets.length === 0) {
-    const actualTargetGroups = candidates.map((candidate) =>
-      resolveActualTransitionTargets(
-        candidate.state,
-        candidate.decision,
-        senderId,
-        candidate.result.routingKind === "triggered"
-          ? {
-              routingKind: "triggered",
-              trigger: candidate.result.trigger,
-            }
-          : candidate.result.routingKind === "invalid"
-            ? {
-                routingKind: "invalid",
-              }
-            : {
-                routingKind: "default",
-              },
-      )
-    );
+  const actualTargetGroups = candidates.map((candidate) =>
+    resolveActualTransitionTargets(
+      candidate.state,
+      candidate.decision,
+      senderId,
+      candidate.result.routing,
+    )
+  );
     const firstTargets = requireArrayItem(actualTargetGroups, 0, "第一组实际目标");
     const sameImmediateTargets = actualTargetGroups.every((targets) =>
       arraysEqual(targets, firstTargets)
     );
     if (sameImmediateTargets) {
       const preferredDefault = candidates.filter((candidate) =>
-        candidate.result.routingKind === "default"
+        candidate.result.routing.kind === "default"
       );
       if (preferredDefault.length > 0) {
         return preferredDefault;
@@ -1345,14 +1295,7 @@ function disambiguateDecisionCandidates<T extends {
       resolveDeferredDecisionTargets(
         state,
         senderId,
-        candidate.result.routingKind === "triggered"
-          ? {
-              routingKind: "triggered",
-              trigger: candidate.result.trigger,
-            }
-          : {
-              routingKind: "default",
-            },
+        candidate.result.routing,
       ),
       expectedTargets,
     )
@@ -1367,11 +1310,12 @@ export function matchesExpectedTransition(input: {
   routingDecision: GraphRoutingDecision;
   senderId: string;
   decisionAgent: boolean;
-} & ScriptRoutingMeta): boolean {
+  routing: AgentRouting;
+}): boolean {
   const deferredDecisionTargets = resolveDeferredDecisionTargets(
     input.state,
     input.senderId,
-    input,
+    input.routing,
   );
   const hasHiddenDecisionTargets = input.routingDecision.type === "execute_batch"
     && getStrictHiddenDecisionTargets(input.state, input.routingDecision).length > 0;
@@ -1476,16 +1420,17 @@ function arraysEqual(left: string[], right: string[]): boolean {
 function resolveDeferredDecisionTargets(
   state: ReturnType<typeof createEmptyGraphTaskState>,
   senderId: string,
-  routing: ScriptRoutingMeta,
+  routing: AgentRouting,
 ): string[] {
-  if (routing.routingKind !== "triggered") {
+  if (routing.kind !== "triggered") {
     return [];
   }
+  const trigger = routing.trigger;
 
   const effectiveTopology = buildEffectiveTopology(state);
   return [...new Set(
     effectiveTopology.edges
-      .filter((edge) => edge.source === senderId && edge.trigger === routing.trigger)
+      .filter((edge) => edge.source === senderId && edge.trigger === trigger)
       .map((edge) => edge.target),
   )];
 }
@@ -1494,7 +1439,7 @@ function resolveActualTransitionTargets(
   state: ReturnType<typeof createEmptyGraphTaskState>,
   decision: GraphRoutingDecision,
   senderId: string,
-  routing: ScriptRoutingMeta,
+  routing: AgentRouting,
 ): string[] {
   if (decision.type === "execute_batch") {
     return getScriptVisibleDecisionTargets(state, decision);
