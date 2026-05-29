@@ -3,25 +3,9 @@ import { test } from "bun:test";
 
 import { resolveCliDisposeOptions } from "./cli-dispose-policy";
 
-test("task headless 在已经观察到任务结束后，不再等待后台 task promise 收尾", () => {
-  assert.deepEqual(
-    resolveCliDisposeOptions({
-      commandKind: "task.headless",
-      observedSettledTaskState: true,
-    }),
-    {
-      awaitPendingTaskRuns: false,
-      forceProcessExit: true,
-      keepAliveUntilSignal: false,
-      shouldDisposeContext: true,
-    },
-  );
-});
-
 test("未观察到任务结束前，CLI 仍然保持保守关闭策略", () => {
   assert.deepEqual(
     resolveCliDisposeOptions({
-      commandKind: "task.headless",
       observedSettledTaskState: false,
     }),
     {
@@ -36,7 +20,6 @@ test("未观察到任务结束前，CLI 仍然保持保守关闭策略", () => {
 test("task ui 在任务结束后会保持驻留，等待 Ctrl+C 时再清理", () => {
   assert.deepEqual(
     resolveCliDisposeOptions({
-      commandKind: "task.ui",
       observedSettledTaskState: true,
     }),
     {

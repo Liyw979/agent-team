@@ -30,11 +30,11 @@
 
 ## 4. CLI 约定
 
-- CLI 默认使用当前目录作为工作目录，`task headless`、`task ui` 在解析 `--cwd` 时要求目标路径真实存在且为目录；创建 CLI 上下文前都会先执行一次 `<cmd> --help` 预检查，默认 `cmd=opencode`，失败即直接报错。
-- CLI 提供 `task headless`、`task ui`：前者会新建当前 Task、打印本轮群聊并在任务结束后退出；后者会新建当前 Task、启动本地 Web Host、打开浏览器页面并持续驻留到 `Ctrl+C` / `SIGTERM`。
+- CLI 默认使用当前目录作为工作目录，`task ui` 在解析 `--cwd` 时要求目标路径真实存在且为目录；创建 CLI 上下文前都会先执行一次 `<cmd> --help` 预检查，默认 `cmd=opencode`，失败即直接报错。
+- CLI 仅提供 `task ui`：会新建当前 Task、启动本地 Web Host、打开浏览器页面并持续驻留到 `Ctrl+C` / `SIGTERM`。
 - `task ui` 只会使用已构建好的静态资源；启动前会检查 `index.html` 是否存在，浏览器地址与本地 Web Host 监听地址统一使用 `localhost`，缺少入口文件时直接报错。
 - CLI / 终端里的 attach 文案都直接显示底层 `<cmd> attach ...`；当 `group` 新增 runtime agent 且获得新 session 时，会增量打印新的 attach 命令，默认 `cmd=opencode`。
-- `bun run cli -- ...` 需要在仓库根目录执行；若从其他目录排查目标工作区，`task headless` / `task ui` 必须显式传入 `--cwd`。收到 `Ctrl+C` / `SIGTERM` 时，CLI 会先回收当前命令启动或连接过的全部 OpenCode 实例，再结束进程。
+- `bun run cli -- ...` 需要在仓库根目录执行；若从其他目录排查目标工作区，`task ui` 必须显式传入 `--cwd`。收到 `Ctrl+C` / `SIGTERM` 时，CLI 会先回收当前命令启动或连接过的全部 OpenCode 实例，再结束进程。
 
 ## 5. 开发与打包
 
