@@ -1,7 +1,4 @@
-import type { ParsedCliCommand } from "./cli-command";
-
 interface ResolveCliDisposeOptionsInput {
-  commandKind: ParsedCliCommand["kind"];
   observedSettledTaskState: boolean;
 }
 
@@ -19,15 +16,6 @@ export function resolveCliDisposeOptions(
     return {
       awaitPendingTaskRuns: true,
       forceProcessExit: false,
-      keepAliveUntilSignal: false,
-      shouldDisposeContext: true,
-    };
-  }
-
-  if (input.commandKind === "task.headless") {
-    return {
-      awaitPendingTaskRuns: false,
-      forceProcessExit: true,
       keepAliveUntilSignal: false,
       shouldDisposeContext: true,
     };

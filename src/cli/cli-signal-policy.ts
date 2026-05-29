@@ -1,7 +1,4 @@
-import type { ParsedCliCommand } from "./cli-command";
-
 interface ResolveCliSignalPlanInput {
-  commandKind: ParsedCliCommand["kind"];
   signal: NodeJS.Signals;
 }
 

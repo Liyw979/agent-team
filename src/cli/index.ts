@@ -15,7 +15,6 @@ import { resolveCliUserDataPath } from "../runtime/user-data-path";
 import { compileTeamDsl, matchesAppliedTeamDsl } from "../runtime/team-dsl";
 import {
   collectIncrementalAgentFinalMessages,
-  collectIncrementalChatTranscript,
   renderChatStreamEntries,
 } from "./chat-stream-printer";
 import {
@@ -27,7 +26,6 @@ import {
 import { resolveCliDisposeOptions, type CliDisposeOptions } from "./cli-dispose-policy";
 import { resolveCliSignalPlan } from "./cli-signal-policy";
 import { ensureRuntimeAssets, isCompiledRuntime } from "./runtime-assets";
-import { resolveCliTaskStreamingPlan } from "./task-streaming-policy";
 import { renderTaskSessionSummary } from "./task-session-summary";
 import { isSupportedTopologyFile, loadTeamDslDefinitionFile } from "./topology-file";
 import {
@@ -58,12 +56,7 @@ interface CliContext {
   userDataPath: string;
 }
 
-type RunnableCliCommand = Extract<ParsedCliCommand, { kind: "task.headless" | "task.ui" }>;
-type RenderTaskMessagesOptions = {
-  includeHistory: boolean;
-  printAttach: boolean;
-  printMessages: boolean;
-};
+type RunnableCliCommand = Extract<ParsedCliCommand, { kind: "task.ui" }>;
 type UiHostState =
   | {
       kind: "inactive";
@@ -175,25 +168,6 @@ async function ensureYamlTopologyApplied(
   });
 }
 
-function validateTaskHeadlessCommand(
-  command: Extract<ParsedCliCommand, { kind: "task.headless" }>,
-) {
-  const hasFile = command.file.trim().length > 0;
-  const hasMessage = command.message.trim().length > 0;
-  if (!isCliCommandNameSupported(command.cmd)) {
-    fail("新建 Task 时传入的 --cmd 必须是单个命令名，只允许字母、数字、_、.、/、\\、:、-。");
-  }
-  if (!hasFile) {
-    fail("新建 Task 时必须传 --file <topology-file>。");
-  }
-  if (!isSupportedTopologyFile(command.file.trim())) {
-    fail("新建 Task 时传入的 --file 必须是 .yaml 或 .yml。");
-  }
-  if (!hasMessage) {
-    fail("新建 Task 时必须传 --message <message>。");
-  }
-}
-
 function validateTaskUiCommand(
   command: Extract<ParsedCliCommand, { kind: "task.ui" }>,
 ) {
@@ -239,13 +213,10 @@ async function renderTaskMessages(
   context: CliContext,
   commandName: string,
   previousMessages: TaskSnapshot["messages"],
-  options: RenderTaskMessagesOptions,
 ) {
   let lastMessages = previousMessages;
-  let attachPrinted = !options.printAttach;
+  let attachPrinted = false;
   let lastAttachEntries: TaskAttachCommandEntry[] = [];
-  let includeHistory = options.includeHistory;
-  const printMessages = options.printMessages;
 
   while (true) {
     const snapshot = await context.orchestrator.getTaskSnapshot();
@@ -266,17 +237,12 @@ async function renderTaskMessages(
       lastAttachEntries = attachEntries;
     }
 
-    const entries = printMessages
-      ? includeHistory
-        ? collectIncrementalChatTranscript([], snapshot.messages)
-        : collectIncrementalChatTranscript(lastMessages, snapshot.messages)
-      : collectIncrementalAgentFinalMessages(lastMessages, snapshot.messages);
+    const entries = collectIncrementalAgentFinalMessages(lastMessages, snapshot.messages);
 
     if (entries.length > 0) {
       process.stdout.write(renderChatStreamEntries(entries));
     }
     lastMessages = snapshot.messages;
-    includeHistory = false;
 
     if (isSettledTaskStatus(snapshot.task.status)) {
       return {
@@ -355,47 +321,11 @@ async function ensureUiAssetsAvailable(userDataPath: string): Promise<string> {
   );
 }
 
-async function handleTaskHeadlessCommand(
-  context: CliContext,
-  command: Extract<ParsedCliCommand, { kind: "task.headless" }>,
-  compiledTopology: ReturnType<typeof compileTeamDsl>,
-) {
-  let workspace = await context.orchestrator.getWorkspaceSnapshot();
-  workspace = await ensureYamlTopologyApplied(context, workspace, compiledTopology);
-  const initialMessage = command.message.trim();
-
-  const snapshot = await context.orchestrator.submitTask(initialMessage);
-  activeRunFailureContextForCrash = {
-    kind: "task",
-    logFilePath: buildTaskLogFilePath(context.userDataPath, snapshot.task.id),
-  };
-  printRunDiagnostics(activeRunFailureContextForCrash.logFilePath);
-
-  const streamingPlan = resolveCliTaskStreamingPlan({
-    showMessage: command.showMessage,
-    isResume: false,
-  });
-  if (!streamingPlan.enabled) {
-    return;
-  }
-
-  await renderTaskMessages(context, command.cmd, [], {
-    includeHistory: streamingPlan.includeHistory,
-    printAttach: streamingPlan.printAttach,
-    printMessages: streamingPlan.printMessages,
-  });
-}
-
 async function handleTaskUiCommand(
   context: CliContext,
   command: Extract<ParsedCliCommand, { kind: "task.ui" }>,
   compiledTopology: ReturnType<typeof compileTeamDsl>,
 ): Promise<() => Promise<void>> {
-  const streamingPlan = resolveCliTaskStreamingPlan({
-    showMessage: command.showMessage,
-    isResume: false,
-  });
-
   let workspace = await context.orchestrator.getWorkspaceSnapshot();
   workspace = await ensureYamlTopologyApplied(context, workspace, compiledTopology);
   const webRoot = await ensureUiAssetsAvailable(context.userDataPath);
@@ -417,13 +347,7 @@ async function handleTaskUiCommand(
     uiHostBinding.bindHosts,
   );
   await open(url);
-  if (streamingPlan.enabled) {
-    await renderTaskMessages(context, command.cmd, [], {
-      includeHistory: streamingPlan.includeHistory,
-      printAttach: streamingPlan.printAttach,
-      printMessages: streamingPlan.printMessages,
-    });
-  }
+  await renderTaskMessages(context, command.cmd, []);
   return close;
 }
 
@@ -434,9 +358,7 @@ async function run() {
     return;
   }
 
-  if (command.kind === "task.headless") {
-    validateTaskHeadlessCommand(command);
-  } else if (command.kind === "task.ui") {
+  if (command.kind === "task.ui") {
     validateTaskUiCommand(command);
   }
   const userDataPath = resolveCliUserDataPath();
@@ -466,7 +388,6 @@ async function run() {
     }
     interrupted = true;
     const plan = resolveCliSignalPlan({
-      commandKind: command.kind,
       signal,
     });
     if (!plan.shouldCleanupOpencode) {
@@ -495,11 +416,7 @@ async function run() {
   process.once("SIGINT", handleSignal);
   process.once("SIGTERM", handleSignal);
   try {
-    if (command.kind === "task.headless") {
-      await handleTaskHeadlessCommand(context, command, compiledTopology);
-      didPrintTaskDiagnosticsForCrash = true;
-      observedSettledTaskState = true;
-    } else if (command.kind === "task.ui") {
+    if (command.kind === "task.ui") {
       activeUiHost = {
         kind: "active",
         close: await handleTaskUiCommand(context, command, compiledTopology),
@@ -507,7 +424,6 @@ async function run() {
       didPrintTaskDiagnosticsForCrash = true;
       observedSettledTaskState = true;
       const disposeOptions = resolveCliDisposeOptions({
-        commandKind: command.kind,
         observedSettledTaskState,
       });
       if (disposeOptions.keepAliveUntilSignal) {
@@ -519,7 +435,6 @@ async function run() {
     process.off("SIGTERM", handleSignal);
     if (!interrupted) {
       const disposeOptions = resolveCliDisposeOptions({
-        commandKind: command.kind,
         observedSettledTaskState,
       });
       forceProcessExit = disposeOptions.forceProcessExit;

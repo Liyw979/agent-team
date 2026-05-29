@@ -212,30 +212,7 @@ test("renderChatStreamEntries 输出的是群聊文本，不包含 agent runtime
       timestamp: toUtcIsoTimestamp("2026-04-19T10:00:00.000Z"),
       content: "Build 已完成。\n\n@CodeReview",
       kinds: ["agent-final", "agent-dispatch"],
-      messageChain: [
-        {
-          id: "m1-final",
-          sender: "Build",
-          timestamp: toUtcIsoTimestamp("2026-04-19T10:00:00.000Z"),
-          content: "Build 已完成。",
-          kind: "agent-final",
-          runCount: 1,
-          status: "completed",
-          routing: { kind: "default" },
-          rawResponse: "Build 已完成。",
-          senderDisplayName: "Build",
-        },
-        {
-          id: "m1-dispatch",
-          sender: "Build",
-          timestamp: toUtcIsoTimestamp("2026-04-19T10:00:00.000Z"),
-          content: "@CodeReview",
-          kind: "agent-dispatch", targetAgentIds: ["CodeReview"],
-          targetRunCounts: [1],
-          dispatchDisplayContent: "@CodeReview",
-          senderDisplayName: "Build",
-        },
-      ],
+      messageChain: [],
     },
   ]);
 

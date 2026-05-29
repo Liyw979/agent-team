@@ -7,49 +7,6 @@ import {
   parseCliCommand,
 } from "./cli-command";
 
-test("parseCliCommand 解析新建 task headless", () => {
-  const parsed = parseCliCommand([
-    "task",
-    "headless",
-    "--file",
-    "config/team-topologies/development-team.topology.yaml",
-    "--message",
-    "请开始执行",
-    "--cwd",
-    "/tmp/project",
-  ]);
-
-  assert.deepEqual(parsed, {
-    kind: "task.headless",
-    cmd: "opencode",
-    file: "config/team-topologies/development-team.topology.yaml",
-    message: "请开始执行",
-    cwd: "/tmp/project",
-    showMessage: false,
-  });
-});
-
-test("parseCliCommand 解析 task headless 的 --show-message", () => {
-  const parsed = parseCliCommand([
-    "task",
-    "headless",
-    "--file",
-    "config/team-topologies/development-team.topology.yaml",
-    "--message",
-    "请开始执行",
-    "--show-message",
-  ]);
-
-  assert.deepEqual(parsed, {
-    kind: "task.headless",
-    cmd: "opencode",
-    cwd: "",
-    file: "config/team-topologies/development-team.topology.yaml",
-    message: "请开始执行",
-    showMessage: true,
-  });
-});
-
 test("parseCliCommand 不再接受 task show", () => {
   assert.throws(() => parseCliCommand([
     "task",
@@ -87,11 +44,10 @@ test("parseCliCommand 解析 task ui 新建任务", () => {
     file: "config/team-topologies/development-team.topology.yaml",
     message: "请开始执行",
     cwd: "/tmp/project",
-    showMessage: false,
   });
 });
 
-test("parseCliCommand 解析 task ui 的 --show-message", () => {
+test("parseCliCommand 接受 .yaml 拓扑文件路径", () => {
   const parsed = parseCliCommand([
     "task",
     "ui",
@@ -99,7 +55,6 @@ test("parseCliCommand 解析 task ui 的 --show-message", () => {
     "config/team-topologies/development-team.topology.yaml",
     "--message",
     "请开始执行",
-    "--show-message",
   ]);
 
   assert.deepEqual(parsed, {
@@ -108,27 +63,6 @@ test("parseCliCommand 解析 task ui 的 --show-message", () => {
     cwd: "",
     file: "config/team-topologies/development-team.topology.yaml",
     message: "请开始执行",
-    showMessage: true,
-  });
-});
-
-test("parseCliCommand 接受 .yaml 拓扑文件路径", () => {
-  const parsed = parseCliCommand([
-    "task",
-    "headless",
-    "--file",
-    "config/team-topologies/development-team.topology.yaml",
-    "--message",
-    "请开始执行",
-  ]);
-
-  assert.deepEqual(parsed, {
-    kind: "task.headless",
-    cmd: "opencode",
-    cwd: "",
-    file: "config/team-topologies/development-team.topology.yaml",
-    message: "请开始执行",
-    showMessage: false,
   });
 });
 
@@ -169,14 +103,13 @@ test("parseCliCommand 允许 task ui 单独接收 --cwd", () => {
     file: "config/team-topologies/development-team.topology.yaml",
     message: "请开始执行",
     cwd: "/tmp/project",
-    showMessage: false,
   });
 });
 
-test("parseCliCommand 解析 task headless 的 --cmd", () => {
+test("parseCliCommand 解析 task ui 的 --cmd", () => {
   const parsed = parseCliCommand([
     "task",
-    "headless",
+    "ui",
     "--cmd",
     "nga",
     "--file",
@@ -186,12 +119,11 @@ test("parseCliCommand 解析 task headless 的 --cmd", () => {
   ]);
 
   assert.deepEqual(parsed, {
-    kind: "task.headless",
+    kind: "task.ui",
     cmd: "nga",
     cwd: "",
     file: "config/team-topologies/development-team.topology.yaml",
     message: "请开始执行",
-    showMessage: false,
   });
 });
 
@@ -232,13 +164,13 @@ test("旧 task run 与旧 --ui 入口都会被拒绝", () => {
   ]));
 });
 
-test("Commander help 只展示保留的 task headless/task ui 命令", () => {
+test("Commander help 只展示保留的 task ui 命令", () => {
   const help = buildCliHelpText();
 
   assert.match(help, /Commands:\n\s+task/u);
-  assert.match(help, /task headless --file <topology-file> --message <message>/u);
   assert.match(help, /task ui --file <topology-file> --message <message>/u);
   assert.match(help, /--cmd <command>/u);
+  assert.doesNotMatch(help, /headless/u);
   assert.doesNotMatch(help, /task attach/u);
   assert.doesNotMatch(help, /task show/u);
   assert.doesNotMatch(help, /task chat/u);
