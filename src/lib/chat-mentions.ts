@@ -4,28 +4,41 @@ export interface MentionContext {
   query: string;
 }
 
+export type MentionContextState =
+  | {
+      kind: "active";
+      context: MentionContext;
+    }
+  | {
+      kind: "inactive";
+    };
+
 interface MentionOptionItem {
   agentId: string;
   displayName: string;
   mentionLabel: string;
 }
 
-export function getMentionContext(value: string, caret: number): MentionContext | null {
+// 2026-05-29: 用户要求 mention 编辑态在入口一次判定完成，禁止继续向上游暴露 null 语义。
+export function getMentionContext(value: string, caret: number): MentionContextState {
   const prefix = value.slice(0, caret);
   const match = prefix.match(/(?:^|\s)@([^\s@]*)$/);
   if (!match) {
-    return null;
+    return { kind: "inactive" };
   }
 
   const start = prefix.lastIndexOf("@");
   if (start < 0) {
-    return null;
+    return { kind: "inactive" };
   }
 
   return {
-    start,
-    end: caret,
-    query: match[1] ?? "",
+    kind: "active",
+    context: {
+      start,
+      end: caret,
+      query: match[1] ?? "",
+    },
   };
 }
 

@@ -16,17 +16,23 @@ test("getMentionOptions filters without reordering the original list", () => {
 });
 
 test("getMentionContext only returns a context while editing an @mention", () => {
-  assert.equal(getMentionContext("", 0), null);
-  assert.equal(getMentionContext("@BA implement add", "@BA implement add".length), null);
+  assert.deepEqual(getMentionContext("", 0), { kind: "inactive" });
+  assert.deepEqual(getMentionContext("@BA implement add", "@BA implement add".length), { kind: "inactive" });
   assert.deepEqual(getMentionContext("@BA", 3), {
-    start: 0,
-    end: 3,
-    query: "BA",
+    kind: "active",
+    context: {
+      start: 0,
+      end: 3,
+      query: "BA",
+    },
   });
   assert.deepEqual(getMentionContext("ask @CodeReview", "ask @CodeReview".length), {
-    start: 4,
-    end: "ask @CodeReview".length,
-    query: "CodeReview",
+    kind: "active",
+    context: {
+      start: 4,
+      end: "ask @CodeReview".length,
+      query: "CodeReview",
+    },
   });
 });
 

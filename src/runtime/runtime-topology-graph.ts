@@ -84,10 +84,14 @@ export function isGroupNode(state: GraphTaskState, nodeId: string): boolean {
   return nodeRecords.some((node) => node.id === nodeId && node.kind === "group");
 }
 
-export function getGroupRuleIdForNode(state: GraphTaskState, nodeId: string): string | null {
+// 2026-05-29: 用户要求拓扑查询边界直接给出确定结果；缺少 groupRuleId 属于非法状态，立即失败。
+export function getGroupRuleIdForNode(state: GraphTaskState, nodeId: string): string {
   const nodeRecords = getTopologyNodeRecords(buildEffectiveTopology(state));
   const groupNode = nodeRecords.find((node): node is TopologyGroupNodeRecord => node.id === nodeId && node.kind === "group");
-  return groupNode ? groupNode.groupRuleId : null;
+  if (!groupNode) {
+    throw new Error(`${nodeId} 缺少 groupRuleId`);
+  }
+  return groupNode.groupRuleId;
 }
 
 export function getGroupRuleEntryRuntimeNodeIds(state: GraphTaskState, groupId: string, groupRuleId: string): string[] {
@@ -100,8 +104,26 @@ export function getGroupRuleEntryRuntimeNodeIds(state: GraphTaskState, groupId: 
     .map((node) => node.id);
 }
 
-export function getRuntimeTemplateName(state: GraphTaskState, runtimeAgentId: string): string | null {
-  return state.runtimeNodes.find((node) => node.id === runtimeAgentId)?.templateName ?? null;
+// 2026-05-29: 用户要求运行态模板查询消灭不确定性；缺少 runtime 节点属于非法状态，立即失败。
+export function getRuntimeTemplateName(state: GraphTaskState, runtimeAgentId: string): string {
+  const runtimeNode = state.runtimeNodes.find((node) => node.id === runtimeAgentId);
+  if (!runtimeNode) {
+    throw new Error(`运行态节点不存在：${runtimeAgentId}`);
+  }
+  return runtimeNode.templateName;
+}
+
+// 2026-05-29: 用户要求 group 源节点模板解析消灭不确定性；源节点必须能在 runtime 或有效拓扑节点中被唯一证明。
+export function resolveSourceTemplateName(state: GraphTaskState, nodeId: string): string {
+  const runtimeNode = state.runtimeNodes.find((node) => node.id === nodeId);
+  if (runtimeNode) {
+    return runtimeNode.templateName;
+  }
+  const topologyNode = getTopologyNodeRecords(buildEffectiveTopology(state)).find((node) => node.id === nodeId);
+  if (topologyNode) {
+    return topologyNode.templateName;
+  }
+  throw new Error(`源节点不存在：${nodeId}`);
 }
 
 export function getNextGroupSequence(state: GraphTaskState, groupRuleId: string): number {

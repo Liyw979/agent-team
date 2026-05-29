@@ -29,12 +29,11 @@ test("显式 @Agent 时仍然从该 Agent 开始，而不是回退到 start node
   });
 });
 
-test("显式 mentionAgentId 字段按 Agent ID 寻址且输出 targetAgentId", () => {
+test("显式正文 mention 会按 Agent ID 寻址且输出 targetAgentId", () => {
   const resolution = resolveTaskSubmissionTarget({
-    content: "请直接验收",
+    content: "@TaskReview 请直接验收",
     availableAgents: ["BA", "Build", "TaskReview"],
     defaultTargetAgentId: "BA",
-    mentionAgentId: "TaskReview",
   });
 
   assert.deepEqual(resolution, {

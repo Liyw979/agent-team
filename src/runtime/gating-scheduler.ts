@@ -47,16 +47,6 @@ export class GatingScheduler {
     private readonly runtime: GatingSchedulerRuntimeState,
   ) {}
 
-  invalidateDownstreamTriggerSignatures(agentId: string) {
-    const downstreamTargets = this.topology.edges
-      .filter((edge) => edge.source === agentId)
-      .map((edge) => edge.target);
-
-    for (const targetName of downstreamTargets) {
-      this.runtime.lastSignatureByAgent.delete(targetName);
-    }
-  }
-
   markAgentRunning(agentId: string) {
     this.runtime.runningAgents.add(agentId);
   }
@@ -75,7 +65,7 @@ export class GatingScheduler {
       restrictTargets?: Set<string>;
       advanceSourceRound?: boolean;
     } = {},
-  ): GatingDispatchPlan | null {
+  ): GatingDispatchPlan {
     const outgoing = this.getOutgoingEdges(sourceAgentId, DEFAULT_TOPOLOGY_TRIGGER);
     const excludeTargets = options.excludeTargets ?? new Set<string>();
     const restrictTargets = options.restrictTargets;
@@ -86,19 +76,46 @@ export class GatingScheduler {
         !excludeTargets.has(edge.target)
         && (!restrictTargets || restrictTargets.has(edge.target)),
     );
-    if (selectedOutgoing.length === 0) {
-      return null;
+    const targetNames = this.uniqueTargetNames(selectedOutgoing);
+    if (targetNames.length === 0) {
+      return {
+        sourceAgentId,
+        sourceContent,
+        triggerTargets: [],
+        readyTargets: [],
+        queuedTargets: [],
+      };
     }
 
     const completed = new Set(this.runtime.completedEdges);
     for (const edge of selectedOutgoing) {
       const edgeId = getTopologyEdgeId(edge);
       completed.add(edgeId);
+    }
+
+    const dispatchTargets = this.classifyDispatchTargets(targetNames, completed, agentStates, DEFAULT_TOPOLOGY_TRIGGER);
+    if (dispatchTargets.readyTargets.length === 0 && dispatchTargets.queuedTargets.length === 0) {
+      return {
+        sourceAgentId,
+        sourceContent,
+        triggerTargets: [...targetNames],
+        readyTargets: [],
+        queuedTargets: [],
+      };
+    }
+
+    for (const edge of selectedOutgoing) {
+      const edgeId = getTopologyEdgeId(edge);
       this.runtime.completedEdges.add(edgeId);
       this.runtime.edgeTriggerVersion.set(edgeId, (this.runtime.edgeTriggerVersion.get(edgeId) ?? 0) + 1);
     }
+    for (const targetName of [...dispatchTargets.readyTargets, ...dispatchTargets.queuedTargets]) {
+      this.runtime.lastSignatureByAgent.set(
+        targetName,
+        this.buildTriggerSignature(completed, targetName),
+      );
+    }
 
-    const targetNames = this.uniqueTargetNames(selectedOutgoing);
     const sourceState = this.getOrCreateSourceRoundState(sourceAgentId);
     if (advanceSourceRound) {
       sourceState.currentRound += 1;
@@ -109,19 +126,13 @@ export class GatingScheduler {
       sourceAgentId,
       sourceContent,
       targets: targetNames,
-      pendingTargets: [],
+      pendingTargets: [...dispatchTargets.readyTargets, ...dispatchTargets.queuedTargets],
       respondedTargets: [],
       sourceRound: sourceState.currentRound,
       failedTargets: [],
     };
 
-    const dispatchTargets = this.claimBatchTargets(batch, completed, agentStates);
-    if (dispatchTargets.readyTargets.length === 0 && dispatchTargets.queuedTargets.length === 0) {
-      return null;
-    }
-
     this.runtime.activeHandoffBatchBySource.set(sourceAgentId, batch);
-
     return {
       sourceAgentId,
       sourceContent,
@@ -139,19 +150,25 @@ export class GatingScheduler {
       restrictTargets?: Set<string>;
       trigger: string;
     },
-  ): GatingDispatchPlan | null {
+  ): GatingDispatchPlan {
     const restrictTargets = options.restrictTargets;
     const trigger = options.trigger;
     const outgoing = this.getOutgoingEdges(sourceAgentId, trigger).filter(
       (edge) => !restrictTargets || restrictTargets.has(edge.target),
     );
-    const completed = new Set(this.runtime.completedEdges);
+    if (outgoing.length === 0) {
+      return {
+        sourceAgentId,
+        sourceContent,
+        triggerTargets: [],
+        readyTargets: [],
+        queuedTargets: [],
+      };
+    }
 
+    const completed = new Set(this.runtime.completedEdges);
     for (const edge of outgoing) {
-      const edgeId = getTopologyEdgeId(edge);
-      completed.add(edgeId);
-      this.runtime.completedEdges.add(edgeId);
-      this.runtime.edgeTriggerVersion.set(edgeId, (this.runtime.edgeTriggerVersion.get(edgeId) ?? 0) + 1);
+      completed.add(getTopologyEdgeId(edge));
     }
 
     const readyTargets: string[] = [];
@@ -166,6 +183,11 @@ export class GatingScheduler {
     }
 
     if (readyTargets.length > 0) {
+      for (const edge of outgoing) {
+        const edgeId = getTopologyEdgeId(edge);
+        this.runtime.completedEdges.add(edgeId);
+        this.runtime.edgeTriggerVersion.set(edgeId, (this.runtime.edgeTriggerVersion.get(edgeId) ?? 0) + 1);
+      }
       const sourceState = this.getOrCreateSourceRoundState(sourceAgentId);
       const batch: GatingHandoffDispatchBatchState = {
         dispatchKind: "triggered",
@@ -180,15 +202,13 @@ export class GatingScheduler {
       this.runtime.activeHandoffBatchBySource.set(sourceAgentId, batch);
     }
 
-    return readyTargets.length > 0
-      ? {
-          sourceAgentId,
-          sourceContent,
-          triggerTargets: [...readyTargets],
-          readyTargets: [...readyTargets],
-          queuedTargets: [],
-        }
-      : null;
+    return {
+      sourceAgentId,
+      sourceContent,
+      triggerTargets: [...readyTargets],
+      readyTargets: [...readyTargets],
+      queuedTargets: [],
+    };
   }
 
   hasSatisfiedIncomingHandoff(agentId: string): boolean {
@@ -201,10 +221,11 @@ export class GatingScheduler {
     return outgoingEdges.every((edge) => this.runtime.completedEdges.has(getTopologyEdgeId(edge)));
   }
 
-  private claimBatchTargets(
-    batch: GatingHandoffDispatchBatchState,
+  private classifyDispatchTargets(
+    targetNames: string[],
     completedEdges: Set<string>,
     agentStates: GatingAgentState[],
+    triggerKind: string,
   ): {
     readyTargets: string[];
     queuedTargets: string[];
@@ -212,17 +233,9 @@ export class GatingScheduler {
     const readyTargets: string[] = [];
     const queuedTargets: string[] = [];
 
-    for (const targetName of batch.targets) {
-      if (!this.canScheduleTarget(completedEdges, targetName, agentStates, DEFAULT_TOPOLOGY_TRIGGER)) {
+    for (const targetName of targetNames) {
+      if (!this.canScheduleTarget(completedEdges, targetName, agentStates, triggerKind)) {
         continue;
-      }
-
-      this.runtime.lastSignatureByAgent.set(
-        targetName,
-        this.buildTriggerSignature(completedEdges, targetName),
-      );
-      if (!batch.pendingTargets.includes(targetName)) {
-        batch.pendingTargets.push(targetName);
       }
 
       if (this.runtime.runningAgents.has(targetName)) {

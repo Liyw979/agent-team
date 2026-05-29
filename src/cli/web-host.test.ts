@@ -546,45 +546,6 @@ test("startWebHost 在 submit 请求缺少有效 content 时返回 400", async (
   }
 });
 
-test("startWebHost 在 submit 请求提供非法 mentionAgentId 时返回 400", async () => {
-  const port = await reservePort();
-  const host = await startWebHost({
-    orchestrator: {
-      submitTask: async () => {
-        throw new Error("unexpected submitTask");
-      },
-      getWorkspaceSnapshot: async () => {
-        throw new Error("unexpected getWorkspaceSnapshot");
-      },
-      openAgentTerminal: async () => {
-        throw new Error("unexpected openAgentTerminal");
-      },
-    } as never,
-    port,
-    staticAssets: { kind: "api-only" },
-    userDataPath: "/tmp",
-    bindHosts: [UI_LOOPBACK_IPV4_HOST],
-  });
-
-  try {
-    const response = await fetch(`http://localhost:${port}/api/tasks/submit`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        content: "请开始执行",
-        mentionAgentId: "",
-      }),
-    });
-
-    assert.equal(response.status, 400);
-    assert.equal(await response.text(), "非法请求：mentionAgentId 必须是非空字符串");
-  } finally {
-    await host.close();
-  }
-});
-
 test("startWebHost 在 open-agent-terminal 请求缺少有效 agentId 时返回 400", async () => {
   const port = await reservePort();
   const host = await startWebHost({

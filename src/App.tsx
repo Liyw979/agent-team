@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type RefCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UiSnapshotPayload } from "@shared/types";
-import { withOptionalString } from "@shared/object-utils";
 import { ChatWindow } from "./components/ChatWindow";
 import { SystemPromptDrawer } from "./components/SystemPromptDrawer";
 import { TopologyGraph } from "./components/TopologyGraph";
@@ -261,10 +260,8 @@ function App() {
               onOpenAgentTerminal={(agentId) => {
                 void handleOpenAgentTerminal(agentId);
               }}
-              onSubmit={async ({ content, mentionAgentId }) => {
-                await submitTaskMutation.mutateAsync(withOptionalString({
-                  content,
-                }, "mentionAgentId", mentionAgentId));
+              onSubmit={async (payload) => {
+                await submitTaskMutation.mutateAsync(payload);
               }}
             />
           </div>
@@ -301,10 +298,8 @@ function App() {
                 onOpenAgentTerminal={(agentId) => {
                   void handleOpenAgentTerminal(agentId);
                 }}
-                onSubmit={async ({ content, mentionAgentId }) => {
-                  await submitTaskMutation.mutateAsync(withOptionalString({
-                    content,
-                  }, "mentionAgentId", mentionAgentId));
+                onSubmit={async (payload) => {
+                  await submitTaskMutation.mutateAsync(payload);
                 }}
               />
             </div>

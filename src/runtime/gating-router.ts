@@ -27,8 +27,8 @@ import {
   getGroupRuleEntryRuntimeNodeIds,
   getGroupRuleIdForNode,
   getNextGroupSequence,
-  getRuntimeTemplateName,
   isGroupNode,
+  resolveSourceTemplateName,
 } from "./runtime-topology-graph";
 
 type HandoffOptions =
@@ -110,15 +110,6 @@ export type GraphRoutingDecision =
   | {
       type: "failed";
       errorMessage: string;
-    };
-
-type DispatchPlanResult =
-  | {
-      kind: "planned";
-      plan: GatingDispatchPlan;
-    }
-  | {
-      kind: "empty";
     };
 
 type GroupActivationResult =
@@ -381,9 +372,9 @@ function triggerHandoffDownstream(
   applySchedulerRuntimeToGraphState(state, runtime);
   delete state.activeHandoffBatchBySource[sourceAgentId];
 
-  let nextPlan: DispatchPlanResult;
+  let nextPlan: GatingDispatchPlan;
   try {
-    nextPlan = materializeGroupTargetsInPlan(state, createDispatchPlanResult(plan), sourceContent);
+    nextPlan = materializeGroupTargetsInPlan(state, plan, sourceContent);
   } catch (error) {
     return {
       type: "failed",
@@ -426,7 +417,7 @@ function triggerTriggeredDownstream(
     },
   );
 
-  if (plan) {
+  if (plan.triggerTargets.length > 0) {
     const effectiveTopology = buildEffectiveTopology(state);
     for (const targetAgentId of plan.triggerTargets) {
       const loopLimitDecision = enforceTriggeredLoopLimit(
@@ -480,9 +471,9 @@ function triggerTriggeredDownstream(
   applySchedulerRuntimeToGraphState(state, runtime);
   delete state.activeHandoffBatchBySource[sourceAgentId];
 
-  let nextPlan: DispatchPlanResult;
+  let nextPlan: GatingDispatchPlan;
   try {
-    nextPlan = materializeGroupTargetsInPlan(state, createDispatchPlanResult(plan), sourceContent);
+    nextPlan = materializeGroupTargetsInPlan(state, plan, sourceContent);
   } catch (error) {
     return {
       type: "failed",
@@ -500,13 +491,13 @@ function triggerTriggeredDownstream(
 
 function createTransferBatchDecision(
   state: GraphTaskState,
-  plan: DispatchPlanResult,
+  plan: GatingDispatchPlan,
 ): GraphRoutingDecision {
   return createExecuteBatchDecision({
     state,
     plan,
     routingKind: "default",
-    displayContent: plan.kind === "planned" ? plan.plan.sourceContent : "",
+    displayContent: plan.sourceContent,
     createJob: (targetName, sourceAgentId, sourceContent, displayContent) => ({
       agentId: targetName,
       sourceAgentId,
@@ -519,7 +510,7 @@ function createTransferBatchDecision(
 
 function createTriggeredBatchDecision(
   state: GraphTaskState,
-  plan: DispatchPlanResult,
+  plan: GatingDispatchPlan,
   sourceMessageId: string,
   trigger: string,
   displayContent: string,
@@ -543,7 +534,7 @@ function createTriggeredBatchDecision(
 
 type ExecuteBatchDecisionInputBase = {
   state: GraphTaskState;
-  plan: DispatchPlanResult;
+  plan: GatingDispatchPlan;
   displayContent: string;
   createJob: (
     targetName: string,
@@ -564,13 +555,13 @@ type ExecuteBatchDecisionInput =
 
 function createExecuteBatchDecision(input: ExecuteBatchDecisionInput): GraphRoutingDecision {
   const { plan } = input;
-  if (plan.kind === "empty" || plan.plan.triggerTargets.length === 0) {
+  if (plan.triggerTargets.length === 0) {
     return {
       type: "finished",
       finishReason: "no_dispatch_targets",
     };
   }
-  const dispatchPlan = plan.plan;
+  const dispatchPlan = plan;
   const batchDisplayContent = input.displayContent || dispatchPlan.sourceContent;
   const dispatchTargets = [...dispatchPlan.readyTargets, ...dispatchPlan.queuedTargets];
   markAgentsScheduled(input.state, dispatchTargets);
@@ -599,17 +590,13 @@ function createExecuteBatchDecision(input: ExecuteBatchDecisionInput): GraphRout
 
 function materializeGroupTargetsInPlan(
   state: GraphTaskState,
-  planResult: DispatchPlanResult,
+  planResult: GatingDispatchPlan,
   sourceContent: string,
-): DispatchPlanResult {
-  if (planResult.kind === "empty") {
-    return planResult;
-  }
-  const plan = planResult.plan;
-
+): GatingDispatchPlan {
+  const plan = planResult;
   const jobTargets = [...plan.readyTargets, ...plan.queuedTargets];
   if (jobTargets.length === 0) {
-    return { kind: "planned", plan };
+    return planResult;
   }
 
   const nextReadyTargets: string[] = [];
@@ -643,27 +630,15 @@ function materializeGroupTargetsInPlan(
   }
 
   if (!changed) {
-    return { kind: "planned", plan };
+    return planResult;
   }
 
   return {
-    kind: "planned",
-    plan: {
-      ...plan,
-      triggerTargets: [...nextReadyTargets, ...nextQueuedTargets],
-      readyTargets: nextReadyTargets,
-      queuedTargets: nextQueuedTargets,
-    },
+    ...plan,
+    triggerTargets: [...nextReadyTargets, ...nextQueuedTargets],
+    readyTargets: nextReadyTargets,
+    queuedTargets: nextQueuedTargets,
   };
-}
-
-function createDispatchPlanResult(
-  plan: ReturnType<GatingScheduler["planHandoffDispatch"]>,
-): DispatchPlanResult {
-  if (!plan) {
-    return { kind: "empty" };
-  }
-  return { kind: "planned", plan };
 }
 
 function buildGroupActivationId(groupRuleId: string, sequence: number): string {
@@ -702,9 +677,6 @@ function materializeGroupNodeTargets(
   source: GroupMaterializeSource,
 ): string[] {
   const groupRuleId = getGroupRuleIdForNode(state, targetName);
-  if (!groupRuleId) {
-    throw new Error(`${targetName} 缺少 groupRuleId`);
-  }
   const groupRule = getGroupRules(state.topology).find((candidate) => candidate.id === groupRuleId);
   if (!groupRule) {
     throw new Error(`group rule 不存在：${groupRuleId}`);
@@ -722,7 +694,7 @@ function materializeGroupNodeTargets(
     id: buildGroupActivationItemId(groupRuleId, sequence, index, itemsList.length),
   }));
   const sourceRuntimeTemplateName = source.kind === "agent"
-    ? resolveRuntimeTemplateName(state, source.agentId)
+    ? resolveSourceTemplateName(state, source.agentId)
     : "";
   const reportRuntimeNodeId = (
     source.kind === "agent"
@@ -775,14 +747,6 @@ function getTriggeredTargetsForSource(
       )
       .map((edge) => edge.target),
   )];
-}
-
-function resolveRuntimeTemplateName(state: GraphTaskState, agentId: string): string {
-  const templateName = getRuntimeTemplateName(state, agentId);
-  if (templateName) {
-    return templateName;
-  }
-  return agentId;
 }
 
 function isCompletedGroupEntryRuntimeTarget(
@@ -1172,7 +1136,14 @@ function collectReachableNodeNames(
 }
 
 function markAgentsScheduled(state: GraphTaskState, agentIds: string[]): void {
+  const topology = buildEffectiveTopology(state);
   for (const agentId of agentIds) {
+    for (const edge of topology.edges) {
+      if (edge.source !== agentId) {
+        continue;
+      }
+      delete state.lastSignatureByAgent[edge.target];
+    }
     if (!state.runningAgents.includes(agentId)) {
       state.runningAgents.push(agentId);
     }

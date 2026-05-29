@@ -2,7 +2,8 @@ import path from "node:path";
 
 type WindowsEnv = NodeJS.ProcessEnv | Record<string, string | undefined>;
 
-function readWindowsEnv(env: WindowsEnv, key: string): string | null {
+// 2026-05-29: 用户要求系统适配边界直接判定变量是否存在，不再向外暴露可空环境变量语义。
+function readWindowsEnv(env: WindowsEnv, key: string): string {
   const direct = env[key];
   if (typeof direct === "string" && direct.trim()) {
     return direct.trim();
@@ -18,7 +19,7 @@ function readWindowsEnv(env: WindowsEnv, key: string): string | null {
     }
   }
 
-  return null;
+  return "";
 }
 
 export function resolveWindowsCmdPath(env: WindowsEnv = process.env): string {
@@ -27,7 +28,7 @@ export function resolveWindowsCmdPath(env: WindowsEnv = process.env): string {
     return comSpec;
   }
 
-  const systemRoot = readWindowsEnv(env, "SystemRoot") ?? readWindowsEnv(env, "WINDIR");
+  const systemRoot = readWindowsEnv(env, "SystemRoot") || readWindowsEnv(env, "WINDIR");
   if (systemRoot) {
     return path.win32.join(systemRoot, "System32", "cmd.exe");
   }

@@ -1,6 +1,7 @@
 import {
   extractAgentFinalDisplayContent,
 } from "../lib/chat-messages";
+import { extractMentionAgentId } from "@shared/agent-id";
 import {
   getMessageTargetAgentIds,
   getMessageSenderDisplayName,
@@ -22,17 +23,13 @@ type DownstreamForwardedContext =
       agentMessage: string;
     };
 
-function extractMention(content: string): string | undefined {
-  const match = content.match(/@([^\s]+)/u);
-  return match?.[1];
-}
-
 export function buildUserHistoryContent(content: string, targetAgentId: string): string {
+  // 2026-05-29: 用户要求消息转发入口只接受确定的 mention 结果；是否存在 mention 必须在这里一次判定完成。
   const trimmed = content.trim();
   if (!trimmed) {
     return `@${targetAgentId}`;
   }
-  if (extractMention(trimmed)) {
+  if (extractMentionAgentId(trimmed)) {
     return content;
   }
   return `@${targetAgentId} ${trimmed}`;

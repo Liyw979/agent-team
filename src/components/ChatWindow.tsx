@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type UIEvent } from "react";
-import { withOptionalString } from "@shared/object-utils";
 import {
   type AgentIdResolution,
   resolvePrimaryTopologyStartTarget,
@@ -23,7 +22,7 @@ import {
 import {
   getMentionContext,
   getMentionOptionItems,
-  type MentionContext,
+  type MentionContextState,
 } from "@/lib/chat-mentions";
 import { AgentHistoryMarkdown } from "@/lib/agent-history-markdown";
 import { MarkdownMessage } from "@/lib/chat-markdown";
@@ -52,7 +51,7 @@ interface ChatWindowProps {
   isMaximized?: boolean;
   onToggleMaximize?: () => void;
   onOpenAgentTerminal?: (agentId: string) => void;
-  onSubmit: (payload: { content: string; mentionAgentId?: string }) => Promise<void>;
+  onSubmit: (payload: { content: string }) => Promise<void>;
 }
 
 const MENTION_MENU_WIDTH = 224;
@@ -471,7 +470,7 @@ export function ChatWindow({
   const defaultAgent = getDefaultAgent(task);
   const hasAvailableAgents = availableAgents.length > 0;
   const [draft, setDraft] = useState("");
-  const [mentionContext, setMentionContext] = useState<MentionContext | null>(null);
+  const [mentionContext, setMentionContext] = useState<MentionContextState>({ kind: "inactive" });
   const [activeIndex, setActiveIndex] = useState(0);
   const [menuPosition, setMenuPosition] = useState({ left: 24, top: 12 });
   const [submitting, setSubmitting] = useState(false);
@@ -485,13 +484,13 @@ export function ChatWindow({
   const executionLastTailVersionRef = useRef<Record<string, string | null>>({});
   const shouldStickToBottomRef = useRef(true);
   const copyResetTimerRef = useRef<number | null>(null);
-  const mentionQuery = mentionContext?.query ?? null;
+  const mentionQuery = mentionContext.kind === "active" ? mentionContext.context.query : "";
   const fullscreenButtonCopy = getPanelFullscreenButtonCopy(isMaximized);
 
   useEffect(() => {
     if (task) {
       setDraft("");
-      setMentionContext(null);
+      setMentionContext({ kind: "inactive" });
       setCopySuccess(false);
       setSubmitError(null);
       shouldStickToBottomRef.current = true;
@@ -524,7 +523,7 @@ export function ChatWindow({
     [task.agents],
   );
   const mentionOptions = useMemo(() => {
-    if (mentionQuery === null) {
+    if (!mentionQuery) {
       return [];
     }
     return getMentionOptionItems(availableAgents, mentionQuery);
@@ -638,7 +637,7 @@ export function ChatWindow({
       if (!composer || !(target instanceof Node) || composer.contains(target)) {
         return;
       }
-      setMentionContext(null);
+      setMentionContext({ kind: "inactive" });
     };
 
     document.addEventListener("pointerdown", handlePointerDown);
@@ -675,21 +674,21 @@ export function ChatWindow({
     setMentionContext(nextContext);
 
     const textarea = textareaRef.current;
-    if (nextContext && textarea) {
-      const matchingOptions = getMentionOptionItems(availableAgents, nextContext.query);
+    if (nextContext.kind === "active" && textarea) {
+      const matchingOptions = getMentionOptionItems(availableAgents, nextContext.context.query);
       updateMenuPosition(textarea, caret, matchingOptions.length);
     }
   }
 
   function applyMention(agentId: string) {
-    if (!mentionContext) {
+    if (mentionContext.kind !== "active") {
       return;
     }
 
-    const nextDraft = `${draft.slice(0, mentionContext.start)}@${agentId} ${draft.slice(mentionContext.end)}`;
-    const nextCaret = mentionContext.start + agentId.length + 2;
+    const nextDraft = `${draft.slice(0, mentionContext.context.start)}@${agentId} ${draft.slice(mentionContext.context.end)}`;
+    const nextCaret = mentionContext.context.start + agentId.length + 2;
     setDraft(nextDraft);
-    setMentionContext(null);
+    setMentionContext({ kind: "inactive" });
 
     requestAnimationFrame(() => {
       const textarea = textareaRef.current;
@@ -717,17 +716,13 @@ export function ChatWindow({
     }
 
     const submitted = draft;
-    const mentionAgentId = resolution.targetAgentId;
-
     setSubmitting(true);
     setSubmitError(null);
     setDraft("");
-    setMentionContext(null);
+    setMentionContext({ kind: "inactive" });
 
     try {
-      await onSubmit(withOptionalString({
-        content,
-      }, "mentionAgentId", mentionAgentId));
+      await onSubmit({ content });
     } catch (error) {
       setDraft(submitted);
       setSubmitError(error instanceof Error ? error.message : "发送失败，请稍后重试。");
@@ -752,8 +747,10 @@ export function ChatWindow({
             message.kinds.includes("agent-final")
           ),
           {
-            logFilePath: taskLogFilePath,
-            taskUrl,
+            headerLines: [
+              { label: "日志", value: taskLogFilePath },
+              { label: "网页", value: taskUrl },
+            ],
           },
         ),
       );
@@ -896,7 +893,7 @@ export function ChatWindow({
                   if (!composer || (activeElement instanceof Node && composer.contains(activeElement))) {
                     return;
                   }
-                  setMentionContext(null);
+                  setMentionContext({ kind: "inactive" });
                 });
               }}
               onKeyUp={(event) => {
@@ -912,7 +909,7 @@ export function ChatWindow({
                 updateMentionState(event.currentTarget.value, event.currentTarget.selectionStart ?? 0);
               }}
               onKeyDown={(event) => {
-                if (mentionOptions.length > 0 && mentionContext) {
+                if (mentionOptions.length > 0 && mentionContext.kind === "active") {
                   if (event.key === "ArrowDown") {
                     event.preventDefault();
                     setActiveIndex((current) => (current + 1) % mentionOptions.length);
@@ -938,7 +935,7 @@ export function ChatWindow({
                     return;
                   }
                   if (event.key === "Escape") {
-                    setMentionContext(null);
+                    setMentionContext({ kind: "inactive" });
                   }
                 }
 
@@ -969,7 +966,7 @@ export function ChatWindow({
               </div>
             ) : null}
 
-            {mentionContext && mentionOptions.length > 0 && (
+            {mentionContext.kind === "active" && mentionOptions.length > 0 && (
               <div
                 className="absolute z-20 w-56 max-h-[252px] overflow-y-auto rounded-[8px] border border-border bg-[#fff8f0] p-2 shadow-xl"
                 style={{

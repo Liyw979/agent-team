@@ -2,7 +2,6 @@
 // 历史要求：orchestrator 内直接调用已有共享能力，不保留无业务语义的透传包装方法。
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { withOptionalString } from "@shared/object-utils";
 import { resolveTaskSubmissionTarget } from "@shared/task-submission";
 import { buildCliAttachCommand } from "@shared/terminal-commands";
 import {
@@ -357,7 +356,6 @@ export class Orchestrator {
     const resolution = resolveTaskSubmissionTarget({
       content: payload.content,
       availableAgents: agents.map((agent) => agent.id),
-      ...withOptionalString({}, "mentionAgentId", payload.mentionAgentId),
       ...defaultTargetPayload,
     });
     if (!resolution.ok) {
@@ -1025,10 +1023,7 @@ export class Orchestrator {
     }
 
     const templateName = getRuntimeTemplateName(state, runtimeAgentId);
-    if (
-      templateName &&
-      availableAgents.some((agent) => agent.id === templateName)
-    ) {
+    if (availableAgents.some((agent) => agent.id === templateName)) {
       return templateName;
     }
 

@@ -22,6 +22,15 @@ test("resolveWindowsCmdPath 在缺少 ComSpec 时回退到 SystemRoot", () => {
   );
 });
 
+test("resolveWindowsCmdPath 会按大小写不敏感方式读取环境变量", () => {
+  assert.equal(
+    resolveWindowsCmdPath({
+      windir: "C:\\Windows",
+    }),
+    "C:\\Windows\\System32\\cmd.exe",
+  );
+});
+
 test("quoteWindowsShellValue 会给 Windows shell 参数补双引号", () => {
   assert.equal(
     quoteWindowsShellValue("C:\\Windows\\System32\\cmd.exe"),
