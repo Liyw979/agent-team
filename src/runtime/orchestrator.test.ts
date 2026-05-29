@@ -3964,7 +3964,7 @@ test("agent-final 入库前会移除协议 trigger 并保留正文细节", async
     "缺少漏洞论证最终消息",
   );
   assert.equal(finalMessage.routing.trigger, "<done>");
-  assert.equal(finalMessage.content, expectedContent);
+  assert.equal(finalMessage.content, `${expectedContent}</done>`);
 });
 
 test("agent 运行中不会把 OpenCode runtime 过程消息持久化到 task messages", async () => {
@@ -4234,7 +4234,7 @@ test("自定义结束 trigger 可以直接命中 __end__", async () => {
     assert.fail("缺少漏洞论证的最终消息");
   }
   assert.equal(argumentMessage.routing.trigger, "<done>");
-  assert.equal(argumentMessage.content, "当前争议点已经论证完毕。");
+  assert.equal(argumentMessage.content, "当前争议点已经论证完毕。\n</done>");
 });
 
 test("判定 Agent 未返回合法标签时必须直接判 invalid 并终止任务", async () => {
