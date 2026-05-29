@@ -17,13 +17,13 @@ export function fetchUiSnapshot() {
   return fetchJson<UiSnapshotPayload>("/api/ui-snapshot");
 }
 
-export function submitTask(payload: SubmitTaskPayload) {
+export function submitTask(content: SubmitTaskPayload) {
   return fetchJson<TaskSnapshot>("/api/tasks/submit", {
     method: "POST",
     headers: {
       "content-type": "application/json",
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(content),
   });
 }
 

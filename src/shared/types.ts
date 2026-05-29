@@ -581,9 +581,7 @@ export type UiSnapshotPayload =
       taskLogFilePath: string;
     });
 
-export interface SubmitTaskPayload {
-  content: string;
-}
+export type SubmitTaskPayload = string;
 
 export function normalizeTopologyEdgeTrigger(value: unknown): TopologyTrigger {
   if (typeof value !== "string") {

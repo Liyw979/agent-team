@@ -51,7 +51,7 @@ interface ChatWindowProps {
   isMaximized?: boolean;
   onToggleMaximize?: () => void;
   onOpenAgentTerminal?: (agentId: string) => void;
-  onSubmit: (payload: { content: string }) => Promise<void>;
+  onSubmit: (content: string) => Promise<void>;
 }
 
 const MENTION_MENU_WIDTH = 224;
@@ -698,6 +698,7 @@ export function ChatWindow({
   }
 
   async function handleSubmit() {
+    // 2026-05-29: 用户要求禁止只含一个字段的结构体，聊天提交直接传递消息字符串，避免 content 包装层回归。
     const content = draft.trim();
     if (!content || submitting) {
       return;
@@ -722,7 +723,7 @@ export function ChatWindow({
     setMentionContext({ kind: "inactive" });
 
     try {
-      await onSubmit({ content });
+      await onSubmit(content);
     } catch (error) {
       setDraft(submitted);
       setSubmitError(error instanceof Error ? error.message : "发送失败，请稍后重试。");

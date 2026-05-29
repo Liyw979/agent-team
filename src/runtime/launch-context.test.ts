@@ -11,9 +11,7 @@ test("resolveLaunchContext 在没有显式 CLI 启动目录时回退到默认目
     defaultCwd: "/repo/agent-team",
   });
 
-  assert.deepEqual(launch, {
-    launchCwd: path.resolve("/repo/agent-team"),
-  });
+  assert.equal(launch, path.resolve("/repo/agent-team"));
 });
 
 test("resolveLaunchContext 只识别 agent-team 显式 CLI 启动参数", () => {
@@ -22,7 +20,5 @@ test("resolveLaunchContext 只识别 agent-team 显式 CLI 启动参数", () => 
     defaultCwd: "/repo/agent-team",
   });
 
-  assert.deepEqual(launch, {
-    launchCwd: path.resolve("/tmp/agent-team"),
-  });
+  assert.equal(launch, path.resolve("/tmp/agent-team"));
 });

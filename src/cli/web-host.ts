@@ -65,16 +65,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function parseSubmitTaskPayload(body: unknown): SubmitTaskPayload {
-  if (!isRecord(body) || !Object.hasOwn(body, "content")) {
-    throw new Error("非法请求：content 必须是非空字符串");
+  // 2026-05-29: 用户要求禁止只含一个字段的结构体，请求体直接使用 string，避免 content 包装层回归。
+  if (typeof body !== "string" || body.trim() === "") {
+    throw new Error("非法请求：请求体必须是非空字符串");
   }
-  const content = body["content"];
-  if (typeof content !== "string" || content.trim() === "") {
-    throw new Error("非法请求：content 必须是非空字符串");
-  }
-  return {
-    content,
-  };
+  return body;
 }
 
 function parseOpenAgentTerminalPayload(body: unknown): string {

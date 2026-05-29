@@ -151,16 +151,11 @@ test("startWebHost 会按 JSON 解析 /api/tasks/submit 请求体", async () => 
       headers: {
         "content-type": "application/json",
       },
-      body: JSON.stringify({
-        content: "请开始执行",
-        newTaskId: "task-123",
-      }),
+      body: JSON.stringify("请开始执行"),
     });
 
     assert.equal(response.status, 200);
-    assert.deepEqual(capturedPayloads, [{
-      content: "请开始执行",
-    }]);
+    assert.deepEqual(capturedPayloads, ["请开始执行"]);
   } finally {
     await host.close();
   }
@@ -508,7 +503,7 @@ test("startWebHost 的 /api/tasks/open-agent-terminal 只透传 agentId", async 
   }
 });
 
-test("startWebHost 在 submit 请求缺少有效 content 时返回 400", async () => {
+test("startWebHost 在 submit 请求体不是非空字符串时返回 400", async () => {
   const port = await reservePort();
   const host = await startWebHost({
     orchestrator: {
@@ -535,12 +530,12 @@ test("startWebHost 在 submit 请求缺少有效 content 时返回 400", async (
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        content: "   ",
+        content: "请开始执行",
       }),
     });
 
     assert.equal(response.status, 400);
-    assert.equal(await response.text(), "非法请求：content 必须是非空字符串");
+    assert.equal(await response.text(), "非法请求：请求体必须是非空字符串");
   } finally {
     await host.close();
   }

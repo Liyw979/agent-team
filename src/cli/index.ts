@@ -364,9 +364,7 @@ async function handleTaskHeadlessCommand(
   workspace = await ensureYamlTopologyApplied(context, workspace, compiledTopology);
   const initialMessage = command.message.trim();
 
-  const snapshot = await context.orchestrator.submitTask({
-    content: initialMessage,
-  });
+  const snapshot = await context.orchestrator.submitTask(initialMessage);
   activeRunFailureContextForCrash = {
     kind: "task",
     logFilePath: buildTaskLogFilePath(context.userDataPath, snapshot.task.id),
@@ -401,9 +399,7 @@ async function handleTaskUiCommand(
   let workspace = await context.orchestrator.getWorkspaceSnapshot();
   workspace = await ensureYamlTopologyApplied(context, workspace, compiledTopology);
   const webRoot = await ensureUiAssetsAvailable(context.userDataPath);
-  const snapshot = await context.orchestrator.submitTask({
-    content: command.message.trim(),
-  });
+  const snapshot = await context.orchestrator.submitTask(command.message.trim());
   const uiHostBinding = await resolveUiHostBinding();
   const uiPort = uiHostBinding.port;
   const uiUrl = buildUiUrl({

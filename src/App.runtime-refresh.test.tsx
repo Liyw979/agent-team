@@ -290,9 +290,7 @@ function SubmitTaskInvalidationProbe() {
   });
 
   useEffect(() => {
-    void submitTaskMutation.mutateAsync({
-      content: "请继续推进当前任务",
-    });
+    void submitTaskMutation.mutateAsync("请继续推进当前任务");
   }, []);
 
   const firstMessage =

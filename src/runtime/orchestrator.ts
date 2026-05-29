@@ -346,6 +346,7 @@ export class Orchestrator {
   }
 
   async submitTask(payload: SubmitTaskPayload): Promise<TaskSnapshot> {
+    // 2026-05-29: 用户要求禁止只含一个字段的结构体，任务提交入口直接接收消息字符串，避免 content 包装层回归。
     const agents = this.listWorkspaceAgents();
     this.syncTopology(agents);
     const topology = this.store.getTopology();
@@ -354,7 +355,7 @@ export class Orchestrator {
       ? { defaultTargetAgentId: defaultTarget.agentId }
       : {};
     const resolution = resolveTaskSubmissionTarget({
-      content: payload.content,
+      content: payload,
       availableAgents: agents.map((agent) => agent.id),
       ...defaultTargetPayload,
     });
@@ -365,19 +366,19 @@ export class Orchestrator {
 
     if (this.store.getState().taskSlot.kind === "present") {
       return this.continueTask(
-        payload.content,
+        payload,
         mentionAgentId,
         agents,
       );
     }
 
     await this.createTask(agents, {
-      title: this.createTaskTitle(payload.content),
+      title: this.createTaskTitle(payload),
       source: "submit",
     });
 
     return this.continueTask(
-      payload.content,
+      payload,
       mentionAgentId,
       agents,
     );
