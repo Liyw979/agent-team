@@ -365,7 +365,7 @@ test("buildAgentHistoryItems 会把判定标签去掉并按当前状态展示结
   );
 });
 
-test("buildAgentHistoryItems 遇到多个同名 allowed tag 时保留 rawResponse", () => {
+test("buildAgentHistoryItems 遇到多个同名 allowed tag 时保留正文中的字面 trigger", () => {
   const messages: MessageRecord[] = [
     {
       id: "decision-same-trigger-example",
@@ -394,13 +394,13 @@ test("buildAgentHistoryItems 遇到多个同名 allowed tag 时保留 rawRespons
     [
       {
         label: "<continue>",
-        detail: "<continue>请检查示例 <continue>done</continue> 是否出现在文档中</continue>",
+        detail: "请检查示例 <continue>done</continue> 是否出现在文档中</continue>",
       },
     ],
   );
 });
 
-test("buildAgentHistoryItems 遇到开头多个同名 allowed tag 时保留 rawResponse", () => {
+test("buildAgentHistoryItems 遇到开头多个同名 allowed tag 时保留正文中的字面 trigger", () => {
   const messages: MessageRecord[] = [
     {
       id: "decision-leading-trigger-example",
@@ -429,7 +429,7 @@ test("buildAgentHistoryItems 遇到开头多个同名 allowed tag 时保留 rawR
     [
       {
         label: "<continue>",
-        detail: "<continue><continue>done</continue> 是示例</continue>",
+        detail: "<continue>done</continue> 是示例</continue>",
       },
     ],
   );
@@ -464,7 +464,7 @@ test("buildAgentHistoryItems 只移除 rawResponse 里的 trigger 标签", () =>
     [
       {
         label: "<continue>",
-        detail: "请继续补证。\nNEXT_AGENTS: Build\nTASK_DONE\nSESSION_REF: abc",
+        detail: "请继续补证。\nNEXT_AGENTS: Build\nTASK_DONE\nSESSION_REF: abc</continue>",
       },
     ],
   );
